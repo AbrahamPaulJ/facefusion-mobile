@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The WINDOW theme, not the app's theme.
+
+    Everything visible is Compose (see ui/Theme.kt); this only dresses the window itself.
+    It matters for exactly one moment: between the launcher tapping the icon and the first
+    composition, the window is painted with `windowBackground`.  Inheriting the platform
+    default made that flash white on a black app.
+
+    Parent is the platform Material theme rather than an AppCompat/MaterialComponents one
+    because the app has no appcompat dependency — ComponentActivity plus Compose needs
+    none, and adding one would pull a fetch we cannot rely on.
+-->
+<resources>
+    <style name="Theme.FaceFusion" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/ff_background</item>
+        <item name="android:statusBarColor">@color/ff_background</item>
+        <item name="android:navigationBarColor">@color/ff_background</item>
+        <!-- Dark chrome: icons in the system bars must stay light. -->
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+</resources>

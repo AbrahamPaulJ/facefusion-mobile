@@ -1,0 +1,404 @@
+#include "ffcv.h"
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstring>
+#include <numeric>
+
+namespace ffcv {
+namespace {
+
+inline float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
+inline int iclamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+// Bilinear fetch with the border policy applied to the SAMPLE COORDINATES, which is what
+// cv2 does: BORDER_REPLICATE clamps the integer taps, BORDER_CONSTANT returns 0 outside.
+template <typename T, int CH>
+inline void sampleBilinear(const T* src, int sw, int sh, float x, float y, Border border,
+                           float* out) {
+  int x0 = (int)std::floor(x), y0 = (int)std::floor(y);
+  float ax = x - x0, ay = y - y0;
+
+  int xs[2] = {x0, x0 + 1}, ys[2] = {y0, y0 + 1};
+  bool ok[2][2];
+  for (int j = 0; j < 2; ++j)
+    for (int i = 0; i < 2; ++i) ok[j][i] = true;
+
+  if (border == BORDER_REPLICATE) {
+    for (int i = 0; i < 2; ++i) {
+      xs[i] = iclamp(xs[i], 0, sw - 1);
+      ys[i] = iclamp(ys[i], 0, sh - 1);
+    }
+  } else {
+    for (int j = 0; j < 2; ++j)
+      for (int i = 0; i < 2; ++i)
+        ok[j][i] = xs[i] >= 0 && xs[i] < sw && ys[j] >= 0 && ys[j] < sh;
+  }
+
+  float wgt[2][2] = {{(1 - ax) * (1 - ay), ax * (1 - ay)}, {(1 - ax) * ay, ax * ay}};
+  for (int ch = 0; ch < CH; ++ch) out[ch] = 0.f;
+  for (int j = 0; j < 2; ++j)
+    for (int i = 0; i < 2; ++i) {
+      if (!ok[j][i]) continue;
+      const T* p = src + ((size_t)ys[j] * sw + xs[i]) * CH;
+      for (int ch = 0; ch < CH; ++ch) out[ch] += wgt[j][i] * (float)p[ch];
+    }
+}
+
+}  // namespace
+
+// ---------------------------------------------------------------- transforms
+
+Affine invertAffine(const Affine& a) {
+  double det = a(0, 0) * a(1, 1) - a(0, 1) * a(1, 0);
+  det = (det != 0.0) ? 1.0 / det : 0.0;
+  Affine r;
+  r(0, 0) = a(1, 1) * det;
+  r(0, 1) = -a(0, 1) * det;
+  r(1, 0) = -a(1, 0) * det;
+  r(1, 1) = a(0, 0) * det;
+  r(0, 2) = -(r(0, 0) * a(0, 2) + r(0, 1) * a(1, 2));
+  r(1, 2) = -(r(1, 0) * a(0, 2) + r(1, 1) * a(1, 2));
+  return r;
+}
+
+void transformPoints(const float* pts, int n, const Affine& a, float* out) {
+  for (int i = 0; i < n; ++i) {
+    double x = pts[2 * i], y = pts[2 * i + 1];
+    out[2 * i] = (float)(a(0, 0) * x + a(0, 1) * y + a(0, 2));
+    out[2 * i + 1] = (float)(a(1, 0) * x + a(1, 1) * y + a(1, 2));
+  }
+}
+
+Affine getRotationMatrix2D(double cx, double cy, double angleDeg, double scale) {
+  double a = angleDeg * M_PI / 180.0;
+  double alpha = std::cos(a) * scale, beta = std::sin(a) * scale;
+  Affine m;
+  m(0, 0) = alpha;  m(0, 1) = beta;   m(0, 2) = (1 - alpha) * cx - beta * cy;
+  m(1, 0) = -beta;  m(1, 1) = alpha;  m(1, 2) = beta * cx + (1 - alpha) * cy;
+  return m;
+}
+
+// Closed-form similarity (rotation + uniform scale + translation) least-squares fit.
+// Umeyama 1991.  Replaces cv2.estimateAffinePartial2D for the 5-point face case.
+Affine umeyama(const float* src, const float* dst, int n) {
+  double sx = 0, sy = 0, dx = 0, dy = 0;
+  for (int i = 0; i < n; ++i) {
+    sx += src[2 * i]; sy += src[2 * i + 1];
+    dx += dst[2 * i]; dy += dst[2 * i + 1];
+  }
+  sx /= n; sy /= n; dx /= n; dy /= n;
+
+  // 4-DOF similarity (uniform scale + rotation + translation) -- exactly the model
+  // cv2.estimateAffinePartial2D fits.  For centred sets a_i (src) and b_i (dst) the
+  // least-squares solution is closed form and needs no SVD:
+  //
+  //     dot   = sum(a_i . b_i)          cross = sum(a_i x b_i)
+  //     s*cos = dot / sum|a_i|^2        s*sin = cross / sum|a_i|^2
+  //
+  // which is the minimiser of sum |b_i - sR a_i|^2 over scale and rotation together.
+  double dot = 0, cross = 0, saa = 0;
+  for (int i = 0; i < n; ++i) {
+    double ax = src[2 * i] - sx, ay = src[2 * i + 1] - sy;
+    double bx = dst[2 * i] - dx, by = dst[2 * i + 1] - dy;
+    dot += ax * bx + ay * by;
+    cross += ax * by - ay * bx;
+    saa += ax * ax + ay * ay;
+  }
+  double sc = (saa > 0) ? dot / saa : 1.0;      // s * cos(theta)
+  double ss = (saa > 0) ? cross / saa : 0.0;    // s * sin(theta)
+
+  Affine m;
+  m(0, 0) = sc;  m(0, 1) = -ss;
+  m(1, 0) = ss;  m(1, 1) = sc;
+  m(0, 2) = dx - (m(0, 0) * sx + m(0, 1) * sy);
+  m(1, 2) = dy - (m(1, 0) * sx + m(1, 1) * sy);
+  return m;
+}
+
+// ---------------------------------------------------------------- resampling
+
+Image warpAffine(const Image& src, const Affine& M, int dw, int dh, Border border) {
+  Image dst(dw, dh, src.c);
+  Affine inv = invertAffine(M);
+  for (int y = 0; y < dh; ++y) {
+    uint8_t* out = dst.row(y);
+    for (int x = 0; x < dw; ++x) {
+      float sxf = (float)(inv(0, 0) * x + inv(0, 1) * y + inv(0, 2));
+      float syf = (float)(inv(1, 0) * x + inv(1, 1) * y + inv(1, 2));
+      float px[4];
+      sampleBilinear<uint8_t, 3>(src.data.data(), src.w, src.h, sxf, syf, border, px);
+      for (int ch = 0; ch < 3; ++ch)
+        out[x * 3 + ch] = (uint8_t)iclamp((int)std::lround(px[ch]), 0, 255);
+    }
+  }
+  return dst;
+}
+
+MatF warpAffineF(const MatF& src, const Affine& M, int dw, int dh, Border border) {
+  MatF dst(dw, dh, src.c);
+  Affine inv = invertAffine(M);
+  for (int y = 0; y < dh; ++y) {
+    float* out = dst.row(y);
+    for (int x = 0; x < dw; ++x) {
+      float sxf = (float)(inv(0, 0) * x + inv(0, 1) * y + inv(0, 2));
+      float syf = (float)(inv(1, 0) * x + inv(1, 1) * y + inv(1, 2));
+      float px[4] = {0, 0, 0, 0};
+      if (src.c == 1)
+        sampleBilinear<float, 1>(src.data.data(), src.w, src.h, sxf, syf, border, px);
+      else
+        sampleBilinear<float, 3>(src.data.data(), src.w, src.h, sxf, syf, border, px);
+      for (int ch = 0; ch < src.c; ++ch) out[x * src.c + ch] = px[ch];
+    }
+  }
+  return dst;
+}
+
+Image resizeLinear(const Image& src, int dw, int dh) {
+  Image dst(dw, dh, src.c);
+  double fx = (double)src.w / dw, fy = (double)src.h / dh;
+  for (int y = 0; y < dh; ++y) {
+    // cv2's INTER_LINEAR maps destination pixel CENTRES back to the source
+    float sy = (float)((y + 0.5) * fy - 0.5);
+    uint8_t* out = dst.row(y);
+    for (int x = 0; x < dw; ++x) {
+      float sx = (float)((x + 0.5) * fx - 0.5);
+      float px[4];
+      sampleBilinear<uint8_t, 3>(src.data.data(), src.w, src.h, sx, sy, BORDER_REPLICATE, px);
+      for (int ch = 0; ch < 3; ++ch)
+        out[x * 3 + ch] = (uint8_t)iclamp((int)std::lround(px[ch]), 0, 255);
+    }
+  }
+  return dst;
+}
+
+// ---------------------------------------------------------------- detection
+
+std::vector<int> nmsBoxes(const std::vector<std::array<float, 4>>& boxes,
+                          const std::vector<float>& scores, float scoreThreshold,
+                          float nmsThreshold) {
+  std::vector<int> order;
+  for (size_t i = 0; i < boxes.size(); ++i)
+    if (scores[i] > scoreThreshold) order.push_back((int)i);
+  std::stable_sort(order.begin(), order.end(),
+                   [&](int a, int b) { return scores[a] > scores[b]; });
+
+  std::vector<int> keep;
+  std::vector<char> dead(boxes.size(), 0);
+  for (size_t oi = 0; oi < order.size(); ++oi) {
+    int i = order[oi];
+    if (dead[i]) continue;
+    keep.push_back(i);
+    const auto& A = boxes[i];
+    float areaA = (A[2] - A[0]) * (A[3] - A[1]);
+    for (size_t oj = oi + 1; oj < order.size(); ++oj) {
+      int j = order[oj];
+      if (dead[j]) continue;
+      const auto& B = boxes[j];
+      float xx1 = std::max(A[0], B[0]), yy1 = std::max(A[1], B[1]);
+      float xx2 = std::min(A[2], B[2]), yy2 = std::min(A[3], B[3]);
+      float w = std::max(0.f, xx2 - xx1), h = std::max(0.f, yy2 - yy1);
+      float inter = w * h;
+      float areaB = (B[2] - B[0]) * (B[3] - B[1]);
+      float denom = areaA + areaB - inter;
+      if (denom > 0 && inter / denom > nmsThreshold) dead[j] = 1;
+    }
+  }
+  return keep;
+}
+
+// ---------------------------------------------------------------- landmarks
+
+void decodeHeatmaps(const float* hm, int n, int hh, int hw, float* outXY, float* outPeak) {
+  // Constants read out of 2dfan4's own initializers, not fitted:
+  //   Greater_867 threshold 6.4 ; Clip_899 floor 0.0 ; Clip_901 m00 floor 1.1920929e-07
+  //   x_indices/y_indices are PIXEL CENTRES (0.5 .. 63.5), not 0-based
+  const float kWindow = 6.4f, kWindow2 = kWindow * kWindow, kEps = 1.1920929e-07f;
+  const int r = (int)std::ceil(kWindow);
+
+  for (int k = 0; k < n; ++k) {
+    const float* p = hm + (size_t)k * hh * hw;
+    int best = 0;
+    float bv = p[0];
+    for (int i = 1; i < hh * hw; ++i)
+      if (p[i] > bv) { bv = p[i]; best = i; }
+    int py = best / hw, px = best % hw;
+    outPeak[k] = bv;
+
+    // Only a radius-6.4 disc can contribute, so scan a 13x13 neighbourhood, not 64x64.
+    double m00 = 0, mx = 0, my = 0;
+    int y0 = std::max(py - r, 0), y1 = std::min(py + r, hh - 1);
+    int x0 = std::max(px - r, 0), x1 = std::min(px + r, hw - 1);
+    for (int y = y0; y <= y1; ++y) {
+      int dy = y - py;
+      for (int x = x0; x <= x1; ++x) {
+        int dx = x - px;
+        if ((float)(dx * dx + dy * dy) > kWindow2) continue;
+        float v = p[(size_t)y * hw + x];
+        if (v < 0.f) v = 0.f;              // Clip lower bound
+        m00 += v;
+        mx += (double)v * (x + 0.5);
+        my += (double)v * (y + 0.5);
+      }
+    }
+    if (m00 < kEps) m00 = kEps;
+    outXY[2 * k] = (float)(mx / m00);
+    outXY[2 * k + 1] = (float)(my / m00);
+  }
+}
+
+int estimateFaceAngle(const float* lm68) {
+  double x1 = lm68[0], y1 = lm68[1], x2 = lm68[16 * 2], y2 = lm68[16 * 2 + 1];
+  double theta = std::atan2(y2 - y1, x2 - x1) * 180.0 / M_PI;
+  theta = std::fmod(theta, 360.0);
+  if (theta < 0) theta += 360.0;
+  const double angles[5] = {0, 90, 180, 270, 360};
+  int bi = 0;
+  double bd = 1e18;
+  for (int i = 0; i < 5; ++i) {
+    double d = std::fabs(angles[i] - theta);
+    if (d < bd) { bd = d; bi = i; }
+  }
+  return (int)std::fmod(angles[bi], 360.0);
+}
+
+void toLandmark5(const float* lm68, float* out5) {
+  auto mean = [&](int a, int b, float* o) {
+    double sx = 0, sy = 0;
+    for (int i = a; i < b; ++i) { sx += lm68[2 * i]; sy += lm68[2 * i + 1]; }
+    o[0] = (float)(sx / (b - a));
+    o[1] = (float)(sy / (b - a));
+  };
+  mean(36, 42, out5 + 0);
+  mean(42, 48, out5 + 2);
+  out5[4] = lm68[30 * 2];  out5[5] = lm68[30 * 2 + 1];
+  out5[6] = lm68[48 * 2];  out5[7] = lm68[48 * 2 + 1];
+  out5[8] = lm68[54 * 2];  out5[9] = lm68[54 * 2 + 1];
+}
+
+// ---------------------------------------------------------------- masking
+
+MatF gaussianBlur(const MatF& src, double sigma) {
+  // cv2 derives the kernel size from sigma: for a float image, ksize = round(sigma*4*2+1)|1
+  int ks = (int)std::lround(sigma * 4.0 * 2.0 + 1.0) | 1;
+  if (ks < 3) ks = 3;
+  int rad = ks / 2;
+  std::vector<double> k(ks);
+  double sum = 0, s2 = 2.0 * sigma * sigma;
+  for (int i = 0; i < ks; ++i) {
+    double d = i - rad;
+    k[i] = std::exp(-(d * d) / s2);
+    sum += k[i];
+  }
+  for (double& v : k) v /= sum;
+
+  MatF tmp(src.w, src.h, 1), dst(src.w, src.h, 1);
+  for (int y = 0; y < src.h; ++y)                     // horizontal, BORDER_REFLECT_101
+    for (int x = 0; x < src.w; ++x) {
+      double a = 0;
+      for (int i = 0; i < ks; ++i) {
+        int xx = x + i - rad;
+        if (xx < 0) xx = -xx;
+        if (xx >= src.w) xx = 2 * (src.w - 1) - xx;
+        xx = iclamp(xx, 0, src.w - 1);
+        a += k[i] * src.row(y)[xx];
+      }
+      tmp.row(y)[x] = (float)a;
+    }
+  for (int y = 0; y < src.h; ++y)                     // vertical
+    for (int x = 0; x < src.w; ++x) {
+      double a = 0;
+      for (int i = 0; i < ks; ++i) {
+        int yy = y + i - rad;
+        if (yy < 0) yy = -yy;
+        if (yy >= src.h) yy = 2 * (src.h - 1) - yy;
+        yy = iclamp(yy, 0, src.h - 1);
+        a += k[i] * tmp.row(yy)[x];
+      }
+      dst.row(y)[x] = (float)a;
+    }
+  return dst;
+}
+
+MatF createBoxMask(int w, int h, float blur, const int padding[4]) {
+  int blurAmount = (int)(w * 0.5f * blur);
+  int blurArea = std::max(blurAmount / 2, 1);
+  MatF m(w, h, 1);
+  std::fill(m.data.begin(), m.data.end(), 1.0f);
+
+  int top = std::max(blurArea, (int)(h * padding[0] / 100.0));
+  int bottom = std::max(blurArea, (int)(h * padding[2] / 100.0));
+  int left = std::max(blurArea, (int)(w * padding[3] / 100.0));
+  int right = std::max(blurArea, (int)(w * padding[1] / 100.0));
+
+  for (int y = 0; y < std::min(top, h); ++y)
+    std::fill(m.row(y), m.row(y) + w, 0.f);
+  for (int y = std::max(0, h - bottom); y < h; ++y)
+    std::fill(m.row(y), m.row(y) + w, 0.f);
+  for (int y = 0; y < h; ++y) {
+    for (int x = 0; x < std::min(left, w); ++x) m.row(y)[x] = 0.f;
+    for (int x = std::max(0, w - right); x < w; ++x) m.row(y)[x] = 0.f;
+  }
+  if (blurAmount > 0) m = gaussianBlur(m, blurAmount * 0.25);
+  return m;
+}
+
+void pasteBack(Image& frame, const MatF& crop, const MatF& mask, const Affine& affine) {
+  Affine inv = invertAffine(affine);
+  float corners[8] = {0, 0, (float)crop.w, 0, (float)crop.w, (float)crop.h, 0, (float)crop.h};
+  float out[8];
+  transformPoints(corners, 4, inv, out);
+  float minx = out[0], maxx = out[0], miny = out[1], maxy = out[1];
+  for (int i = 1; i < 4; ++i) {
+    minx = std::min(minx, out[2 * i]);   maxx = std::max(maxx, out[2 * i]);
+    miny = std::min(miny, out[2 * i + 1]); maxy = std::max(maxy, out[2 * i + 1]);
+  }
+  int x1 = iclamp((int)std::floor(minx), 0, frame.w);
+  int y1 = iclamp((int)std::floor(miny), 0, frame.h);
+  int x2 = iclamp((int)std::ceil(maxx), 0, frame.w);
+  int y2 = iclamp((int)std::ceil(maxy), 0, frame.h);
+  int pw = x2 - x1, ph = y2 - y1;
+  if (pw <= 0 || ph <= 0) return;
+
+  Affine paste = inv;
+  paste(0, 2) -= x1;
+  paste(1, 2) -= y1;
+
+  MatF im = warpAffineF(mask, paste, pw, ph, BORDER_CONSTANT);
+  MatF ic = warpAffineF(crop, paste, pw, ph, BORDER_REPLICATE);
+
+  for (int y = 0; y < ph; ++y) {
+    uint8_t* dst = frame.row(y1 + y) + (size_t)x1 * 3;
+    const float* mrow = im.row(y);
+    const float* crow = ic.row(y);
+    for (int x = 0; x < pw; ++x) {
+      float a = clampf(mrow[x], 0.f, 1.f);
+      for (int ch = 0; ch < 3; ++ch) {
+        float v = dst[x * 3 + ch] * (1.f - a) + crow[x * 3 + ch] * a;
+        dst[x * 3 + ch] = (uint8_t)iclamp((int)v, 0, 255);   // numpy astype = truncate
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------- warp templates
+
+const float* warpTemplate(int which) {
+  static const float kArc112v2[10] = {
+      0.34191607f, 0.46157411f, 0.65653393f, 0.45983393f, 0.50022500f,
+      0.64050536f, 0.37097589f, 0.82469196f, 0.63151696f, 0.82325089f};
+  static const float kArc128[10] = {
+      0.36167656f, 0.40387734f, 0.63696719f, 0.40235469f, 0.50019687f,
+      0.56044219f, 0.38710391f, 0.72160547f, 0.61507734f, 0.72034453f};
+  static const float kFfhq512[10] = {
+      0.37691676f, 0.46864664f, 0.62285697f, 0.46912813f, 0.50123859f,
+      0.61331904f, 0.39308822f, 0.72541100f, 0.61150205f, 0.72490465f};
+  switch (which) {
+    case 1: return kArc128;
+    case 2: return kFfhq512;
+    default: return kArc112v2;
+  }
+}
+
+}  // namespace ffcv

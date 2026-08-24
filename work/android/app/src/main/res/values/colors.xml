@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Window-chrome colours only.
+
+    Compose does not read this file for its colour scheme — that lives in ui/Theme.kt.
+    What is here exists so the window behind Compose is already the right dark before the
+    first frame is composed, otherwise launching flashes the platform's white.
+-->
+<resources>
+    <color name="ff_background">#FF0D0D10</color>
+
+    <!--
+        The adaptive-icon plate.  White, because FaceFusion's mark is BLACK artwork on
+        transparency: on a dark plate the outer ring would disappear into it and leave a
+        floating face.
+    -->
+    <color name="ic_launcher_background">#FFFFFFFF</color>
+</resources>

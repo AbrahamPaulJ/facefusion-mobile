@@ -1,0 +1,95 @@
+{
+  "version": "0.1.0",
+  "tiers": {
+    "v68": {
+      "files": [
+        {
+          "name": "yoloface_v68.bin",
+          "bytes": 3998864,
+          "sha256": "5fda8b93d8bfda64308b885185dfed412c9193c9af2597c6ad09330c68415be8"
+        },
+        {
+          "name": "fan2d_v68.bin",
+          "bytes": 25193920,
+          "sha256": "00cb455fd905495dbfcd907620605d876ae6fa3dc6cb4cbddf9cf83487475b7b"
+        },
+        {
+          "name": "arcface_v68.bin",
+          "bytes": 44085904,
+          "sha256": "ce7bd5c337ce2bcb186503875615525b4b8651584cc3764de872a2dc50fa7bb9"
+        },
+        {
+          "name": "hyperswap_v68.bin",
+          "bytes": 204956024,
+          "sha256": "524db7d1e871fcf571d71cb3be0819783a63ec66801d40e1e80e4545e6612def"
+        },
+        {
+          "name": "nsfwq_v68.bin",
+          "bytes": 6604760,
+          "sha256": "27884c9d1835ac45a596650dcdcabf4027475c931f4f9f22037ea5c761f0c629"
+        }
+      ],
+      "bytes": 284839472
+    },
+    "v73": {
+      "files": [
+        {
+          "name": "yoloface_v73.bin",
+          "bytes": 3994768,
+          "sha256": "f38df2db356c2c81b2e25625961daf12f59273ec53c26b40693ee743cb0ba018"
+        },
+        {
+          "name": "fan2d_v73.bin",
+          "bytes": 24993216,
+          "sha256": "c0726e27f9edbd1d5b265f44909bf90a7d25cb12480bd72ca480b602941e8933"
+        },
+        {
+          "name": "arcface_v73.bin",
+          "bytes": 44155536,
+          "sha256": "588cf1971dbcb44e29f66492d196bc769580d32afde9df275b725e8b2a3eaec2"
+        },
+        {
+          "name": "hyperswap_v73.bin",
+          "bytes": 205689208,
+          "sha256": "d05bc0eaac2bc205f0489e2cdc51d4200b8535b6c3de0149f299ac1192a05658"
+        },
+        {
+          "name": "nsfwq_v73.bin",
+          "bytes": 6703064,
+          "sha256": "f85590597217088875a39fffd43ddb2b61594528656c1f976e380d56d7b1e930"
+        }
+      ],
+      "bytes": 285535792
+    },
+    "v79": {
+      "files": [
+        {
+          "name": "yoloface_v79.bin",
+          "bytes": 4003000,
+          "sha256": "b4f6dde3905ea7cbea0f494011d770a26fcd67f8aa55547bf0e468aced73d3d1"
+        },
+        {
+          "name": "fan2d_v79.bin",
+          "bytes": 24931808,
+          "sha256": "90a77c2c6f10ce0f2e1ab147ee7670c0e1b0bacbfa0342f21cbf7444340b8b57"
+        },
+        {
+          "name": "arcface_v79.bin",
+          "bytes": 44143280,
+          "sha256": "73cd398229fb6d239bd403be2d5ca0a7ced2afe4f9b6c0566297956a18bb6adb"
+        },
+        {
+          "name": "hyperswap_v79.bin",
+          "bytes": 205767064,
+          "sha256": "e460287a4685a11d209a315a8329ba5f392c73587c9f52333777a053803f31d6"
+        },
+        {
+          "name": "nsfw_v79.bin",
+          "bytes": 13881320,
+          "sha256": "74755eb82955fd03abe7275e93a86e46352e36f9b8aa5a30f67e64da32b9f2d0"
+        }
+      ],
+      "bytes": 292726472
+    }
+  }
+}

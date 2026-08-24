@@ -1,0 +1,114 @@
+package com.facefusion.mobile
+
+/**
+ * JNI surface onto libffnative.so.
+ *
+ * The native side is the same ffqnn + ffcv + ffpipe code the headless CLI links
+ * (work/native/ffswap_main.cpp), so a swap verified over adb is the same computation the
+ * app performs.  Colour conversion is native because it is per-pixel work on every frame.
+ */
+object NativePipe {
+
+    @Volatile private var loaded = false
+
+    fun ensureLoaded() {
+        if (!loaded) { System.loadLibrary("ffnative"); loaded = true }
+    }
+
+    /**
+     * libDir holds libQnnHtp.so/libQnnSystem.so; skelDir the hexagon skel.
+     *
+     * Prefer [init], which takes a [SwapOptions] instead of eleven positional arguments.
+     * Every numeric argument is re-clamped natively -- they come from sliders, and a bad
+     * `pixelBoost` would cost its square in graph invocations per face.
+     */
+    @JvmStatic external fun initEx(
+        libDir: String, skelDir: String, modelDir: String, swapper: String,
+        weight: Float, maskBlur: Float, maskPadding: IntArray,
+        detectorScore: Float, landmarkerScore: Float,
+        pixelBoost: Int, largestOnly: Boolean,
+    ): Boolean
+
+    /** Load the pipeline with [opts] applied. */
+    fun init(libDir: String, skelDir: String, modelDir: String,
+             opts: SwapOptions = SwapOptions()): Boolean =
+        initEx(libDir, skelDir, modelDir, opts.swapper,
+               opts.weight, opts.maskBlur, opts.maskPadding.toIntArray(),
+               opts.detectorScore, opts.landmarkerScore,
+               opts.pixelBoost, opts.largestOnly)
+    @JvmStatic external fun release()
+
+    /**
+     * Which context-binary tier this chip needs -- "v68" / "v73" / "v79".
+     *
+     * Measured off the HTP (arch, VTCM, soc_model) with no model loaded, so it can be
+     * asked before the binaries are even present.  Returns the most permissive tier when
+     * the probe fails, so an unrecognised device behaves like an old one rather than not
+     * at all.
+     */
+    @JvmStatic external fun probeTier(libDir: String, skelDir: String): String
+
+    /**
+     * Whether this chip accepts the fp16 stamp every QAIRT 2.49 context carries.
+     *
+     * "yes" | "no" | "unknown".  ⚠ "unknown" means the CONTROL canary failed -- the probe
+     * is broken and the chip has said nothing.  It must never be treated as "no": that
+     * verdict pushes a working device onto the slower compatibility build.
+     *
+     * @param canaryDir holds canary_249.bin and canary_228.bin, unpacked from assets.
+     */
+    @JvmStatic external fun probeFp16(libDir: String, skelDir: String,
+                                      canaryDir: String): String
+
+    /**
+     * What the HTP reports about itself, as `key=value;` pairs:
+     * `ok`, `arch`, `vtcm`, `soc`, `signedPd`, `dlbc`, `tier`.
+     *
+     * ⚠ `ok=0` means the PROBE failed and every other field is absent. It does not mean the
+     * chip is unsupported -- the same distinction [probeTier] makes when it falls back.
+     */
+    @JvmStatic external fun probeDeviceInfo(libDir: String, skelDir: String): String
+
+    /**
+     * Upstream's content-gate statistic for one BGR frame: `logit[0] - logit[1]`, flagged
+     * above [ContentGate.THRESHOLD].  Returns **NaN** when the graph did not run.
+     *
+     * ⚠ NaN, not `false`: an error that read as "allow" would open the gate exactly when
+     * it broke.  Every comparison against a threshold is false for NaN, so callers must
+     * test `isNaN()` explicitly -- see [ContentGate].
+     */
+    @JvmStatic external fun contentScore(bgr: ByteArray, w: Int, h: Int): Float
+
+    /** True when this tier had no fp32 gate context; see [ContentGate.QUANTISED_BIAS]. */
+    @JvmStatic external fun contentGateIsQuantised(): Boolean
+
+    @JvmStatic external fun setSource(bgr: ByteArray, w: Int, h: Int): Boolean
+    /** Swaps every face in place; returns the face count, or -1 on error. */
+    @JvmStatic external fun processFrame(bgr: ByteArray, w: Int, h: Int): Int
+
+    @JvmStatic external fun argbToBgr(argb: IntArray, w: Int, h: Int): ByteArray
+    @JvmStatic external fun yuvToBgr(
+        y: ByteArray, yRow: Int,
+        u: ByteArray, uRow: Int, uPix: Int,
+        v: ByteArray, vRow: Int, vPix: Int,
+        w: Int, h: Int,
+    ): ByteArray
+    @JvmStatic external fun bgrToI420(bgr: ByteArray, w: Int, h: Int): ByteArray
+    /**
+     * Write a BGR frame into the encoder's own input planes, honouring its strides.
+     * COLOR_FormatYUV420Flexible is NOT necessarily I420 -- this device's AVC encoder is
+     * semi-planar -- so the layout is taken from the Image rather than assumed.
+     */
+    @JvmStatic external fun bgrToImagePlanes(
+        bgr: ByteArray, w: Int, h: Int,
+        y: java.nio.ByteBuffer, yRow: Int, yPix: Int,
+        u: java.nio.ByteBuffer, uRow: Int, uPix: Int,
+        v: java.nio.ByteBuffer, vRow: Int, vPix: Int,
+    ): Boolean
+    /** Box-downsampled ARGB_8888 for the live preview; scaling natively avoids a
+     *  full-resolution Bitmap allocation per frame. */
+    @JvmStatic external fun bgrToArgb(bgr: ByteArray, w: Int, h: Int,
+                                      dstW: Int, dstH: Int): IntArray
+
+    @JvmStatic external fun lastError(): String
+}
