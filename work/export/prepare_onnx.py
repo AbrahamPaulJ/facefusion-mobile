@@ -913,7 +913,162 @@ def do_gpen():
 		g.initializer.extend(extra_inits)
 	print('  replaced %d upfirdn2d upsamples with a stride-2 ConvTranspose' % n_up)
 
-	# ---- third pass: an explicit zero bias on every bias-less conv
+	# ---- third pass: the blur blocks, as one grouped conv each
+	#
+	# Every StyleGAN blur -- 6 in the encoder, 6 before a generator conv, 6 in the
+	# to_rgbs upsamples -- is exported as upfirdn2d's "depthwise via the batch axis":
+	#
+	#   [1,C,H,W] -T(0,2,3,1)-> [1,H,W,C] -Pad-> -Slice-> -T(0,3,1,2)-> [1,C,H',W']
+	#             -Reshape-> [C,1,H',W'] -Conv(K[1,1,4,4])-> [C,1,Ho,Wo]
+	#             -Reshape-> [1,C,Ho,Wo]
+	#
+	# One kernel over C batches IS a depthwise convolution over C channels, and the Pad
+	# is what the conv's own `pads` express.  The converter already sees the DepthWiseConv2d
+	# -- what it cannot see through is the layout churn around it, and that churn is where
+	# gpen's time goes: the shipped net moves 86.51 MB through Transpose against 33.36 MB
+	# of compute output (ratio 2.59), and its ten largest Transposes are all named for these
+	# blocks.  So the win is not the node count, it is the traffic.
+	#
+	# The Slice is a full-range no-op that onnxsim keeps (starts 0, steps 1, ends == the
+	# padded extent); it is asserted to be one rather than assumed, and skipped.
+	m = shape_inference.infer_shapes(strip_value_info(m), strict_mode=False)
+	g = m.graph
+	dims = {vi.name: [d.dim_value for d in vi.type.tensor_type.shape.dim]
+			for vi in list(g.value_info) + list(g.input) + list(g.output)}
+	inits = {t.name: t for t in g.initializer}
+	prod = {o: n for n in g.node for o in n.output}
+	cons = {}
+	for n in g.node:
+		for i in n.input:
+			cons.setdefault(i, []).append(n)
+
+	def arr(name):
+		return numpy_helper.to_array(inits[name]) if name in inits else None
+
+	def attrs_of(n):
+		return {a.name: (list(a.ints) if len(a.ints) else a.i) for a in n.attribute}
+
+	def sole(n):
+		"""The producer of n.input[0], but only if n is that tensor's only consumer.
+
+		Anything with a second consumer has to stay, so the chain is not foldable.
+		"""
+		if n is None or len(cons.get(n.input[0], [])) != 1:
+			return None
+		return prod.get(n.input[0])
+
+	blur_nodes = {}      # id(node to splice at) -> [replacement nodes]
+	blur_drop = set()
+	blur_inits = []
+	n_blur = 0
+
+	for conv in list(g.node):
+		if conv.op_type != 'Conv' or len(conv.input) != 2:
+			continue
+		w = arr(conv.input[1])
+		# The depthwise-via-batch kernel is [1,1,kh,kw]: one input channel, one output.
+		if w is None or w.ndim != 4 or w.shape[0] != 1 or w.shape[1] != 1:
+			continue
+		kh, kw = int(w.shape[2]), int(w.shape[3])
+		ca = attrs_of(conv)
+		# All the spatial framing lives in the Pad; a conv that also strides or pads on its
+		# own is a different block and is left alone.
+		if (ca.get('strides', [1, 1]) != [1, 1] or ca.get('dilations', [1, 1]) != [1, 1]
+				or ca.get('pads', [0] * 4) != [0] * 4 or ca.get('group', 1) != 1):
+			continue
+
+		rs = sole(conv)
+		if rs is None or rs.op_type != 'Reshape':
+			continue
+		tp1 = sole(rs)
+		if tp1 is None or tp1.op_type != 'Transpose' or attrs_of(tp1).get('perm') != [0, 3, 1, 2]:
+			continue
+		up = sole(tp1)
+		# The full-range Slice, if onnxsim kept one.  Identity == same shape, starts 0,
+		# steps 1; that needs no reasoning about how the ends were spelled.
+		sl = None
+		if up is not None and up.op_type == 'Slice':
+			st, sp = arr(up.input[1]), arr(up.input[4]) if len(up.input) > 4 else None
+			if (st is None or any(int(v) for v in st)
+					or (sp is not None and any(int(v) != 1 for v in sp))
+					or dims.get(up.input[0]) is None
+					or dims.get(up.input[0]) != dims.get(up.output[0])):
+				continue
+			sl, up = up, sole(up)
+		pad = up
+		if pad is None or pad.op_type != 'Pad':
+			continue
+		if next((a.s for a in pad.attribute if a.name == 'mode'), b'constant') != b'constant':
+			continue
+		cv = arr(pad.input[2]) if len(pad.input) > 2 else None
+		if cv is not None and float(numpy.asarray(cv).ravel()[0]) != 0.0:
+			continue
+		tp0 = sole(pad)
+		if tp0 is None or tp0.op_type != 'Transpose' or attrs_of(tp0).get('perm') != [0, 2, 3, 1]:
+			continue
+
+		x = tp0.input[0]
+		shape = dims.get(x)
+		if not shape or len(shape) != 4 or shape[0] != 1:
+			continue
+		C = shape[1]
+
+		# The pad is expressed in NHWC: begins[4] + ends[4] over N,H,W,C.  Conv wants
+		# [top, left, bottom, right].  Anything padding N or C is not a spatial blur and is
+		# left alone rather than guessed at.
+		pv = arr(pad.input[1])
+		if pv is None or len(pv) != 8:
+			continue
+		pv = [int(v) for v in pv]
+		if pv[0] or pv[3] or pv[4] or pv[7]:
+			continue
+		pads = [pv[1], pv[2], pv[5], pv[6]]
+
+		# The batch trick only holds if the two Reshapes are exactly the [1,C,..]<->[C,1,..]
+		# pair; assert the shapes rather than trust the names.
+		rs2 = cons.get(conv.output[0], [])
+		if len(rs2) != 1 or rs2[0].op_type != 'Reshape':
+			continue
+		rs2 = rs2[0]
+		h2, w2 = shape[2] + pads[0] + pads[2], shape[3] + pads[1] + pads[3]
+		ho, wo = h2 - kh + 1, w2 - kw + 1
+		if (dims.get(rs.output[0]) != [C, 1, h2, w2]
+				or dims.get(conv.output[0]) != [C, 1, ho, wo]
+				or dims.get(rs2.output[0]) != [1, C, ho, wo]):
+			continue
+
+		wn = conv.name + '/ff_blur_W'
+		# One kernel, repeated per channel: that IS what the batch trick computed.
+		tiled = numpy.repeat(w.reshape(1, 1, kh, kw).astype(numpy.float32), C, axis=0)
+		blur_inits.append(numpy_helper.from_array(numpy.ascontiguousarray(tiled), wn))
+
+		blur_nodes[id(tp0)] = [helper.make_node(
+			'Conv', [x, wn], [rs2.output[0]], name=conv.name + '/ff_blur',
+			kernel_shape=[kh, kw], strides=[1, 1], dilations=[1, 1],
+			pads=pads, group=C)]
+		blur_drop.update(id(n) for n in (tp0, pad, tp1, rs, conv, rs2))
+		if sl is not None:
+			blur_drop.add(id(sl))
+		n_blur += 1
+
+	if blur_nodes:
+		kept = []
+		for n in g.node:
+			# Spliced in AT the first node it replaces, so the list stays topologically
+			# sorted: x is produced partway down the graph, not at the top.
+			if id(n) in blur_nodes:
+				kept.extend(blur_nodes[id(n)])
+			if id(n) in blur_drop:
+				continue
+			kept.append(n)
+		del g.node[:]
+		g.node.extend(kept)
+		g.initializer.extend(blur_inits)
+	print('  collapsed %d blur blocks into a grouped conv' % n_blur)
+	if n_blur != 18:
+		print('  WARNING: expected 18 blur blocks, matched %d' % n_blur)
+
+	# ---- fourth pass: an explicit zero bias on every bias-less conv
 	#
 	# The 2.49 converter's `squash_sum` folds an ElementwiseSum into a preceding NN node by
 	# writing into that node's bias, and reads `input_names[2]` without checking the node
