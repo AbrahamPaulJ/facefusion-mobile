@@ -31,10 +31,26 @@ object ModelPaths {
      * NOT "this tier and every older one" -- see NativePipe.probeTierChain -- so it must
      * never be reconstructed from a single tier.
      */
+    /**
+     * Cached because the chain is a property of the SILICON and cannot change while the
+     * process lives -- and because probing it brings the QNN backend up, which is far too
+     * expensive to do from composition.
+     *
+     * ⚠ The chain is cached; the RESOLVED TIER below is deliberately not. That distinction
+     * is the whole bug fixed on 2026-08-30: what a device *can* load is fixed, what is *on
+     * disk* changes the moment a download finishes.
+     */
+    @Volatile private var chainCache: List<String>? = null
+
     fun tierChain(ctx: Context): List<String> {
+        chainCache?.let { return it }
         val lib = ctx.applicationInfo.nativeLibraryDir
-        return NativePipe.probeTierChain(lib, lib)
+        val c = NativePipe.probeTierChain(lib, lib)
             .split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        // Only a non-empty answer is cached: a failed probe must not be remembered as
+        // "this chip can load nothing" for the rest of the process.
+        if (c.isNotEmpty()) chainCache = c
+        return c
     }
 
     /**
@@ -42,6 +58,15 @@ object ModelPaths {
      *
      * With nothing downloaded yet the answer is the best tier, because that is the set to
      * fetch.
+     *
+     * ⚠ **Never cache this, and never substitute `pickTier`/`probeDeviceInfo`'s tier for
+     * it.** That tier is `tierChain().front()` -- what the SILICON can load, with no
+     * reference to disk. They differ on exactly the devices whose best arch is not hosted
+     * yet: a v81 part resolves the chain `v81,v73,v68`, the manifest publishes no v81, the
+     * downloader correctly fetches **v73**, and anything naming files `_v81` then reports
+     * a complete download as missing. That shipped in 0.2.0 and is what this warning is
+     * for. Recomputing is a handful of `canRead()` calls; the chain above is what was
+     * expensive, and it is cached.
      */
     fun tier(ctx: Context): String {
         val chain = tierChain(ctx)

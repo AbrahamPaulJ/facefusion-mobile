@@ -243,30 +243,21 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Which `<name>_<tier>.bin` this chip needs.  Measured once per process; the native
-     * side re-derives it inside Pipeline::init, so this copy exists only so the UI can
-     * name the right files when they are missing.
+     * Which `<name>_<tier>.bin` this chip needs, resolved against disk on EVERY read.
+     *
+     * ⚠ A `by lazy` here was half of the 0.2.0 "downloads the models, then says there are
+     * no models" bug. It is first read before anything is downloaded, when the only answer
+     * available is the best tier the chip could load; the download then lands a DIFFERENT
+     * tier, and the cached value never catches up. A getter costs a few `canRead()` calls
+     * -- [ModelPaths] caches the expensive half, the probe.
      */
-    private val tier: String by lazy {
-        // Resolved against disk, exactly as Pipeline::init resolves it. The tier the UI
-        // names has to be the tier the pipeline will open, or "models missing" and "model
-        // loaded" contradict each other on any chip whose best tier is not hosted yet.
-        // With nothing on disk, name the best one -- that is the set to download.
-        tierChain.firstOrNull { File(modelDir(), "yoloface_" + it + ".bin").canRead() }
-            ?: tierChain.firstOrNull()
-            ?: NativePipe.probeTier(applicationInfo.nativeLibraryDir,
-                                    applicationInfo.nativeLibraryDir)
-    }
+    private val tier: String get() = ModelPaths.tier(this)
 
     /**
      * Every tier this chip can load, best first. See [NativePipe.probeTierChain] -- it is
      * NOT "this tier and every older one", so it must not be reconstructed here.
      */
-    private val tierChain: List<String> by lazy {
-        NativePipe.probeTierChain(applicationInfo.nativeLibraryDir,
-                                  applicationInfo.nativeLibraryDir)
-            .split(",").map { it.trim() }.filter { it.isNotEmpty() }
-    }
+    private val tierChain: List<String> get() = ModelPaths.tierChain(this)
 
     /**
      * Whether the second swapper is on the device at all.
@@ -581,14 +572,9 @@ class MainActivity : ComponentActivity() {
      */
     /** Recompute from disk. Cheap: a handful of canRead() calls. */
     private fun refreshModelsMissing() {
-        val t = deviceUi.tier.ifEmpty { tier }
-        val dir = modelDir()
-        val absent = listOf("yoloface", "fan2d", "arcface", opts.swapper)
-            .filter { !File(dir, it + "_" + t + ".bin").canRead() }
-            .toMutableList()
-        if (!File(dir, "nsfw_" + t + ".bin").canRead() &&
-            !File(dir, "nsfwq_" + t + ".bin").canRead())
-            absent += "nsfw"
+        // ModelPaths, not a fourth copy of the same list, and NOT deviceUi.tier -- see the
+        // warning on ModelPaths.tier.
+        val absent = ModelPaths.missing(this, tier, opts.swapper)
         val now = absent.isNotEmpty()
         if (now != modelsMissing)
             android.util.Log.i("ffmodels", "missing=" + now + " " + absent)
@@ -625,7 +611,7 @@ class MainActivity : ComponentActivity() {
     private fun modelRows(): List<ModelRow> {
         val ignored = modelsVersion
         check(ignored >= 0)
-        val t = deviceUi.tier.ifEmpty { tier }
+        val t = tier
         val required = listOf(
             "yoloface" to "Face detector",
             "fan2d" to "Face landmarker",
@@ -781,7 +767,7 @@ class MainActivity : ComponentActivity() {
                     soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
 
                     val models = modelDir()
-                    val t = deviceUi.tier.ifEmpty { tier }
+                    val t = tier
                     val missing = listOf("yoloface", "fan2d", "arcface", opts.swapper)
                         .map { File(models, "${it}_$t.bin") }.filterNot { it.canRead() }
                     if (missing.isNotEmpty()) {

@@ -55,7 +55,17 @@ android {
         // every device that already has 0.1.0: it cannot be installed as an update, and
         // anyone upgrading has to uninstall first -- which deletes the downloaded context
         // binaries with the app's private files dir.  Say so in the release notes.
-        versionCode = 3
+        // 4 = the 0.2.0 HOTFIX (2026-08-30, the v81 "no models" bug).  versionName stays
+        // "0.2.0" ON PURPOSE: archivesBaseName below is derived from it, so the release
+        // asset keeps the filename the published download link already points at.
+        //
+        // ⚠ The CODE still had to go up.  Android compares versionCode, not versionName:
+        // reusing 3 would have made the hotfix un-installable over the build it fixes,
+        // which is every affected user.  A tag can be reused; a versionCode cannot.
+        //
+        // The cost is two different APKs both calling themselves 0.2.0, so BugReport now
+        // prints the code alongside the name -- that is what tells them apart in a report.
+        versionCode = 4
         versionName = "0.2.0$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel

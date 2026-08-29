@@ -61,8 +61,14 @@ object BugReport {
         models: List<String>,
         status: String,
     ): String {
+        // Name AND code.  0.2.0 shipped twice -- versionCode 3, and the 4 that fixes the
+        // v81 "no models" bug -- so the name alone cannot answer "which build is this?",
+        // which is the first question any report about that bug needs answered.
         val v = runCatching {
-            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+            val pi = context.packageManager.getPackageInfo(context.packageName, 0)
+            val code = if (Build.VERSION.SDK_INT >= 28) pi.longVersionCode
+                       else @Suppress("DEPRECATION") pi.versionCode.toLong()
+            pi.versionName + " (" + code + ")"
         }.getOrNull() ?: "?"
         val sb = StringBuilder()
         sb.append("FaceFusion Mobile bug report\n")
