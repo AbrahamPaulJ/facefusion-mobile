@@ -612,21 +612,40 @@ class MainActivity : ComponentActivity() {
         val ignored = modelsVersion
         check(ignored >= 0)
         val t = tier
+        // "Required" has to mean what ModelPaths.missing() ENFORCES, or this screen tells
+        // a user everything is fine about a device that then refuses to swap.
+        //
+        // Which swapper is required depends on the one selected: missing() checks
+        // opts.swapper, so hyperswap is not inherently the required one and inswapper is
+        // not inherently optional -- the SELECTED one is required and the other is the
+        // alternative.
+        val alt = if (opts.swapper == "inswapper") "hyperswap" else "inswapper"
         val required = listOf(
             "yoloface" to "Face detector",
             "fan2d" to "Face landmarker",
             "arcface" to "Face recogniser",
-            "hyperswap" to "Face swapper",
+            opts.swapper to "Face swapper",
+        )
+        // The content gate is required -- missing() blocks a run without it and
+        // ffpipe::init will not come up -- but it is satisfied by EITHER build, so neither
+        // file is required ON ITS OWN. fp32 `nsfw_` only finalizes on v79 and up; below
+        // that the quantised `nsfwq_` is the only one that exists. So the PAIR is what is
+        // required, and a row is only worth flagging when NEITHER is on the device --
+        // otherwise a v79 phone, which correctly has just `nsfw_`, would be told the
+        // `nsfwq_` it must never download is missing and required.
+        val gateOk = File(modelDir(), "nsfw_$t.bin").canRead() ||
+                     File(modelDir(), "nsfwq_$t.bin").canRead()
+        val gate = listOf(
+            "nsfw" to "Content checker",
+            "nsfwq" to "Content checker (quantised)",
         )
         val optional = listOf(
-            "inswapper" to "Face swapper (alternative)",
+            alt to "Face swapper (alternative)",
             // It was absent from BOTH lists, so a 28 MB model that is on the device, that
             // the Advanced panel offers a switch for, and that /health reports as present,
             // was invisible on the one screen whose job is to say what is installed.
             "gpen" to "Face enhancer",
             "fan685" to "Landmark refiner",
-            "nsfw" to "Content checker",
-            "nsfwq" to "Content checker (quantised)",
         )
         // What can be fetched is whatever the MANIFEST publishes for this tier -- asked
         // once over the network, not guessed here. The guess it replaces had the gate wrong
@@ -641,6 +660,7 @@ class MainActivity : ComponentActivity() {
                             downloadable = f.name in hostedFiles)
         }
         return required.map { (n, l) -> row(n, l, true) } +
+            gate.map { (n, l) -> row(n, l, !gateOk) }.filter { it.present || it.downloadable } +
             optional.map { (n, l) -> row(n, l, false) }.filter { it.present || it.downloadable }
     }
 
