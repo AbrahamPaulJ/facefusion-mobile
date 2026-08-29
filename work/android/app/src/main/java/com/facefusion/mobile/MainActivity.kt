@@ -153,7 +153,24 @@ class MainActivity : ComponentActivity() {
      * name the right files when they are missing.
      */
     private val tier: String by lazy {
-        NativePipe.probeTier(applicationInfo.nativeLibraryDir, applicationInfo.nativeLibraryDir)
+        // Resolved against disk, exactly as Pipeline::init resolves it. The tier the UI
+        // names has to be the tier the pipeline will open, or "models missing" and "model
+        // loaded" contradict each other on any chip whose best tier is not hosted yet.
+        // With nothing on disk, name the best one -- that is the set to download.
+        tierChain.firstOrNull { File(modelDir(), "yoloface_" + it + ".bin").canRead() }
+            ?: tierChain.firstOrNull()
+            ?: NativePipe.probeTier(applicationInfo.nativeLibraryDir,
+                                    applicationInfo.nativeLibraryDir)
+    }
+
+    /**
+     * Every tier this chip can load, best first. See [NativePipe.probeTierChain] -- it is
+     * NOT "this tier and every older one", so it must not be reconstructed here.
+     */
+    private val tierChain: List<String> by lazy {
+        NativePipe.probeTierChain(applicationInfo.nativeLibraryDir,
+                                  applicationInfo.nativeLibraryDir)
+            .split(",").map { it.trim() }.filter { it.isNotEmpty() }
     }
 
     /**
@@ -373,7 +390,10 @@ class MainActivity : ComponentActivity() {
 
     private fun beginDownload() {
         ModelDownload.reset()
-        DownloadService.start(this, deviceUi.tier.ifEmpty { tier })
+        // The whole chain, not one tier: the downloader picks the best tier the manifest
+        // actually publishes. Handing it only `tier` would fail outright on a chip whose
+        // best tier is not hosted yet.
+        DownloadService.start(this, tierChain.joinToString(","))
     }
 
     // ------------------------------------------------------------------ models

@@ -49,6 +49,20 @@ object NativePipe {
     @JvmStatic external fun probeTier(libDir: String, skelDir: String): String
 
     /**
+     * Every tier this chip can load, best first, comma-joined -- "v81,v73,v68".
+     *
+     * [probeTier] names the tier the hardware DESERVES; this names the ones it can
+     * actually use. They differ exactly when the app has learned about an arch whose
+     * context binaries are not hosted yet, which is the normal state of affairs for a
+     * day or two after a new tier lands. The downloader walks this and takes the first
+     * tier the manifest carries; ffpipe walks it and takes the first present on disk.
+     *
+     * ⚠ Not simply "every older tier": the v79 build is pinned to soc_model 69, so it is
+     * absent from a v81 chain. Do not reconstruct this list in Kotlin.
+     */
+    @JvmStatic external fun probeTierChain(libDir: String, skelDir: String): String
+
+    /**
      * Whether this chip accepts the fp16 stamp every QAIRT 2.49 context carries.
      *
      * "yes" | "no" | "unknown".  ⚠ "unknown" means the CONTROL canary failed -- the probe

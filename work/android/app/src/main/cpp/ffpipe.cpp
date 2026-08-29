@@ -64,9 +64,34 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
     return false;
   }
   // Which arch tier this chip needs, measured rather than assumed. Everything before
-  // 2026-08-24 hard-coded _v79 here, which is exactly one phone; pickTier falls back to
+  // 2026-08-24 hard-coded _v79 here, which is exactly one phone; the chain falls back to
   // v68 whenever the probe cannot measure, so an unrecognised device still loads.
-  tier_ = ffqnn::pickTier(ffqnn::deviceInfo());
+  //
+  // Then resolve that against WHAT IS ACTUALLY ON DISK.  The best tier for a chip is not
+  // always one we have published: a v81 part asks for v81 the moment the app knows the
+  // arch exists, which is necessarily before the binaries are hosted.  Taking the first
+  // tier whose detector is present turns that from a hard init failure into "keeps running
+  // the tier it ran yesterday, upgrades itself the day the files land".
+  //
+  // The detector is the probe because it is mandatory and the smallest -- 3.8 MB. A tier
+  // is never half-present: the downloader writes a `.part` and renames only after the
+  // SHA256 matches, so yoloface existing means the rest of that tier does too.
+  const std::vector<std::string> chain = ffqnn::tierChain(ffqnn::deviceInfo());
+  tier_ = chain.front();
+  for (const std::string& t : chain) {
+    std::string probe = modelDir + "/yoloface_" + t + ".bin";
+    if (FILE* f = std::fopen(probe.c_str(), "rb")) {
+      std::fclose(f);
+      tier_ = t;
+      break;
+    }
+  }
+  // No logging channel exists this early -- init() predates the app's log box. It is still
+  // visible in a bug report, which prints pickTier's answer next to the files on disk: a
+  // fallback reads as `tier v81` beside `yoloface_v73.bin`, which is the whole story.
+  if (ffdebug() && tier_ != chain.front())
+    fprintf(stderr, "[dbg] tier %s not present, using %s\n",
+            chain.front().c_str(), tier_.c_str());
 
   auto open = [&](const char* name) -> ffqnn::Handle {
     std::string path = modelDir + "/" + name + "_" + tier_ + ".bin";

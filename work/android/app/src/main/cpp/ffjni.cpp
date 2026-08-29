@@ -127,6 +127,30 @@ Java_com_facefusion_mobile_NativePipe_probeTier(JNIEnv* env, jclass, jstring jLi
   return env->NewStringUTF(ffqnn::pickTier(ffqnn::deviceInfo()).c_str());
 }
 
+// Every tier this chip can load, best first, comma-joined: "v81,v73,v68".
+//
+// The DOWNLOADER needs this, not just probeTier. pickTier names the tier the hardware
+// deserves, which the hosted manifest may not carry yet -- asking for a tier that is not
+// published is an error, and on a brand-new arch it would be the error every user of that
+// chip hits. Handing Kotlin the whole chain keeps the rule in one place: C++ decides what
+// is loadable, the downloader decides what is available.
+JNIEXPORT jstring JNICALL
+Java_com_facefusion_mobile_NativePipe_probeTierChain(JNIEnv* env, jclass, jstring jLib,
+                                                     jstring jSkel) {
+  std::string lib = jstr(env, jLib);
+  ffqnn::DeviceInfo d{};
+  if (!ffqnn::init(lib + "/libQnnHtp.so", lib + "/libQnnSystem.so", jstr(env, jSkel)))
+    g_err = ffqnn::lastError();   // leave d unmeasured; the chain's own fallback applies
+  else
+    d = ffqnn::deviceInfo();
+  std::string out;
+  for (const std::string& t : ffqnn::tierChain(d)) {
+    if (!out.empty()) out += ",";
+    out += t;
+  }
+  return env->NewStringUTF(out.c_str());
+}
+
 // "yes" | "no" | "unknown".  A String rather than a tri-state enum because "unknown" has
 // to be impossible to confuse with "no" at the call site -- a boolean here would make the
 // control's whole purpose unrepresentable.

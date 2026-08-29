@@ -253,6 +253,7 @@ private fun InfoRow(label: String, value: String) {
  */
 private val TIERS = listOf(
     "v68" to "Snapdragon 888 and older (v68), 8 Gen 1 (v69), or any part with under 8 MB VTCM",
-    "v73" to "8 Gen 2 (v73), 8 Gen 3 (v75), newer v81 parts, and v79 parts other than SM8750",
+    "v73" to "8 Gen 2 (v73), 8 Gen 3 (v75), and v79 parts other than SM8750",
     "v79" to "Snapdragon 8 Elite (SM8750)",
+    "v81" to "Snapdragon 8 Elite Gen 5 (v81) and newer",
 )

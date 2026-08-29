@@ -69,13 +69,26 @@ object ModelDownload {
         return !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
     }
 
-    /** Which files this tier needs, from the hosted manifest. Network call; not on main. */
-    fun manifestFor(tier: String): List<Entry> {
+    /**
+     * Which files to fetch, from the hosted manifest. Network call; not on main.
+     *
+     * Takes the whole tier CHAIN ("v81,v73,v68", from [NativePipe.probeTierChain]) rather
+     * than one tier, and returns the best one the manifest actually publishes along with
+     * its files. The two differ whenever the app knows about an arch whose binaries are
+     * not hosted yet -- which is the normal state for a day or two after a tier lands, and
+     * used to be a hard "no models published for tier v81" for every user of that chip.
+     *
+     * A single tier is still accepted: a string with no comma is a one-entry chain.
+     */
+    fun manifestFor(chain: String): Pair<String, List<Entry>> {
+        val want = chain.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        if (want.isEmpty()) error("no tier requested")
         val text = URL(BASE + "manifest.json").readText()
         val tiers = JSONObject(text).getJSONObject("tiers")
-        if (!tiers.has(tier)) error("no models published for tier $tier")
+        val tier = want.firstOrNull { tiers.has(it) }
+            ?: error("no models published for any of " + want.joinToString(", "))
         val arr = tiers.getJSONObject(tier).getJSONArray("files")
-        return (0 until arr.length()).map {
+        return tier to (0 until arr.length()).map {
             val o = arr.getJSONObject(it)
             Entry(o.getString("name"), o.getLong("bytes"), o.getString("sha256"))
         }
@@ -93,12 +106,12 @@ object ModelDownload {
      *
      * @return null on success, an error string otherwise.
      */
-    fun run(dir: File, tier: String, onTick: () -> Unit): String? {
+    fun run(dir: File, chain: String, onTick: () -> Unit): String? {
         cancelled = false
         error = null; finished = false; running = true
         try {
             val entries = try {
-                manifestFor(tier)
+                manifestFor(chain).second
             } catch (e: Exception) {
                 return fail("Could not read the model list: ${e.message}")
             }

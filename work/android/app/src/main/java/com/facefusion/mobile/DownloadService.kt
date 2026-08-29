@@ -31,7 +31,7 @@ class DownloadService : Service() {
             return START_NOT_STICKY
         }
 
-        val tier = intent?.getStringExtra(EXTRA_TIER).orEmpty()
+        val chain = intent?.getStringExtra(EXTRA_TIERS).orEmpty()
         val dir = File(getExternalFilesDir(null), "models").apply { mkdirs() }
 
         createChannel()
@@ -39,7 +39,7 @@ class DownloadService : Service() {
 
         thread(name = "model-download") {
             var lastPost = 0L
-            val err = ModelDownload.run(dir, tier) {
+            val err = ModelDownload.run(dir, chain) {
                 // Throttled: the notification manager rate-limits updates anyway, and
                 // posting per chunk is wasted work on a 275 MB transfer.
                 val now = System.currentTimeMillis()
@@ -115,11 +115,12 @@ class DownloadService : Service() {
     companion object {
         private const val CHANNEL = "model_download"
         private const val NOTIF_ID = 1001
-        private const val EXTRA_TIER = "tier"
+        private const val EXTRA_TIERS = "tiers"
         private const val ACTION_CANCEL = "com.facefusion.mobile.CANCEL_DOWNLOAD"
 
-        fun start(context: Context, tier: String) {
-            val i = Intent(context, DownloadService::class.java).putExtra(EXTRA_TIER, tier)
+        /** @param tiers the comma-joined tier chain, best first -- "v81,v73,v68". */
+        fun start(context: Context, tiers: String) {
+            val i = Intent(context, DownloadService::class.java).putExtra(EXTRA_TIERS, tiers)
             context.startForegroundService(i)
         }
     }

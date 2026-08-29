@@ -33,8 +33,15 @@ FF=${FF:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
 #   v68/2  -- SD 888 and up.  Runs forward onto every later HTP; 2 MB fits anywhere.
 #   v69/8  -- 8 Gen 1 and up with full VTCM.
 #   v73/8  -- 8 Gen 2 and up.
-#   v79/8  -- 8 Elite.  What ships today.
-TIERS="v68:2 v69:8 v73:8 v79:8"
+#   v79/8  -- 8 Elite.  Pinned to soc_model 69, so it is NOT the answer for newer parts.
+#   v81/8  -- 8 Elite Gen 5 and up.  Added because pickTier was sending every v81 part
+#             (S26 Ultra) to the v73 build: the v79 context is soc-pinned, so `arch >= 79`
+#             fell through to `arch >= 73`.  Deliberately NOT soc-pinned -- below v79 the
+#             point of a tier is breadth, and the same applies above it.
+#             ⚠ vtcm_mb 8 is the CONSERVATIVE value carried over from v73/v79, not a
+#             measurement: no v81 part has been on the bench.  If one reports more VTCM,
+#             raising this is free performance and needs re-emitting nothing else.
+TIERS="v68:2 v69:8 v73:8 v79:8 v81:8"
 
 emit() {
   local name=$1 arch=$2 vtcm=$3

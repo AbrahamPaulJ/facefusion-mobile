@@ -66,9 +66,23 @@ struct DeviceInfo {
 // Reads the HTP through QnnDevice_getPlatformInfo.  Requires init(); loads no model.
 DeviceInfo deviceInfo();
 
-// The arch suffix of the context binaries this chip should load -- "v68" ... "v79", i.e.
-// the `<name>_<tier>.bin` that ffpipe opens.  Falls back to the most permissive tier
-// whenever the probe could not measure, so an unknown chip behaves like an old one.
+// Every tier this chip can load, BEST FIRST -- "v81", "v73", "v68" for an 8 Elite Gen 5.
+//
+// A tier is in the chain only if a context built for it actually runs here, which is not
+// the same as "older than this arch": the v79 build is pinned to soc_model 69, so it never
+// appears in a v81 part's chain even though 81 > 79.
+//
+// The chain exists because the app can learn about an arch BEFORE its context binaries are
+// hosted.  Without a fallback, adding a tier would brick every device on that arch the
+// moment the app shipped and before the models did; with one, such a device quietly keeps
+// using the tier it used yesterday and picks the new one up when it appears.
+std::vector<std::string> tierChain(const DeviceInfo& d);
+
+// The arch suffix of the context binaries this chip should load -- "v68" ... "v81", i.e.
+// the `<name>_<tier>.bin` that ffpipe opens.  This is tierChain().front(): the tier the
+// chip DESERVES, which is not necessarily one we have shipped yet.  ffpipe resolves the
+// rest of the chain against the filesystem; callers that only want to name the hardware
+// (the settings panel, the bug report) want this one.
 std::string pickTier(const DeviceInfo& d);
 
 enum class Fp16 { Unknown, Yes, No };

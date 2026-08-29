@@ -667,29 +667,42 @@ DeviceInfo deviceInfo() {
   return d;
 }
 
-std::string pickTier(const DeviceInfo& d) {
+std::vector<std::string> tierChain(const DeviceInfo& d) {
   // An unmeasured chip gets the most permissive build. v68 is the floor the SDK sets and
   // a v68 context runs FORWARD onto every later HTP, so being wrong here costs speed,
   // never a load failure -- and the alternative (guessing high) costs the whole app.
-  if (!d.ok) return "v68";
+  if (!d.ok) return {"v68"};
 
   // VTCM first: the v69/v73/v79 configs all pin vtcm_mb 8, so a part with less rejects
   // them regardless of how new its arch is. Only the v68 build asks for 2.
-  if (d.vtcmMb < 8) return "v68";
+  if (d.vtcmMb < 8) return {"v68"};
+
+  // v81 and up (8 Elite Gen 5; the S26 Ultra) get their own build.  Before this entry they
+  // fell all the way to v73: the v79 context is soc-pinned (below), so `arch >= 79` did not
+  // match and `arch >= 73` did -- correct, and forward-compatible, but it ran a
+  // two-generation-old context on the newest silicon.  Users reported it as slowness.
+  //
+  // Note what is NOT in this chain: v79.  It is soc-pinned to SM8750 and would be rejected
+  // for the SoC, not the arch, so for a v81 part it is not a fallback at all -- it is a
+  // guaranteed failure.  A tier belongs in a chain only if a context built for it actually
+  // RUNS on this chip.
+  if (d.arch >= 81) return {"v81", "v73", "v68"};
 
   // soc_model is baked into the v79 config (69 == SM8750) and pins that context to one
   // SoC, so a *newer* v79-or-above part must not be handed it -- it would be rejected for
   // the SoC, not the arch. v73 is the right forward-compatible answer there.
-  if (d.arch >= 79 && d.socModel == 69) return "v79";
-  if (d.arch >= 73) return "v73";
+  if (d.arch >= 79 && d.socModel == 69) return {"v79", "v73", "v68"};
+  if (d.arch >= 73) return {"v73", "v68"};
 
   // v69 deliberately falls through to v68. The v69 hyperswap context spills 70.0 MB --
   // MORE than the 2 MB v68 build's 41.8 MB, and more than v73's 31.6 MB. That is
   // unexplained (HANDOFF, session 3), so until someone measures a v69 part the v68 build
   // is both proven-forward-compatible and the smaller spill. Flip this line once v69 has
   // a number against it.
-  return "v68";
+  return {"v68"};
 }
+
+std::string pickTier(const DeviceInfo& d) { return tierChain(d).front(); }
 
 // One context binary, loaded and immediately discarded. Stops at contextCreateFromBinary
 // on purpose: ffqnn::load() goes on to bind tensor metadata, and a failure THERE would be
