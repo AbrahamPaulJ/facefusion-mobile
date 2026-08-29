@@ -13,10 +13,17 @@
 # question the app will ask, through the on-device CLI, so the files pushed are the files
 # the app will look for.  It falls back to v79 when ffswap is not staged.
 #
+# -Dev installs the UNGATED build instead.  It is a different applicationId, so it is a
+# different app to the phone: it installs BESIDE the gated one rather than over it, and it
+# gets its OWN files dir -- which is why -Dev seeds that dir from the gated app's copy
+# before pushing anything.  A cp on the device costs nothing; re-pushing ~300 MB to arrive
+# at byte-identical files costs a transfer that has silently truncated before.
+#
 #   .\work\device\install_app.ps1              # install + models for the measured tier
 #   .\work\device\install_app.ps1 -NoModels    # APK only
 #   .\work\device\install_app.ps1 -Tier v68    # force a tier, to test a lower one
-param([switch]$NoModels, [string]$Swapper = "hyperswap", [string]$Tier = "auto")
+#   .\work\device\install_app.ps1 -Dev         # the ungated build, alongside the gated one
+param([switch]$NoModels, [switch]$Dev, [string]$Swapper = "hyperswap", [string]$Tier = "auto")
 
 $ErrorActionPreference = 'Continue'
 $PSNativeCommandUseErrorActionPreference = $false
@@ -30,14 +37,24 @@ if (-not $serial) {
                ForEach-Object { ($_ -split '\s+')[0] } | Select-Object -First 1)
 }
 if (-not $serial) { Write-Output "no adb device; connect one or set FF_ADB_SERIAL"; exit 1 }
-$pkg    = "com.facefusion.mobile"
+# Must match build.gradle.kts, which derives the id from whether ContentGate.kt exists.
+$pkg    = if ($Dev) { "com.facefusion.mobile.dev" } else { "com.facefusion.mobile" }
 $files  = "/sdcard/Android/data/$pkg/files"
 
 & $adb connect $serial | Out-Null
 
-$apk = Get-ChildItem "$ff\work\android\app\build\outputs\apk\debug\*.apk" | Select-Object -First 1
-if (-not $apk) { Write-Output "no APK built -- run gradlew assembleDebug"; exit 1 }
-Write-Output ("apk {0:N1} MB  {1}" -f ($apk.Length / 1MB), $apk.Name)
+# Both build types, newest first, filtered to the line asked for.  The variant is in the
+# FILENAME (`-dev-`) because build.gradle.kts puts it there, so this cannot install a gated
+# APK under the dev package or the reverse -- which would look like it worked and leave an
+# ungated app wearing the gated app's name.
+$apk = Get-ChildItem "$ff\work\android\app\build\outputs\apk\*\*.apk" -ErrorAction SilentlyContinue |
+       Where-Object { ($_.Name -like '*-dev-*') -eq [bool]$Dev } |
+       Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if (-not $apk) {
+    $what = if ($Dev) { "a -dev APK (build it on the dev branch)" } else { "an APK" }
+    Write-Output "no $what under app/build/outputs/apk -- run gradlew assembleRelease"; exit 1
+}
+Write-Output ("apk {0:N1} MB  {1}  -> {2}" -f ($apk.Length / 1MB), $apk.Name, $pkg)
 
 & $adb -s $serial install -r -g $apk.FullName 2>&1 | Out-String -Stream | Select-Object -Last 2
 
@@ -68,9 +85,22 @@ if (-not $NoModels) {
     $owner = & $adb -s $serial shell "ls -ld $files/models 2>/dev/null"
     Write-Output "models dir: $owner"
 
-    # The content gate ships too, and it is mandatory (it blocks). fp32 `nsfw` is the
-    # shipping build but only finalizes on v79; below that the quantised `nsfwq` is the
-    # only one that exists, so try both and push whichever this tier has.
+    if ($Dev) {
+        # Seed from the gated app, which is almost always already on the phone with a tier
+        # downloaded.  -n so an existing dev copy is never overwritten, and every file is
+        # hash-checked by the loop below regardless: this is an optimisation, not trust.
+        $src = "/sdcard/Android/data/com.facefusion.mobile/files/models"
+        $n = ((& $adb -s $serial shell "ls $src/*.bin 2>/dev/null | wc -l") -join "").Trim()
+        if ($n -match '^[0-9]+$' -and [int]$n -gt 0) {
+            Write-Output "seeding from the gated app ($n files, on-device copy)"
+            & $adb -s $serial shell "cp -n $src/*.bin $files/models/ 2>/dev/null"
+        }
+    }
+
+    # The gate context ships on BOTH lines and is mandatory on both: it blocks on main, and
+    # even with -Dev `ffpipe::init` opens it with the rest and fails hard when it is absent.
+    # fp32 `nsfw` is the shipping build but only finalizes on v79; below that the quantised
+    # `nsfwq` is the only one that exists, so push whichever this tier has.
     $models = @("yoloface", "fan2d", "arcface", $Swapper)
     if (Test-Path "$ff\work\device\nsfw_$Tier.bin") { $models += "nsfw" } else { $models += "nsfwq" }
 
