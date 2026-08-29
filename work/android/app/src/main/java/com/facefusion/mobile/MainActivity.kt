@@ -67,6 +67,18 @@ class MainActivity : ComponentActivity() {
     private var elapsedS by mutableStateOf(0.0)
     private var preview by mutableStateOf<Bitmap?>(null)
     private var outputFile by mutableStateOf<File?>(null)
+
+    /** The finished still, when the target was an image rather than a video. */
+    private var outputImage by mutableStateOf<Bitmap?>(null)
+
+    /**
+     * Whether the finished output stopped early because the user cancelled.
+     *
+     * A cancelled run now KEEPS its frames (VideoSwapper), which is what was asked for --
+     * but a 4-second file from a 30-second clip must not read as a completed run, so the
+     * pane says so.
+     */
+    private var outputPartial by mutableStateOf(false)
     private var savedUri by mutableStateOf<Uri?>(null)
 
     // ---- UI shell
@@ -98,6 +110,30 @@ class MainActivity : ComponentActivity() {
     private var previewBusy by mutableStateOf(false)
     private var previewNote by mutableStateOf<String?>(null)
     private var targetAspect by mutableStateOf(16f / 9f)
+
+    /**
+     * The target when it is a STILL rather than a video.
+     *
+     * Non-null is the mode flag: `durationMs == 0` follows from it, which is what hides the
+     * trim slider and the frame-rate control.
+     */
+    private var targetImage by mutableStateOf<Bitmap?>(null)
+
+    /** The target video's own frame rate, so the rate control can cap itself to it. */
+    private var inputFps by mutableStateOf(30)
+
+    /**
+     * The trim handle the previews are following.
+     *
+     * Both panes used to show the start frame unconditionally, so dragging the END handle
+     * changed nothing on screen and read as a broken preview. Whichever handle moved last
+     * is the one being looked at.
+     */
+    private var previewEdge by mutableStateOf(TrimEdge.Start)
+
+    /** The position both panes are previewing: whichever handle was touched last. */
+    private val previewAtMs: Float
+        get() = if (previewEdge == TrimEdge.End) trimEndMs else trimStartMs
     private var scrubJob: Job? = null
 
     /** Set by the Cancel button, read by the swap worker. Volatile: different threads. */
@@ -112,7 +148,10 @@ class MainActivity : ComponentActivity() {
             invalidatePreview()
         }
     }
-    private val pickTarget = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    // OpenDocument rather than GetContent: GetContent takes ONE mime filter, and the
+    // target can now be a video or a still.
+    private val pickTarget = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) loadTarget(uri)
     }
 
@@ -252,6 +291,22 @@ class MainActivity : ComponentActivity() {
                         delay(400)
                     }
                 }
+
+                // The preview warms ITSELF once both inputs and the models exist.
+                //
+                // The refresh button used to be the only thing that would pay for the first
+                // model load (~266 MB, several seconds), so removing it means nothing would
+                // ever ask. force = true because that first load is exactly what a cold
+                // refreshSwapped declines to do on its own.
+                //
+                // Keyed on the inputs rather than run in a loop: it fires when the user
+                // finishes picking, and `previewWarm` stops it repeating.
+                LaunchedEffect(sourceUri, targetFile, modelsMissing) {
+                    if (sourceUri != null && targetFile != null &&
+                        !modelsMissing && !previewWarm && !busy) {
+                        refreshSwapped(force = true)
+                    }
+                }
                 AppScaffold(screen, { screen = it }) { pad ->
                     Box(Modifier.padding(pad)) {
                         when (screen) {
@@ -263,18 +318,19 @@ class MainActivity : ComponentActivity() {
                                 trimStartMs = trimStartMs,
                                 trimEndMs = trimEndMs,
                                 onTrimChange = ::onTrimChanged,
+                                targetAspect = targetAspect,
+                                inputFps = inputFps,
                                 fmt = ::fmt,
                                 preview = PreviewUi(
                                     original = originalFrame,
                                     // During a run the pane becomes the live output, which is
                                     // the same thing one frame later.
                                     swapped = if (busy) preview else swappedFrame,
-                                    timeLabel = if (durationMs > 0) fmt(trimStartMs) else "",
+                                    timeLabel = if (durationMs > 0) fmt(previewAtMs) else "",
                                     warm = previewWarm,
                                     busy = previewBusy,
                                     note = previewNote,
                                 ),
-                                onRefreshPreview = { refreshSwapped(force = true) },
                                 run = RunUi(busy, preparing, progress, framesDone,
                                             framesTotal, elapsedS),
                                 status = status,
@@ -293,11 +349,17 @@ class MainActivity : ComponentActivity() {
                                 onToggleCard = { k -> openCard = if (openCard == k) "" else k },
                                 advancedOpen = advancedOpen,
                                 onToggleAdvanced = { advancedOpen = !advancedOpen },
-                                hasOutput = outputFile != null,
+                                hasOutput = outputFile != null || outputImage != null,
+                                outputFile = outputFile,
+                                outputImage = outputImage,
+                                outputPartial = outputPartial,
+                                onSaveFrame = ::saveFrameAt,
                                 saved = savedUri != null,
                                 savedPath = savedUri?.let { "Movies/FaceFusion/${outputFile?.name}" },
                                 onPickSource = { pickSource.launch("image/*") },
-                                onPickTarget = { pickTarget.launch("video/*") },
+                                onPickTarget = {
+                                    pickTarget.launch(arrayOf("video/*", "image/*"))
+                                },
                                 onSwap = { runSwap() },
                                 onCancel = { cancelRequested = true; status = "Cancelling..." },
                                 modelsMissing = modelsMissing,
@@ -444,7 +506,8 @@ class MainActivity : ComponentActivity() {
     // ------------------------------------------------------------------ models
 
     /** What `loadTarget` pulls out of the container, so the result is not a List<Any>. */
-    private data class Loaded(val file: File, val durationMs: Long, val width: Int, val height: Int)
+    private data class Loaded(val file: File, val durationMs: Long, val width: Int,
+                             val height: Int, val fps: Int)
 
     /**
      * The inventory the Settings screen lists.
@@ -493,13 +556,15 @@ class MainActivity : ComponentActivity() {
      * each one is a video seek. The swapped pane waits longer again, and only refreshes if
      * the pipeline is ALREADY warm -- the first load costs seconds and must be asked for.
      */
-    private fun onTrimChanged(start: Float, end: Float) {
+    private fun onTrimChanged(start: Float, end: Float, edge: TrimEdge) {
         trimStartMs = start
         trimEndMs = end
+        previewEdge = edge
         scrubJob?.cancel()
         scrubJob = lifecycleScope.launch {
             delay(150)
-            originalFrame = previews.frameAt(trimStartMs)
+            // The frame under the handle being dragged, not always the start.
+            originalFrame = previews.frameAt(previewAtMs)
             if (previewWarm && !busy) {
                 delay(250)
                 refreshSwapped(force = false)
@@ -523,7 +588,7 @@ class MainActivity : ComponentActivity() {
             previewBusy = true
             previewNote = null
             try {
-                val frame = originalFrame ?: previews.frameAt(trimStartMs)?.also {
+                val frame = originalFrame ?: previews.frameAt(previewAtMs)?.also {
                     originalFrame = it
                 } ?: run {
                     previewNote = "Could not read that frame"
@@ -592,8 +657,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Copy the picked video out of SAF and read its duration, so trim can be offered. */
+    /**
+     * Copy the picked target out of SAF.
+     *
+     * A still short-circuits everything video: there is no duration, so no trim, no frame
+     * rate, and nothing to seek. `durationMs == 0` is the mode flag the UI reads.
+     */
     private fun loadTarget(uri: Uri) {
+        if (contentResolver.getType(uri)?.startsWith("image/") == true) {
+            loadTargetImage(uri)
+            return
+        }
         preparing = true
         targetName = uri.lastPathSegment?.substringAfterLast('/')
         lifecycleScope.launch {
@@ -611,12 +685,26 @@ class MainActivity : ComponentActivity() {
                         ?.toIntOrNull() ?: 0
                     val h = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
                         ?.toIntOrNull() ?: 0
+                    // CAPTURE_FRAMERATE is absent on plenty of files (it is a camera tag,
+                    // not a container one), so fall back to counting frames over the
+                    // duration rather than assuming 30.
+                    val fpsMeta = mmr.extractMetadata(
+                        MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)?.toFloatOrNull()
+                    val frameCount = mmr.extractMetadata(
+                        MediaMetadataRetriever.METADATA_KEY_VIDEO_FRAME_COUNT)?.toIntOrNull()
+                    val fps = when {
+                        fpsMeta != null && fpsMeta > 1f -> fpsMeta.roundToInt()
+                        frameCount != null && d > 0 -> (frameCount * 1000.0 / d).roundToInt()
+                        else -> 30
+                    }.coerceIn(1, 240)
                     mmr.release()
-                    Loaded(f, d, w, h)
+                    Loaded(f, d, w, h, fps)
                 }
             }
             ok.onSuccess { l ->
+                targetImage = null
                 targetFile = l.file; durationMs = l.durationMs
+                inputFps = l.fps
                 trimStartMs = 0f; trimEndMs = l.durationMs.toFloat()
                 targetAspect = if (l.width > 0 && l.height > 0)
                     l.width.toFloat() / l.height else 16f / 9f
@@ -630,14 +718,49 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * A still target.
+     *
+     * Decoded through [decodeOriented] like the source, so a portrait photo is not swapped
+     * on its side -- the same EXIF bug, and it would have been reintroduced here by using
+     * BitmapFactory for the new path.
+     */
+    private fun loadTargetImage(uri: Uri) {
+        preparing = true
+        targetName = uri.lastPathSegment?.substringAfterLast('/')
+        lifecycleScope.launch {
+            val bmp = withContext(Dispatchers.IO) { decodeOriented(uri) }
+            if (bmp == null) {
+                status = "Cannot read image"
+                preparing = false
+                return@launch
+            }
+            previews.closeTarget()
+            targetFile = null
+            targetImage = bmp
+            durationMs = 0L
+            trimStartMs = 0f; trimEndMs = 0f
+            targetAspect = if (bmp.height > 0) bmp.width.toFloat() / bmp.height else 1f
+            originalFrame = bmp
+            swappedFrame = null; previewNote = null
+            invalidatePreview()
+            originalFrame = bmp
+            status = "Target ready: ${bmp.width} x ${bmp.height}"
+            preparing = false
+        }
+    }
+
     private fun runSwap() {
         val src = sourceUri ?: return
-        val tgt = targetFile ?: return
+        val tgtImage = targetImage
+        val tgt = targetFile
+        if (tgt == null && tgtImage == null) return
         // The preview holds a loaded pipeline and `g_pipe` is a single global, so the run
         // cannot start until it lets go.
         invalidatePreview()
         cancelRequested = false
         busy = true; progress = 0f; log = ""; outputFile = null; savedUri = null
+        outputImage = null; outputPartial = false
         preview = null; framesDone = 0; framesTotal = 0; elapsedS = 0.0
 
         lifecycleScope.launch {
@@ -680,13 +803,27 @@ class MainActivity : ComponentActivity() {
                         appendLog("source content score %+.3f".format(it.score))
                         if (!it.ok) throw ContentGate.Refused(ContentGate.message("the source image", it))
                     }
-                    ContentGate.checkVideo(tgt).let {
-                        // `detail` is an ARGUMENT, never interpolated into the format
-                        // string: it reads "0/11 flagged (0.0%)", and that trailing `%)`
-                        // is parsed as a conversion -- UnknownFormatConversionException,
-                        // which killed the whole swap after the gate had already passed.
-                        appendLog("target content: %s, worst %+.3f".format(it.detail, it.score))
-                        if (!it.ok) throw ContentGate.Refused(ContentGate.message("the target video", it))
+                    // The target, gated whichever kind it is. An image target is a
+                    // FOURTH processing path, and the gate has to be on it by construction
+                    // -- a separate runImageSwap is exactly how a path ends up ungated.
+                    if (tgtImage != null) {
+                        ContentGate.checkImage(tgtImage).let {
+                            appendLog("target content score %+.3f".format(it.score))
+                            if (!it.ok)
+                                throw ContentGate.Refused(
+                                    ContentGate.message("the target image", it))
+                        }
+                    } else {
+                        ContentGate.checkVideo(tgt!!).let {
+                            // `detail` is an ARGUMENT, never interpolated into the format
+                            // string: it reads "0/11 flagged (0.0%)", and that trailing `%)`
+                            // is parsed as a conversion -- UnknownFormatConversionException,
+                            // which killed the whole swap after the gate had already passed.
+                            appendLog("target content: %s, worst %+.3f".format(it.detail, it.score))
+                            if (!it.ok)
+                                throw ContentGate.Refused(
+                                    ContentGate.message("the target video", it))
+                        }
                     }
 
                     val soft = bmp.copy(Bitmap.Config.ARGB_8888, false)
@@ -697,13 +834,42 @@ class MainActivity : ComponentActivity() {
                         error("source: ${NativePipe.lastError()}")
                     appendLog("source ready (${soft.width}x${soft.height})")
 
+                    val t0 = System.currentTimeMillis()
+
+                    // ---- a still target: one frame, no codecs, no muxer.
+                    if (tgtImage != null) {
+                        status = "Swapping..."
+                        val ts = tgtImage.copy(Bitmap.Config.ARGB_8888, false)
+                        val tpx = IntArray(ts.width * ts.height)
+                        ts.getPixels(tpx, 0, ts.width, 0, 0, ts.width, ts.height)
+                        val bgr = NativePipe.argbToBgr(tpx, ts.width, ts.height)
+                        val faces = NativePipe.processFrame(bgr, ts.width, ts.height)
+                        if (faces < 0) error("native: ${NativePipe.lastError()}")
+                        appendLog("$faces face(s) swapped")
+                        val argb = NativePipe.bgrToArgb(bgr, ts.width, ts.height,
+                                                        ts.width, ts.height)
+                        val bmpOut = Bitmap.createBitmap(argb, ts.width, ts.height,
+                                                         Bitmap.Config.ARGB_8888)
+                        // Written to a file as well as held in memory, so Save and Share
+                        // work exactly as they do for a video.
+                        val png = File(getExternalFilesDir(null),
+                            "swapped_${System.currentTimeMillis()}.png")
+                        png.outputStream().use {
+                            bmpOut.compress(Bitmap.CompressFormat.PNG, 100, it)
+                        }
+                        withContext(Dispatchers.Main) { outputImage = bmpOut }
+                        appendLog("total %.1f s".format(
+                            (System.currentTimeMillis() - t0) / 1000.0))
+                        return@runCatching png
+                    }
+
                     val out = File(getExternalFilesDir(null),
                         "swapped_${System.currentTimeMillis()}.mp4")
                     status = "Swapping..."
-                    val t0 = System.currentTimeMillis()
                     var lastPreview = 0L
 
                     VideoSwapper(
+                        outputFps = opts.outputFps,
                         trimStartUs = (trimStartMs * 1000).toLong(),
                         trimEndUs = if (trimEndMs >= durationMs) Long.MAX_VALUE
                                     else (trimEndMs * 1000).toLong(),
@@ -726,7 +892,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onLog = { appendLog(it) },
                         isCancelled = { cancelRequested },
-                    ).swap(tgt.absolutePath, out.absolutePath).getOrThrow()
+                    ).swap(tgt!!.absolutePath, out.absolutePath).getOrThrow()
 
                     appendLog("total %.1f s".format((System.currentTimeMillis() - t0) / 1000.0))
                     out
@@ -734,6 +900,8 @@ class MainActivity : ComponentActivity() {
             }
             result.onSuccess {
                 outputFile = it; progress = 1f
+                // The run kept whatever it had when Cancel was pressed, so say which it is.
+                outputPartial = cancelRequested
                 status = "Done - ${it.length() / 1024} KB"
             }.onFailure {
                 // A refusal is already a finished sentence aimed at the user, and it is not
@@ -756,9 +924,49 @@ class MainActivity : ComponentActivity() {
 
     private fun saveToGallery(file: File) {
         lifecycleScope.launch {
-            val r = withContext(Dispatchers.IO) { GallerySaver.save(this@MainActivity, file) }
-            r.onSuccess { savedUri = it; status = "Saved to Movies/FaceFusion" }
-             .onFailure { status = "Save failed: ${it.message}" }
+            // An image result goes to Pictures, a video to Movies. Same button, and the
+            // file itself says which -- the alternative is a second button that is dead
+            // for whichever kind of target you did not pick.
+            val image = outputImage
+            val r = withContext(Dispatchers.IO) {
+                if (image != null)
+                    GallerySaver.saveImage(this@MainActivity, image, file.name)
+                else
+                    GallerySaver.save(this@MainActivity, file)
+            }
+            r.onSuccess {
+                savedUri = it
+                status = if (image != null) "Saved to Pictures/FaceFusion"
+                         else "Saved to Movies/FaceFusion"
+            }.onFailure { status = "Save failed: ${it.message}" }
+        }
+    }
+
+    /**
+     * Lift the frame currently on screen out of the finished video and save it as a PNG.
+     *
+     * MediaMetadataRetriever with OPTION_CLOSEST, the same option PreviewEngine uses and
+     * for the same reason: OPTION_PREVIOUS_SYNC snaps to a keyframe, so asking for the
+     * frame you are looking at would hand back a different one whenever the scrub position
+     * sits inside a GOP.
+     */
+    private fun saveFrameAt(positionMs: Int) {
+        val file = outputFile ?: return
+        lifecycleScope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching {
+                    val mmr = MediaMetadataRetriever().apply { setDataSource(file.absolutePath) }
+                    val bmp = mmr.getFrameAtTime(positionMs * 1000L,
+                                                 MediaMetadataRetriever.OPTION_CLOSEST)
+                    mmr.release()
+                    bmp ?: error("no frame at that position")
+                }.mapCatching { bmp ->
+                    val name = file.nameWithoutExtension + "_%06dms.png".format(positionMs)
+                    GallerySaver.saveImage(this@MainActivity, bmp, name).getOrThrow()
+                }
+            }
+            r.onSuccess { status = "Frame saved to Pictures/FaceFusion" }
+             .onFailure { status = "Save frame failed: ${it.message}" }
         }
     }
 
@@ -767,11 +975,15 @@ class MainActivity : ComponentActivity() {
             status = "Save to gallery first, then share"
             return
         }
+        // The mime has to match what was actually saved, or the chooser offers apps that
+        // cannot open it -- an image result went out as video/mp4 before image targets
+        // existed, and would have silently kept doing so.
+        val image = outputImage != null
         startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-            type = "video/mp4"
+            type = if (image) "image/png" else "video/mp4"
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }, "Share swapped video"))
+        }, if (image) "Share swapped image" else "Share swapped video"))
     }
 
     /**

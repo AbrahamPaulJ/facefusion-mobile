@@ -1,11 +1,14 @@
 package com.facefusion.mobile.ui
 
 import android.graphics.Bitmap
+import android.widget.VideoView
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -19,11 +22,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -33,6 +40,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.facefusion.mobile.R
+import kotlinx.coroutines.delay
+import java.io.File
 
 /**
  * FaceFusion's mark, on a light plate.
@@ -93,23 +102,58 @@ fun Caption(text: String, modifier: Modifier = Modifier) {
 }
 
 /**
- * One full-width preview pane.
+ * Pan and zoom shared by several panes.
  *
- * Full width is the point: the previous UI showed the result in whatever space was left
- * over, and a face swap cannot be judged at that size. The box reserves its space via the
- * source's own aspect ratio so the layout does not jump when the first frame arrives.
+ * Hoisted into a state object rather than remembered inside each pane, because the point is
+ * that the panes move TOGETHER: pinching the original has to zoom the swapped one to the
+ * same place, or a before/after comparison at 4x is worthless. One instance, passed to
+ * every pane, is what makes that true by construction instead of by synchronisation.
  */
+@Stable
+class ZoomState {
+    var scale by mutableStateOf(1f)
+        private set
+    var offset by mutableStateOf(Offset.Zero)
+        private set
+
+    val zoomed get() = scale > 1.01f
+
+    fun reset() {
+        scale = 1f
+        offset = Offset.Zero
+    }
+
+    /**
+     * Fold one gesture into the state, clamped so the image cannot be lost.
+     *
+     * The offset limit is (scale - 1) * size / 2 per axis: at scale 1 that is zero, so the
+     * image cannot be panned at all while it fits, and at higher scales it is exactly the
+     * amount of image hidden outside the box. Without it a fling leaves an empty pane and
+     * no way back except double-tap.
+     */
+    fun transform(zoomChange: Float, panChange: Offset, boxW: Float, boxH: Float) {
+        val next = (scale * zoomChange).coerceIn(1f, 6f)
+        val maxX = (next - 1f) * boxW / 2f
+        val maxY = (next - 1f) * boxH / 2f
+        // Pan is scaled by the zoom change too, so the point under the fingers stays put.
+        val moved = offset * (next / scale) + panChange
+        scale = next
+        offset = Offset(moved.x.coerceIn(-maxX, maxX), moved.y.coerceIn(-maxY, maxY))
+    }
+}
+
 @Composable
 fun PreviewPane(
     label: String,
     /**
-     * The box height, IDENTICAL for both panes.
+     * The box height, IDENTICAL for every pane on screen.
      *
      * Deliberately not the source's aspect ratio. Sizing each pane to its content meant a
      * portrait clip produced a box taller than the screen, so the two were never visible at
      * once -- and a before/after you have to scroll between is not a comparison. A fixed
-     * shared box plus ContentScale.Fit letterboxes the image instead, which keeps both on
-     * screen and keeps them the same size as each other.
+     * shared box plus ContentScale.Fit letterboxes the image instead, which keeps them on
+     * screen and keeps them the same size as each other. Which WAY they are stacked is the
+     * caller's decision (see PreviewPair).
      */
     height: Dp,
     bitmap: Bitmap?,
@@ -121,6 +165,11 @@ fun PreviewPane(
     actionIcon: ImageVector? = null,
     /** Drawn ON TOP of the pane, whatever it contains. Used for the model download. */
     overlay: (@Composable BoxScope.() -> Unit)? = null,
+    /**
+     * Shared pan/zoom. Pass the SAME instance to every pane that should move together;
+     * null disables gestures entirely (the output pane, which owns its own surface).
+     */
+    zoom: ZoomState? = null,
     trailing: @Composable RowScope.() -> Unit = {},
 ) {
     Column(modifier.fillMaxWidth()) {
@@ -129,7 +178,21 @@ fun PreviewPane(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Caption(label, Modifier.weight(1f))
-            trailing()
+            // Fixed HEIGHT, whatever the slot holds; width still wraps.
+            //
+            // It used to size to its content, and content alternated between an 18 dp
+            // spinner and a 28 dp IconButton -- so starting a preview changed the label
+            // row's height and shoved the trim slider and the Swap button down the screen
+            // mid-interaction. Reserving the larger height makes the swap invisible.
+            //
+            // Height only: the shift was vertical, and pinning the width too would clip the
+            // "Change" button the original pane carries.
+            Box(
+                Modifier.height(28.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, content = trailing)
+            }
         }
         Box(
             Modifier
@@ -137,13 +200,46 @@ fun PreviewPane(
                 .height(height)
                 .clip(RoundedCornerShape(14.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
-                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+                .then(
+                    // Gestures only once there is an image: with none, the pane is purely a
+                    // picker and `clickable` keeps its ripple and accessibility semantics.
+                    if (zoom != null && bitmap != null) {
+                        Modifier
+                            .pointerInput(zoom) {
+                                detectTransformGestures { _, pan, z, _ ->
+                                    zoom.transform(z, pan, size.width.toFloat(),
+                                                   size.height.toFloat())
+                                }
+                            }
+                            .pointerInput(zoom, onClick) {
+                                detectTapGestures(
+                                    // The only way back from a deep zoom, and the
+                                    // conventional one.
+                                    onDoubleTap = { zoom.reset() },
+                                    onTap = { onClick?.invoke() },
+                                )
+                            }
+                    } else if (onClick != null) {
+                        Modifier.clickable(onClick = onClick)
+                    } else {
+                        Modifier
+                    }
+                ),
             contentAlignment = Alignment.Center,
         ) {
             if (bitmap != null) {
                 Image(
                     bitmap.asImageBitmap(), label,
-                    Modifier.fillMaxSize(),
+                    Modifier
+                        .fillMaxSize()
+                        .then(
+                            if (zoom != null) Modifier.graphicsLayer {
+                                scaleX = zoom.scale
+                                scaleY = zoom.scale
+                                translationX = zoom.offset.x
+                                translationY = zoom.offset.y
+                            } else Modifier
+                        ),
                     contentScale = ContentScale.Fit,
                 )
             } else {
@@ -167,6 +263,114 @@ fun PreviewPane(
                 }
             }
             overlay?.invoke(this)
+        }
+    }
+}
+
+/**
+ * The finished video, playable in place, with a scrub bar and a Save frame button.
+ *
+ * Framework [VideoView] rather than media3/ExoPlayer. One pane does not justify a player
+ * dependency in an APK whose whole design is about not carrying libraries it can do
+ * without -- there is no OpenCV and no ONNX Runtime on device for the same reason.
+ *
+ * The scrub bar is what makes Save frame worth having: it is how you find the frame you
+ * want before you save it, and seeking a local MP4 is cheap.
+ */
+@Composable
+fun OutputPane(
+    file: File,
+    height: Dp,
+    /** Given the position in milliseconds currently on screen. */
+    onSaveFrame: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    partial: Boolean = false,
+    enabled: Boolean = true,
+) {
+    // Keyed on the file: a second run replaces the video, and stale position/duration from
+    // the previous one would put the scrub bar somewhere that no longer exists.
+    var player by remember(file) { mutableStateOf<VideoView?>(null) }
+    var durationMs by remember(file) { mutableStateOf(0) }
+    var positionMs by remember(file) { mutableStateOf(0) }
+    var playing by remember(file) { mutableStateOf(false) }
+
+    // Only while playing. VideoView has no position callback, so the bar has to be polled,
+    // and polling a paused video is pure battery.
+    LaunchedEffect(playing, file) {
+        while (playing) {
+            positionMs = player?.currentPosition ?: 0
+            delay(200)
+        }
+    }
+
+    Column(modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().padding(bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Caption(if (partial) "Output  (partial)" else "Output", Modifier.weight(1f))
+            Box(Modifier.height(28.dp), contentAlignment = Alignment.Center) {
+                TextButton(
+                    onClick = { onSaveFrame(positionMs) },
+                    enabled = enabled,
+                ) { Text("Save frame") }
+            }
+        }
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(height)
+                .clip(RoundedCornerShape(14.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) {
+            AndroidView(
+                factory = { ctx ->
+                    VideoView(ctx).apply {
+                        setVideoPath(file.absolutePath)
+                        setOnPreparedListener { mp ->
+                            durationMs = mp.duration
+                            // Seek off zero so the pane shows the first frame instead of
+                            // black while paused.
+                            seekTo(1)
+                        }
+                        setOnCompletionListener { playing = false }
+                        player = this
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(
+                onClick = {
+                    val v = player ?: return@TextButton
+                    if (playing) v.pause() else v.start()
+                    playing = !playing
+                },
+                enabled = enabled,
+            ) { Text(if (playing) "Pause" else "Play") }
+
+            Slider(
+                value = positionMs.toFloat().coerceIn(0f, durationMs.toFloat()),
+                onValueChange = {
+                    positionMs = it.toInt()
+                    player?.seekTo(it.toInt())
+                },
+                valueRange = 0f..durationMs.coerceAtLeast(1).toFloat(),
+                enabled = enabled && durationMs > 0,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                "%d.%02ds".format(positionMs / 1000, (positionMs % 1000) / 10),
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 6.dp),
+            )
         }
     }
 }

@@ -8,9 +8,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -26,7 +26,9 @@ import com.facefusion.mobile.FaceEnhancerCard
 import com.facefusion.mobile.FaceMaskerCard
 import com.facefusion.mobile.FaceSwapperCard
 import com.facefusion.mobile.ModelDownload
+import com.facefusion.mobile.OptionSegments
 import com.facefusion.mobile.SwapOptions
+import java.io.File
 import kotlin.math.roundToInt
 
 /** Everything the two preview panes need to draw themselves. */
@@ -40,6 +42,15 @@ data class PreviewUi(
     /** "No face detected", or an error. Shown in place of the image. */
     val note: String? = null,
 )
+
+/**
+ * Which trim handle the user is dragging.
+ *
+ * The previews follow the handle under the finger. Before this, both panes always showed
+ * the START frame, so dragging the end handle appeared to do nothing at all -- the
+ * "slider doesn't move the preview" report was this, not a stale pane.
+ */
+enum class TrimEdge { Start, End }
 
 /** Progress of an actual swap run. */
 data class RunUi(
@@ -59,10 +70,13 @@ fun SwapScreen(
     durationMs: Long,
     trimStartMs: Float,
     trimEndMs: Float,
-    onTrimChange: (Float, Float) -> Unit,
+    onTrimChange: (Float, Float, TrimEdge) -> Unit,
+    /** width / height of the target. Below 1 the panes go side by side. */
+    targetAspect: Float,
+    /** The target video's own rate, and the cap on what can be chosen. */
+    inputFps: Int,
     fmt: (Float) -> String,
     preview: PreviewUi,
-    onRefreshPreview: () -> Unit,
     run: RunUi,
     status: String,
     log: String,
@@ -75,6 +89,13 @@ fun SwapScreen(
     advancedOpen: Boolean,
     onToggleAdvanced: () -> Unit,
     hasOutput: Boolean,
+    /** The finished video, for the output pane. Null for an image result. */
+    outputFile: File?,
+    /** The finished still, when the target was an image. */
+    outputImage: Bitmap?,
+    /** True when the run was cancelled, so the output is only as long as it got. */
+    outputPartial: Boolean,
+    onSaveFrame: (Int) -> Unit,
     saved: Boolean,
     savedPath: String?,
     onPickSource: () -> Unit,
@@ -94,7 +115,13 @@ fun SwapScreen(
     // controls around them. The reserve is the wordmark, source button, captions, trim,
     // Swap and the nav bar; whatever is left is split in two.
     val screenH = LocalConfiguration.current.screenHeightDp
-    val paneHeight = ((screenH - 470) / 2).coerceIn(140, 320).dp
+    // Side-by-side panes are half as wide, so they can afford to be taller: the pair costs
+    // ONE pane's height instead of two, which is the whole reason portrait gets this layout.
+    val paneHeight = if (targetAspect < 1f) (screenH - 400).coerceIn(200, 460).dp
+                     else ((screenH - 470) / 2).coerceIn(140, 320).dp
+
+    // ONE instance for every pane, which is what makes them zoom together (item 4).
+    val zoom = remember { ZoomState() }
     Column(
         modifier
             .fillMaxSize()
@@ -121,64 +148,72 @@ fun SwapScreen(
         }
         // ---------------------------------------------------------------- previews
         //
-        // Both full width and stacked, so the pair reads as a before/after of ONE frame.
-        // The originals used to be a 56 dp thumbnail and a leftover-space preview, at which
-        // size a face swap cannot actually be judged.
-        PreviewPane(
-            label = if (preview.timeLabel.isEmpty()) "Original" else "Original  ${preview.timeLabel}",
-            height = paneHeight,
-            bitmap = preview.original,
-            placeholder = when {
-                run.preparing -> "Reading video..."
-                hasTarget -> "Seeking..."
-                else -> "Add a target video"
-            },
-            // The pane IS the picker. A separate full-width button said the same thing
-            // twice and cost a row of height the wordmark needed.
-            onClick = if (idle) onPickTarget else null,
-            actionIcon = if (hasTarget) null else Icons.Default.Add,
-        ) {
-            if (hasTarget)
-                TextButton(onPickTarget, enabled = idle) { Text("Change") }
-        }
+        // Read as a before/after of ONE frame, so the two are always the same size as each
+        // other. WHICH WAY they stack follows the footage: a portrait clip in two stacked
+        // full-width boxes is mostly empty grey, because ContentScale.Fit letterboxes a
+        // 9:16 image into a 16:9 box and throws away about two thirds of the width. Side by
+        // side, each pane is half as wide and the image fills it.
+        val portrait = targetAspect < 1f
+        val panes: @Composable (Modifier) -> Unit = { paneModifier ->
+            PreviewPane(
+                label = if (preview.timeLabel.isEmpty()) "Original"
+                        else "Original  ${preview.timeLabel}",
+                height = paneHeight,
+                bitmap = preview.original,
+                placeholder = when {
+                    run.preparing -> "Reading video..."
+                    hasTarget -> "Seeking..."
+                    else -> "Add a target"
+                },
+                modifier = paneModifier,
+                // The pane IS the picker. A separate full-width button said the same thing
+                // twice and cost a row of height the wordmark needed.
+                onClick = if (idle) onPickTarget else null,
+                actionIcon = if (hasTarget) null else Icons.Default.Add,
+                zoom = zoom,
+            ) {
+                if (hasTarget) TextButton(onPickTarget, enabled = idle) { Text("Change") }
+            }
 
-        PreviewPane(
-            label = "Swapped",
-            height = paneHeight,
-            bitmap = preview.swapped,
-            placeholder = when {
-                modelsMissing -> ""
-                preview.note != null -> preview.note
-                preview.busy && !preview.warm -> "Loading models, this takes a few seconds..."
-                preview.busy -> "Swapping this frame..."
-                !hasSource || !hasTarget -> "Pick a source face and a target video"
-                !preview.warm -> "Tap refresh to preview this frame"
-                else -> "Tap refresh"
-            },
-            // The download lives here rather than in a bar of its own: this is the pane
-            // that cannot draw anything without the models, so it is where their absence
-            // is already visible.
-            overlay = if (modelsMissing) { { DownloadOverlay(onDownload) } } else null,
-        ) {
-            if (preview.busy) {
-                CircularProgressIndicator(
-                    Modifier.size(18.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                IconButton(
-                    onClick = onRefreshPreview,
-                    enabled = idle && hasSource && hasTarget && !modelsMissing,
-                    modifier = Modifier.size(28.dp),
-                ) {
-                    Icon(
-                        Icons.Default.Refresh, "Refresh preview",
+            PreviewPane(
+                label = "Swapped",
+                height = paneHeight,
+                bitmap = preview.swapped,
+                placeholder = when {
+                    modelsMissing -> ""
+                    preview.note != null -> preview.note
+                    preview.busy && !preview.warm -> "Loading models, this takes a few seconds..."
+                    preview.busy -> "Swapping this frame..."
+                    !hasSource || !hasTarget -> "Pick a source face and a target"
+                    // No "tap refresh" any more: the preview warms itself as soon as both
+                    // inputs exist, so this is a transient state rather than an instruction.
+                    else -> "Preparing preview..."
+                },
+                modifier = paneModifier,
+                // The download lives here rather than in a bar of its own: this is the pane
+                // that cannot draw anything without the models, so it is where their absence
+                // is already visible.
+                overlay = if (modelsMissing) { { DownloadOverlay(onDownload) } } else null,
+                zoom = zoom,
+            ) {
+                // Spinner only. The refresh button is gone -- see item 1 -- and the fixed
+                // slot height in PreviewPane keeps this from moving anything below it.
+                if (preview.busy) {
+                    CircularProgressIndicator(
                         Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
+        }
+
+        if (portrait) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                panes(Modifier.weight(1f))
+            }
+        } else {
+            panes(Modifier)
         }
 
         // ---------------------------------------------------------------- trim
@@ -195,18 +230,44 @@ fun SwapScreen(
                 RangeSlider(
                     value = trimStartMs..trimEndMs,
                     onValueChange = { r ->
+                        // Which handle moved: RangeSlider reports the whole range, so the
+                        // edge has to be inferred by comparing against what it was. The
+                        // previews then follow the handle under the finger rather than
+                        // always showing the start frame.
+                        val edge = if (r.start != trimStartMs) TrimEdge.Start else TrimEdge.End
                         // Keep at least a third of a second, so the encoder always gets a frame.
-                        onTrimChange(r.start, maxOf(r.endInclusive, r.start + 333f))
+                        onTrimChange(r.start, maxOf(r.endInclusive, r.start + 333f), edge)
                     },
                     valueRange = 0f..durationMs.toFloat(),
                     enabled = idle,
                 )
-                val estFrames = ((trimEndMs - trimStartMs) / 1000f * 30f).roundToInt()
+                // The REAL rate, not a hardcoded 30. The estimate was wrong on every
+                // clip that was not 30 fps, and it is the number the ETA is read against.
+                val effFps = if (opts.outputFps in 1..inputFps) opts.outputFps else inputFps
+                val estFrames = ((trimEndMs - trimStartMs) / 1000f * effFps).roundToInt()
                 Text(
-                    "$estFrames frames of ${fmt(durationMs.toFloat())}",
+                    "$estFrames frames of ${fmt(durationMs.toFloat())}   ${effFps} fps",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+
+                // Frame rate. Only rates at or below the input's are offered: a higher one
+                // would duplicate frames, and each duplicate costs a full swap to produce
+                // nothing new. Dropping frames is the only direction that saves anything.
+                val rates = listOf(0 to "Same ($inputFps)") +
+                    listOf(24, 30, 60).filter { it < inputFps }.map { it to "$it" }
+                if (rates.size > 1) {
+                    Spacer(Modifier.height(6.dp))
+                    OptionSegments(
+                        "Frame rate",
+                        rates,
+                        if (opts.outputFps in 1..inputFps) opts.outputFps else 0,
+                        { onOptsChange(opts.copy(outputFps = it)) },
+                        hint = if (opts.outputFps == 0 || opts.outputFps >= inputFps)
+                                   "every frame of the source"
+                               else "drops frames before the swap, so it is faster too",
+                    )
+                }
             }
         }
 
@@ -248,6 +309,29 @@ fun SwapScreen(
             if (status.startsWith("Failed")) {
                 TextButton(onShareLog) { Text("Share bug report") }
             }
+        }
+
+        // ---------------------------------------------------------------- output
+        //
+        // The result was previously invisible in the app: Save and Share, and no way to see
+        // what you were about to save. A video gets a player with a scrub bar; an image
+        // result is a still, which is all there is to show.
+        if (outputImage != null) {
+            PreviewPane(
+                label = if (outputPartial) "Output  (partial)" else "Output",
+                height = paneHeight,
+                bitmap = outputImage,
+                placeholder = "",
+                zoom = zoom,
+            )
+        } else if (outputFile != null) {
+            OutputPane(
+                file = outputFile,
+                height = paneHeight,
+                onSaveFrame = onSaveFrame,
+                partial = outputPartial,
+                enabled = idle,
+            )
         }
 
         if (hasOutput) {

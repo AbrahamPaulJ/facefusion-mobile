@@ -23,6 +23,15 @@ import java.nio.ByteBuffer
  * so the result starts where the trim does.
  */
 class VideoSwapper(
+    /**
+     * Frames per second to WRITE. 0 keeps the input's rate.
+     *
+     * Lowering it drops frames rather than re-timing them: the encoder is told the new rate
+     * and each decoded frame is kept only if it lands in a slot that is still empty. That
+     * makes a 30 -> 24 conversion cost 20% LESS NPU time, which is most of the point --
+     * a swap is ~19 ms of NPU per frame, so the frames not kept are the frames not swapped.
+     */
+    private val outputFps: Int = 0,
     private val trimStartUs: Long = 0L,
     private val trimEndUs: Long = Long.MAX_VALUE,
     private val onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
@@ -53,10 +62,15 @@ class VideoSwapper(
         val vf = format ?: error("no video track in $inputPath")
         val width = vf.getInteger(MediaFormat.KEY_WIDTH)
         val height = vf.getInteger(MediaFormat.KEY_HEIGHT)
-        val fps = if (vf.containsKey(MediaFormat.KEY_FRAME_RATE)) vf.getInteger(MediaFormat.KEY_FRAME_RATE) else 30
+        val inFps = if (vf.containsKey(MediaFormat.KEY_FRAME_RATE))
+            vf.getInteger(MediaFormat.KEY_FRAME_RATE) else 30
+        // Never above the input: duplicating frames would cost a full swap each and add
+        // nothing. 0 (or anything silly) means "keep the input rate".
+        val fps = if (outputFps in 1..inFps) outputFps else inFps
         val spanUs = (if (trimEndUs == Long.MAX_VALUE) durationUs(vf) else trimEndUs) - trimStartUs
         val expected = ((spanUs / 1_000_000.0) * fps).toInt().coerceAtLeast(1)
-        onLog("${width}x$height @ ${fps}fps, ~$expected frames")
+        onLog("${width}x$height @ ${inFps}fps" +
+              (if (fps != inFps) " -> ${fps}fps" else "") + ", ~$expected frames")
 
         extractor.selectTrack(videoTrack)
         if (trimStartUs > 0) extractor.seekTo(trimStartUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
@@ -112,19 +126,30 @@ class VideoSwapper(
         var sawInputEOS = false
         var sawDecodeEOS = false
         var swapped = 0
+        var cancelled = false
+        // The last output slot already written, for rate conversion. -1 so slot 0 is free.
+        var lastSlot = -1L
 
         while (!sawDecodeEOS) {
             // Checked before the work, not after, so pressing Cancel stops the next frame
             // rather than finishing it first.
             if (isCancelled()) {
-                onLog("cancelled after $swapped frames")
-                decoder.stop(); decoder.release()
-                encoder.stop(); encoder.release()
-                extractor.release()
-                if (muxing) runCatching { muxer.stop() }
-                muxer.release()
-                File(outputPath).delete()
-                error("cancelled")
+                // KEEP what has already been swapped.
+                //
+                // This used to delete the output and throw, which threw away every frame
+                // the NPU had produced -- on a long clip that is minutes of work discarded
+                // because the user stopped a run that was already mostly useful.
+                //
+                // Instead, stop feeding the decoder and fall through to the SAME
+                // finalisation an ordinary run uses: signal EOS, drain the encoder, copy
+                // the audio, stop the muxer. The only thing cancelling changes is where the
+                // video ends.
+                onLog("cancelled after $swapped frames -- keeping them")
+                cancelled = true
+                signalEncoderEOS(encoder)
+                sawInputEOS = true
+                sawDecodeEOS = true
+                break
             }
             if (!sawInputEOS) {
                 val inIx = decoder.dequeueInputBuffer(10_000)
@@ -144,7 +169,15 @@ class VideoSwapper(
             if (outIx >= 0) {
                 val pts = info.presentationTimeUs
                 // frames between the sync point and the trim mark are decoded but dropped
-                val inRange = info.size > 0 && pts >= trimStartUs && pts <= trimEndUs
+                var inRange = info.size > 0 && pts >= trimStartUs && pts <= trimEndUs
+                // Rate conversion, as decimation: which output slot would this frame fill?
+                // If that slot is taken, the frame is surplus and is dropped BEFORE the
+                // swap, so a lower rate genuinely costs less NPU time rather than just
+                // writing fewer frames.
+                if (inRange && fps != inFps) {
+                    val slot = ((pts - trimStartUs) * fps) / 1_000_000L
+                    if (slot <= lastSlot) inRange = false else lastSlot = slot
+                }
                 if (inRange) {
                     val image = decoder.getOutputImage(outIx)
                     if (image != null) {
@@ -167,6 +200,18 @@ class VideoSwapper(
         var flushed = false
         while (!flushed) {
             muxing = drainEncoder(encoder, muxer, muxing, addTracks = addTracks) { flushed = true }
+        }
+
+        // Cancelled before a single frame reached the encoder: the muxer never had a track
+        // added, and an MP4 with no tracks is not a file anything can open. That is the one
+        // case where there is genuinely nothing to keep.
+        if (!muxing) {
+            decoder.stop(); decoder.release()
+            encoder.stop(); encoder.release()
+            extractor.release()
+            muxer.release()
+            File(outputPath).delete()
+            error(if (cancelled) "cancelled before any frame was written" else "no frames encoded")
         }
 
         // Same principle as addTracks above, one stage later: by this point every frame has
@@ -206,7 +251,8 @@ class VideoSwapper(
         encoder.stop(); encoder.release()
         muxer.stop(); muxer.release()
         extractor.release()
-        onLog("wrote ${File(outputPath).length() / 1024} KB, $swapped frames")
+        onLog((if (cancelled) "partial: " else "") +
+              "wrote ${File(outputPath).length() / 1024} KB, $swapped frames")
         outputPath
     }
 

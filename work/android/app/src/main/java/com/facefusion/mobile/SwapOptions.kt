@@ -63,6 +63,16 @@ data class SwapOptions(
      * default is 80.
      */
     val enhanceBlend: Float = 0.8f,
+
+    /**
+     * Output frame rate. **0 means "same as the input"**, which is the default and the only
+     * value that cannot be wrong -- every other choice is a resample.
+     *
+     * The UI never offers a rate above the input's: raising it would duplicate frames and
+     * cost NPU time producing nothing new, so the cap is structural rather than validated
+     * after the fact.
+     */
+    val outputFps: Int = 0,
 ) {
     val pixelBoostLabel get() = "${256 * pixelBoost}x${256 * pixelBoost}"
 
@@ -81,6 +91,7 @@ data class SwapOptions(
             .putBoolean(K_LARGEST, largestOnly)
             .putBoolean(K_ENHANCE, faceEnhance)
             .putFloat(K_ENHANCE_BLEND, enhanceBlend)
+            .putInt(K_FPS, outputFps)
             .apply()
     }
 
@@ -96,6 +107,7 @@ data class SwapOptions(
         private const val K_LARGEST = "largest_only"
         private const val K_ENHANCE = "face_enhance"
         private const val K_ENHANCE_BLEND = "face_enhance_blend"
+        private const val K_FPS = "output_fps"
 
         private fun prefs(context: Context) =
             context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -120,6 +132,7 @@ data class SwapOptions(
                 largestOnly = p.getBoolean(K_LARGEST, d.largestOnly),
                 faceEnhance = p.getBoolean(K_ENHANCE, d.faceEnhance),
                 enhanceBlend = p.getFloat(K_ENHANCE_BLEND, d.enhanceBlend),
+                outputFps = p.getInt(K_FPS, d.outputFps),
             )
         }
     }

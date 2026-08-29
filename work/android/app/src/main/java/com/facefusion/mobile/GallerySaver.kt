@@ -2,6 +2,7 @@ package com.facefusion.mobile
 
 import android.content.ContentValues
 import android.content.Context
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -42,6 +43,43 @@ object GallerySaver {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 values.clear()
                 values.put(MediaStore.Video.Media.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+            }
+            uri
+        }
+
+    /**
+     * Copy a still into the shared Pictures collection.
+     *
+     * Same IS_PENDING dance as [save] and for the same reason: without it a gallery can
+     * index a zero-length file and cache it as broken, which no later write repairs.
+     *
+     * PNG, not JPEG. This saves either an image swap or a frame lifted out of a finished
+     * video, and both have already been through one lossy encode -- re-encoding a swapped
+     * face a second time is where the artefacts everyone notices come from.
+     */
+    fun saveImage(context: Context, bitmap: Bitmap, displayName: String): Result<Uri> =
+        runCatching {
+            val resolver = context.contentResolver
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.Images.Media.RELATIVE_PATH,
+                        Environment.DIRECTORY_PICTURES + "/FaceFusion")
+                    put(MediaStore.Images.Media.IS_PENDING, 1)
+                }
+            }
+            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                ?: error("MediaStore refused the insert")
+
+            resolver.openOutputStream(uri).use { out ->
+                if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, out!!))
+                    error("PNG encode failed")
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                values.clear()
+                values.put(MediaStore.Images.Media.IS_PENDING, 0)
                 resolver.update(uri, values, null, null)
             }
             uri
