@@ -42,7 +42,8 @@ The app measures your chip at startup and downloads the matching build:
 | `v68` | Snapdragon 888 and older, 8 Gen 1 (v69), or parts with under 8 MB VTCM |
 | `v73` | 8 Gen 2 (v73), 8 Gen 3 (v75), and v79 parts other than the SM8750 |
 | `v79` | Snapdragon 8 Elite (SM8750) |
-| `v81` | Snapdragon 8 Elite Gen 5 and newer |
+
+Snapdragon 8 Elite Gen 5 (v81) parts run the `v73` build for now — see the roadmap below.
 
 Devices without a Qualcomm NPU are not supported — there is no CPU fallback.
 
@@ -53,6 +54,22 @@ not need to download anything to talk to your chip.
 > the same code path but have not yet been exercised on real hardware of those
 > generations. If you try one, **Settings → Share bug report** is the fastest way to tell
 > me what happened.
+
+## Roadmap
+
+**A native v81 build, for Snapdragon 8 Elite Gen 5.** v81 phones (S26 Ultra) currently run
+the `v73` build, which is two generations old on that silicon and is why owners have
+reported around 9 fps. The app already prefers a `v81` build and falls back cleanly when
+one is not published, so this is conversion work rather than app work: every graph has to
+be rebuilt against the v81 config and checked for accuracy the same way the others were.
+The face enhancer is already converted for v81; the rest are not.
+
+**CPU support, for phones without a Qualcomm NPU.** Today the answer is simply no — every
+graph is a QNN context binary compiled for a specific Hexagon architecture, and there is no
+second path through the pipeline. Adding one means a whole separate runtime (ONNX Runtime or
+a hand-written path) alongside the geometry that already exists in C++, and it would be far
+slower than 18 ms a frame. It is the most requested thing that does not exist; it is also
+the largest single piece of work on this list, so no promises about when.
 
 ## Install
 
