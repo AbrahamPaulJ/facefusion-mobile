@@ -76,7 +76,7 @@ the largest single piece of work on this list, so no promises about when.
 1. Download the APK (~46 MB) from
    [Releases](https://github.com/AbrahamPaulJ/facefusion-mobile/releases).
 2. Install it and open the app.
-3. Tap **Download models**. The app fetches the ~275 MB set for your chip from
+3. Tap **Download models**. The app fetches the ~300 MB set for your chip from
    [Hugging Face](https://huggingface.co/AbrahamPJ/facefusion-mobile-models-0.1.0).
 
 The download is resumable and every file is checksum-verified, so an interrupted transfer

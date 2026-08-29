@@ -103,7 +103,7 @@ with no face keeps the original rather than shortening the clip and desyncing th
 Measured: 432 frames at 478x850 through `upload` took **5.7 s** on an SM8750, 13 ms a frame.
 The upload streams to disk as it arrives and the result streams back off disk -- an earlier
 version held the request body, a copy of it and the finished file in the heap at once,
-alongside ~275 MB of context binaries, and the process was killed mid-job. From the client
+alongside ~300 MB of context binaries, and the process was killed mid-job. From the client
 that is indistinguishable from the server hanging up.
 
 ## Notes
