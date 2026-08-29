@@ -32,12 +32,22 @@ val keystoreProps = Properties().apply {
 val hasContentGate = file("src/main/java/com/facefusion/mobile/ContentGate.kt").exists()
 val variantTag = if (hasContentGate) "" else "-dev"
 
+// `dev` is a SEPARATE APP, not a differently-signed one.  Android identifies an installed
+// app by its applicationId; a build that keeps this one and changes only the key cannot be
+// installed beside the gated build, it can only refuse to install over it
+// (INSTALL_FAILED_UPDATE_INCOMPATIBLE).  A distinct id is what lets both sit on one phone,
+// and it also gives dev its own private files dir -- so the two can never share, or
+// corrupt, each other's downloaded context binaries.  The price is that dev downloads its
+// own ~300 MB tier.
+val idSuffix = if (hasContentGate) "" else ".dev"
+val appLabel = if (hasContentGate) "FaceFusion" else "FaceFusion Dev"
+
 android {
     namespace = "com.facefusion.mobile"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.facefusion.mobile"
+        applicationId = "com.facefusion.mobile$idSuffix"
         minSdk = 31                 // SM8750 / HTP v79 is far above this
         targetSdk = 35
         // ⚠ 0.1.1 IS SIGNED WITH A DIFFERENT KEY THAN 0.1.0.  The 0.1.0 keystore was lost,
@@ -48,6 +58,7 @@ android {
         versionCode = 3
         versionName = "0.2.0$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
+        manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }
         externalNativeBuild { cmake { arguments += listOf("-DANDROID_STL=c++_shared") } }
     }
