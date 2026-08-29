@@ -258,6 +258,61 @@ Java_com_facefusion_mobile_NativePipe_argbToBgr(JNIEnv* env, jclass, jintArray j
 }
 
 /**
+ * Rotate a packed BGR frame by 0/90/180/270 degrees clockwise.
+ *
+ * A portrait video is stored as LANDSCAPE frames plus a rotation flag in the container.
+ * MediaMetadataRetriever applies that flag, which is why the preview looks upright, but
+ * MediaCodec does not -- so the swap path was detecting faces on their side and, when it
+ * found none, producing a sideways video with no flag set either.
+ *
+ * Native because it is 2.95 M pixels per frame at 720p: the same reason yuvToBgr is here.
+ * A pure index remap, so it is exact -- no resampling and nothing to verify numerically.
+ * 90 and 270 SWAP the dimensions; the caller must size everything downstream to match.
+ */
+JNIEXPORT jbyteArray JNICALL
+Java_com_facefusion_mobile_NativePipe_rotateBgr(JNIEnv* env, jclass, jbyteArray jBgr,
+                                                jint w, jint h, jint degrees) {
+  const jsize n = (jsize)w * h * 3;
+  if (env->GetArrayLength(jBgr) != n) {
+    g_err = "rotateBgr: buffer is not w*h*3 bytes";
+    return nullptr;
+  }
+  std::vector<uint8_t> src((size_t)n);
+  env->GetByteArrayRegion(jBgr, 0, n, (jbyte*)src.data());
+
+  int deg = ((degrees % 360) + 360) % 360;
+  if (deg == 0) {
+    jbyteArray out = env->NewByteArray(n);
+    env->SetByteArrayRegion(out, 0, n, (const jbyte*)src.data());
+    return out;
+  }
+
+  const int dw = (deg == 180) ? w : h;      // destination width
+  const int dh = (deg == 180) ? h : w;      // destination height
+  std::vector<uint8_t> dst((size_t)n);
+
+  for (int y = 0; y < h; ++y) {
+    for (int x = 0; x < w; ++x) {
+      int dx, dy;
+      switch (deg) {
+        case 90:  dx = dw - 1 - y; dy = x;             break;   // clockwise
+        case 180: dx = w - 1 - x;  dy = h - 1 - y;     break;
+        default:  dx = y;          dy = dh - 1 - x;    break;   // 270
+      }
+      const uint8_t* sp = &src[((size_t)y * w + x) * 3];
+      uint8_t* dp = &dst[((size_t)dy * dw + dx) * 3];
+      dp[0] = sp[0];
+      dp[1] = sp[1];
+      dp[2] = sp[2];
+    }
+  }
+
+  jbyteArray out = env->NewByteArray(n);
+  env->SetByteArrayRegion(out, 0, n, (const jbyte*)dst.data());
+  return out;
+}
+
+/**
  * YUV_420_888 planes -> packed BGR.  MediaCodec hands back arbitrary row/pixel strides
  * and semi-planar (NV12/NV21) chroma is expressed as pixelStride 2, so both strides have
  * to be honoured -- assuming tightly packed I420 gives a green-and-magenta image.

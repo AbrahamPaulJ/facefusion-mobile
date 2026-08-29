@@ -3,6 +3,7 @@ package com.facefusion.mobile
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaExtractor
+import android.media.MediaMetadataRetriever
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import java.io.File
@@ -60,8 +61,44 @@ class VideoSwapper(
             else if (mime.startsWith("audio/") && audioTrack < 0) audioTrack = i
         }
         val vf = format ?: error("no video track in $inputPath")
+        // STORED dimensions. For a portrait clip these are landscape, with the upright
+        // orientation carried separately as a rotation flag.
         val width = vf.getInteger(MediaFormat.KEY_WIDTH)
         val height = vf.getInteger(MediaFormat.KEY_HEIGHT)
+
+        /*
+         * The container's rotation, which MediaCodec does NOT apply.
+         *
+         * A phone records portrait as LANDSCAPE frames plus a 90-degree flag. Before this,
+         * nothing read the flag: frames reached yoloface on their side, which does not
+         * detect a rotated face (the same failure as the EXIF bug on the source path), and
+         * the output was written landscape with no flag either, so it also PLAYED sideways.
+         *
+         * It was invisible in the preview because MediaMetadataRetriever applies the flag
+         * and MediaCodec does not -- the preview looked upright and only the result was
+         * wrong, which is the worst way for this to present.
+         *
+         * The frames are rotated upright BEFORE detection rather than tagging the output
+         * with an orientation hint, because a hint would fix playback and leave the
+         * detection failure -- and detection is the part that makes the feature not work.
+         *
+         * KEY_ROTATION is not always present on an extractor track format; MMR's metadata
+         * is the more reliable source, so it is the fallback.
+         */
+        val rotation = when {
+            vf.containsKey(MediaFormat.KEY_ROTATION) -> vf.getInteger(MediaFormat.KEY_ROTATION)
+            else -> runCatching {
+                val r = MediaMetadataRetriever().apply { setDataSource(inputPath) }
+                val d = r.extractMetadata(
+                    MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+                r.release()
+                d
+            }.getOrDefault(0)
+        }.let { ((it % 360) + 360) % 360 }
+
+        // What everything downstream sees: 90 and 270 swap the axes.
+        val outW = if (rotation == 90 || rotation == 270) height else width
+        val outH = if (rotation == 90 || rotation == 270) width else height
         val inFps = if (vf.containsKey(MediaFormat.KEY_FRAME_RATE))
             vf.getInteger(MediaFormat.KEY_FRAME_RATE) else 30
         // Never above the input: duplicating frames would cost a full swap each and add
@@ -70,6 +107,7 @@ class VideoSwapper(
         val spanUs = (if (trimEndUs == Long.MAX_VALUE) durationUs(vf) else trimEndUs) - trimStartUs
         val expected = ((spanUs / 1_000_000.0) * fps).toInt().coerceAtLeast(1)
         onLog("${width}x$height @ ${inFps}fps" +
+              (if (rotation != 0) " rot ${rotation} -> ${outW}x$outH" else "") +
               (if (fps != inFps) " -> ${fps}fps" else "") + ", ~$expected frames")
 
         extractor.selectTrack(videoTrack)
@@ -81,10 +119,12 @@ class VideoSwapper(
         decoder.configure(vf, null, null, 0)
         decoder.start()
 
-        val encFormat = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
+        // The encoder is sized to the UPRIGHT frame, so the output needs no orientation
+        // hint of its own -- the rotation is baked into the pixels.
+        val encFormat = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, outW, outH).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT,
                 MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
-            setInteger(MediaFormat.KEY_BIT_RATE, (width * height * fps * 0.25).toInt())
+            setInteger(MediaFormat.KEY_BIT_RATE, (outW * outH * fps * 0.25).toInt())
             setInteger(MediaFormat.KEY_FRAME_RATE, fps)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
         }
@@ -181,12 +221,16 @@ class VideoSwapper(
                 if (inRange) {
                     val image = decoder.getOutputImage(outIx)
                     if (image != null) {
-                        val bgr = imageToBgr(image, width, height)
+                        // Upright FIRST: everything after this -- detection, the swap, the
+                        // preview, the encoder -- works on the frame the viewer will see.
+                        val decoded = imageToBgr(image, width, height)
                         image.close()
-                        val faces = NativePipe.processFrame(bgr, width, height)
+                        val bgr = if (rotation == 0) decoded
+                                  else NativePipe.rotateBgr(decoded, width, height, rotation)
+                        val faces = NativePipe.processFrame(bgr, outW, outH)
                         if (faces < 0) error("native: ${NativePipe.lastError()}")
-                        onFrame(bgr, width, height)
-                        feedEncoder(encoder, bgr, width, height, pts - trimStartUs)
+                        onFrame(bgr, outW, outH)
+                        feedEncoder(encoder, bgr, outW, outH, pts - trimStartUs)
                         swapped++
                         onProgress(swapped, expected)
                     }

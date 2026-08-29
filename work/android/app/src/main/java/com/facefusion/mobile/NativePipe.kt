@@ -118,6 +118,14 @@ object NativePipe {
         v: ByteArray, vRow: Int, vPix: Int,
         w: Int, h: Int,
     ): ByteArray
+    /**
+     * Rotate a packed BGR frame clockwise by 0/90/180/270.
+     *
+     * For the container's rotation flag, which MediaCodec does NOT apply. 90 and 270 swap
+     * the dimensions -- the caller sizes the encoder and everything downstream to match.
+     */
+    @JvmStatic external fun rotateBgr(bgr: ByteArray, w: Int, h: Int, degrees: Int): ByteArray
+
     @JvmStatic external fun bgrToI420(bgr: ByteArray, w: Int, h: Int): ByteArray
     /**
      * Write a BGR frame into the encoder's own input planes, honouring its strides.
