@@ -66,6 +66,15 @@ struct Config {
   bool swapDenorm = true;
   bool swapperIsHyperswap = true;
 
+  // --face-enhancer, gpen_bfr_256.  OFF by default and deliberately so: it is another
+  // 8.57 GMAC per face on top of the swapper's 31.93, and its context binary is a separate
+  // download that most installs will not have.
+  bool faceEnhance = false;
+
+  // --face-enhancer-blend.  Upstream is 0-100; this is the same number as a fraction.
+  // 1 = fully enhanced, 0 = the swapper's output untouched.  80 is upstream's default.
+  float faceEnhancerBlend = 0.8f;
+
   // content_analyser.py:detect_with_nsfw_2 -- `logit[0] - logit[1] > 0.25` flags a frame.
   float nsfwThreshold = 0.25f;
 };
@@ -114,6 +123,12 @@ class Pipeline {
   // here: the correction is an unmeasured constant and does not belong in the runner.
   bool contentGateIsQuantised() const { return nsfwQuantised_; }
 
+  // Whether gpen_<tier>.bin was found at init.  The UI offers the enhancer switch
+  // only when this is true -- the same rule inswapper follows, and for the same
+  // reason: offering a model that is not on the device turns a missing file into a
+  // failed run at the worst possible moment.
+  bool hasEnhancer() const;
+
   // Every face in one frame, fully analysed (detector + landmarker + recogniser).
   std::vector<Face> analyse(const ffcv::Image& frame);
 
@@ -126,6 +141,9 @@ class Pipeline {
   const std::string& error() const { return err_; }
   // Cumulative per-stage milliseconds, for the CLI's report.
   double msDetect = 0, msLandmark = 0, msRecognise = 0, msSwap = 0, msGeom = 0;
+  // Separate from msSwap on purpose: the enhancer is the one stage a user can turn
+  // off, so its cost has to be attributable rather than folded into the swapper's.
+  double msEnhance = 0;
   int framesDone = 0, facesDone = 0;
 
  private:

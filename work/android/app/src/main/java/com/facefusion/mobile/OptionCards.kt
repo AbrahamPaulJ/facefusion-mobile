@@ -226,3 +226,50 @@ fun FaceDetectorCard(
              modifier = Modifier.padding(top = 8.dp))
     }
 }
+
+/**
+ * `--face-enhancer`, gpen_bfr_256.
+ *
+ * Composed ONLY when the context binary is on the device -- same rule the inswapper choice
+ * follows. A switch for a model that is not there turns a missing file into a failed run at
+ * the one moment the user is least able to do anything about it.
+ *
+ * Off by default: it is 8.57 GMAC per face on top of the swapper's 31.93, and on video that
+ * is a cost the user should opt into rather than discover.
+ */
+@Composable
+fun FaceEnhancerCard(
+    opts: SwapOptions,
+    onChange: (SwapOptions) -> Unit,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    OptionCard(
+        "Face Enhancer",
+        if (opts.faceEnhance) "gpen_bfr_256   blend %.2f".format(opts.enhanceBlend) else "off",
+        expanded, onToggle,
+    ) {
+        OptionSegments(
+            "Enhancer",
+            listOf(false to "Off", true to "On"),
+            opts.faceEnhance,
+            { onChange(opts.copy(faceEnhance = it)) },
+            hint = "restores detail the swapper loses — about +4 ms per face",
+        )
+        if (opts.faceEnhance) {
+            OptionSlider(
+                "Blend", opts.enhanceBlend, { onChange(opts.copy(enhanceBlend = it)) },
+                hint = when {
+                    opts.enhanceBlend >= 0.95f -> "the enhancer's output alone"
+                    opts.enhanceBlend <= 0.05f -> "no effect — the swap is left untouched"
+                    else -> "mixed with the unenhanced swap (upstream default 0.80)"
+                },
+            )
+            // It runs on the swapper's own crop: gpen_bfr_256 and hyperswap_1a_256 declare
+            // the same template and size, so no second alignment is involved.
+            Text("runs on the swapped face at ${opts.pixelBoostLabel}, before it is pasted back",
+                 style = MaterialTheme.typography.bodySmall, fontSize = 11.sp,
+                 modifier = Modifier.padding(top = 8.dp))
+        }
+    }
+}

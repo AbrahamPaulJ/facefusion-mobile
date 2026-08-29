@@ -45,6 +45,24 @@ data class SwapOptions(
 
     /** `--face-selector-mode`: false = `many`, true = `one` (largest face only). */
     val largestOnly: Boolean = false,
+
+    /**
+     * `--face-enhancer`, gpen_bfr_256. Off by default.
+     *
+     * Costs 8.57 GMAC per face on top of the swapper's 31.93, and needs its own context
+     * binary -- so asking for it does not mean getting it. The pipeline skips the stage
+     * when the model is absent, and the UI only offers the switch when
+     * [NativePipe.hasEnhancer] is true.
+     */
+    val faceEnhance: Boolean = false,
+
+    /**
+     * `--face-enhancer-blend`, upstream's 0-100 as a 0.0-1.0 fraction, step 0.05.
+     *
+     * 1.0 is the enhancer's output alone; 0.0 leaves the swap untouched. Upstream's
+     * default is 80.
+     */
+    val enhanceBlend: Float = 0.8f,
 ) {
     val pixelBoostLabel get() = "${256 * pixelBoost}x${256 * pixelBoost}"
 
@@ -61,6 +79,8 @@ data class SwapOptions(
             .putFloat(K_LMK, landmarkerScore)
             .putInt(K_BOOST, pixelBoost)
             .putBoolean(K_LARGEST, largestOnly)
+            .putBoolean(K_ENHANCE, faceEnhance)
+            .putFloat(K_ENHANCE_BLEND, enhanceBlend)
             .apply()
     }
 
@@ -74,6 +94,8 @@ data class SwapOptions(
         private const val K_LMK = "landmarker_score"
         private const val K_BOOST = "pixel_boost"
         private const val K_LARGEST = "largest_only"
+        private const val K_ENHANCE = "face_enhance"
+        private const val K_ENHANCE_BLEND = "face_enhance_blend"
 
         private fun prefs(context: Context) =
             context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -96,6 +118,8 @@ data class SwapOptions(
                 landmarkerScore = p.getFloat(K_LMK, d.landmarkerScore),
                 pixelBoost = p.getInt(K_BOOST, d.pixelBoost),
                 largestOnly = p.getBoolean(K_LARGEST, d.largestOnly),
+                faceEnhance = p.getBoolean(K_ENHANCE, d.faceEnhance),
+                enhanceBlend = p.getFloat(K_ENHANCE_BLEND, d.enhanceBlend),
             )
         }
     }

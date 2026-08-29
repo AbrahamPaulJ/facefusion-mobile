@@ -184,6 +184,20 @@ class MainActivity : ComponentActivity() {
         File(modelDir(), "inswapper_$tier.bin").canRead()
     }
 
+    /**
+     * Whether the face enhancer's binary is on the device.
+     *
+     * Asked of the FILESYSTEM, not [NativePipe.hasEnhancer], because the switch has to be
+     * drawable before any pipeline exists -- the Advanced panel opens long before a run
+     * initialises one. The native side is still the authority at execution time and skips
+     * the stage if the model went away in between.
+     *
+     * Not `by lazy`: a download can add gpen after the Activity is created, and a lazy
+     * would keep saying no for the life of the process.
+     */
+    private val hasEnhancer: Boolean
+        get() = File(modelDir(), "gpen_$tier.bin").canRead()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         BugReport.install(this)
@@ -244,6 +258,7 @@ class MainActivity : ComponentActivity() {
                                     invalidatePreview()
                                 },
                                 hasInswapper = hasInswapper,
+                                hasEnhancer = hasEnhancer,
                                 openCard = openCard,
                                 onToggleCard = { k -> openCard = if (openCard == k) "" else k },
                                 advancedOpen = advancedOpen,

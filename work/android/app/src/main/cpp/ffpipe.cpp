@@ -28,10 +28,17 @@ double nowMs() {
 struct Nets {
   ffqnn::Handle det = nullptr, fan = nullptr, fan685 = nullptr, arc = nullptr, swap = nullptr;
   ffqnn::Handle nsfw = nullptr;
+  // Optional, like fan685: absent simply means the enhancer cannot be offered.
+  ffqnn::Handle enh = nullptr;
 };
 
 // content_analyser.py:create_static_model_set -- nsfw_2 is 384x384, mean 0, std 1.
 constexpr int kNsfwSize = 384;
+
+// face_enhancer/core.py -- gpen_bfr_256 is 256x256 on the `arcface_128` template, the
+// same template and size hyperswap_1a_256 declares.  NOT cfg.swapSize: inswapper is 128,
+// and the enhancer graph does not change with the swapper.
+constexpr int kEnhSize = 256;
 
 }  // namespace
 
@@ -48,7 +55,8 @@ Pipeline::Pipeline() = default;
 
 Pipeline::~Pipeline() {
   if (p_) {
-    for (auto h : {p_->n.det, p_->n.fan, p_->n.fan685, p_->n.arc, p_->n.swap, p_->n.nsfw})
+    for (auto h : {p_->n.det, p_->n.fan, p_->n.fan685, p_->n.arc, p_->n.swap, p_->n.nsfw,
+                   p_->n.enh})
       if (h) ffqnn::release(h);
   }
 }
@@ -105,6 +113,11 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
   p_->n.swap = open(swapperName.c_str()); if (!p_->n.swap) return false;
   p_->n.fan685 = open("fan685");    // optional; absent -> geometric fallback below
 
+  // The face enhancer.  Optional in the strongest sense: it is a separate download,
+  // most installs will not have it, and a missing file must never be an init failure --
+  // the UI asks hasEnhancer() and simply does not offer the switch.
+  p_->n.enh = open("gpen");
+
   // The content gate is MANDATORY, because it blocks.  A gate that silently does not run
   // is worse than no gate: it reports "checked" to every caller above it.  So a missing
   // context is an init failure, not a fallback.
@@ -124,6 +137,8 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
   }
   return true;
 }
+
+bool Pipeline::hasEnhancer() const { return p_ && p_->n.enh != nullptr; }
 
 // ------------------------------------------------------------ content gate
 
@@ -381,7 +396,7 @@ bool Pipeline::setSource(const ffcv::Image& img) {
   p_->haveSource = true;
   // the source frame's own analysis is bookkeeping, not output
   framesDone = 0; facesDone = 0;
-  msDetect = msLandmark = msRecognise = msGeom = 0;
+  msDetect = msLandmark = msRecognise = msGeom = msEnhance = 0;
   return true;
 }
 
@@ -467,6 +482,76 @@ bool Pipeline::swapAll(ffcv::Image& frame, const std::vector<Face>& faces) {
             v = v < 0.f ? 0.f : (v > 1.f ? 1.f : v);
             orow[(x * PB + tx) * 3 + (2 - c)] = v * 255.f;   // RGB -> BGR
           }
+      }
+      msGeom += nowMs() - t0;
+    }
+
+    // ---------------------------------------------------- face enhancer (gpen_bfr_256)
+    //
+    // Upstream runs this as a SEPARATE processor pass: it re-warps the already-pasted
+    // frame from the target landmarks, enhances, and pastes a second time.  We run it on
+    // the swapped crop instead, because gpen_bfr_256 and hyperswap_1a_256 declare the SAME
+    // template and size -- `arcface_128` at 256x256 (face_enhancer/core.py:163,
+    // face_swapper/core.py:252) -- so the crop the swapper just produced already IS the
+    // crop the enhancer wants.  That saves a warp round trip and a second paste_back, and
+    // it is strictly the more faithful of the two: upstream re-derives its crop from a
+    // frame it has already blended, and enhances the blend along with the face.
+    //
+    // Pixel boost carries over unchanged: gpen is a fixed 256x256 graph exactly like the
+    // swapper, so the same polyphase split applies and the crop keeps its full resolution.
+    // Resizing down to 256 to enhance would throw the boost away.
+    if (cfg.faceEnhance && p_->n.enh && CS % kEnhSize == 0) {
+      const int ES = kEnhSize, EPB = CS / ES;
+      ffcv::MatF enhCrop(CS, CS, 3);
+      std::vector<float> ein((size_t)3 * ES * ES);
+      for (int k = 0; k < EPB * EPB; ++k) {
+        const int ty = k / EPB, tx = k % EPB;
+
+        t0 = nowMs();
+        // prepare_crop_frame -- BGR->RGB, /255, then (x - 0.5) / 0.5 into [-1, 1].
+        for (int y = 0; y < ES; ++y) {
+          const float* row = outCrop.row(y * EPB + ty);
+          for (int x = 0; x < ES; ++x)
+            for (int c = 0; c < 3; ++c)
+              ein[(size_t)(2 - c) * ES * ES + (size_t)y * ES + x] =
+                  ((row[(x * EPB + tx) * 3 + c] / 255.0f) - 0.5f) / 0.5f;
+        }
+        msGeom += nowMs() - t0;
+
+        t0 = nowMs();
+        std::vector<std::vector<float>> eo;
+        if (!ffqnn::execute(p_->n.enh, {"input"}, {ein.data()}, eo)) {
+          err_ = std::string("enhancer: ") + ffqnn::lastError();
+          return false;
+        }
+        msEnhance += nowMs() - t0;
+
+        t0 = nowMs();
+        // normalize_crop_frame -- clip to [-1, 1], (x + 1) / 2, *255, RGB->BGR.
+        const float* e = eo[0].data();
+        for (int y = 0; y < ES; ++y) {
+          float* erow = enhCrop.row(y * EPB + ty);
+          for (int x = 0; x < ES; ++x)
+            for (int c = 0; c < 3; ++c) {
+              float v = e[(size_t)c * ES * ES + (size_t)y * ES + x];
+              v = v < -1.f ? -1.f : (v > 1.f ? 1.f : v);
+              erow[(x * EPB + tx) * 3 + (2 - c)] = (v + 1.f) * 0.5f * 255.f;
+            }
+        }
+        msGeom += nowMs() - t0;
+      }
+
+      // blend_paste_frame -- upstream blends the enhanced PASTED frame against the frame
+      // it started from, weighted by face_enhancer_blend.  In the crop it is the same
+      // convex combination one step earlier, and it touches only pixels the mask was
+      // going to write anyway.
+      t0 = nowMs();
+      const float b = cfg.faceEnhancerBlend < 0.f ? 0.f
+                    : (cfg.faceEnhancerBlend > 1.f ? 1.f : cfg.faceEnhancerBlend);
+      for (int y = 0; y < CS; ++y) {
+        float* o = outCrop.row(y);
+        const float* e = enhCrop.row(y);
+        for (int i = 0; i < CS * 3; ++i) o[i] = o[i] * (1.f - b) + e[i] * b;
       }
       msGeom += nowMs() - t0;
     }

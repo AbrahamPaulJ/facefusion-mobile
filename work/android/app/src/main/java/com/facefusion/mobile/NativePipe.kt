@@ -27,6 +27,7 @@ object NativePipe {
         weight: Float, maskBlur: Float, maskPadding: IntArray,
         detectorScore: Float, landmarkerScore: Float,
         pixelBoost: Int, largestOnly: Boolean,
+        faceEnhance: Boolean, enhanceBlend: Float,
     ): Boolean
 
     /** Load the pipeline with [opts] applied. */
@@ -35,8 +36,18 @@ object NativePipe {
         initEx(libDir, skelDir, modelDir, opts.swapper,
                opts.weight, opts.maskBlur, opts.maskPadding.toIntArray(),
                opts.detectorScore, opts.landmarkerScore,
-               opts.pixelBoost, opts.largestOnly)
+               opts.pixelBoost, opts.largestOnly,
+               opts.faceEnhance, opts.enhanceBlend)
     @JvmStatic external fun release()
+
+    /**
+     * Whether `gpen_<tier>.bin` was found when the pipeline last initialised.
+     *
+     * Only meaningful after a successful [init]; false before that, which is the safe
+     * direction -- the UI hides the enhancer switch rather than offering one that cannot
+     * work. Same rule `inswapper` follows.
+     */
+    @JvmStatic external fun hasEnhancer(): Boolean
 
     /**
      * Which context-binary tier this chip needs -- "v68" / "v73" / "v79".

@@ -14,6 +14,8 @@
 //          [--weight 0.5]      # face_swapper_weight; >0.5 amplifies the source identity
 //          [--blur 0.3] [--pad 0]        # face_mask_blur / face_mask_padding
 //          [--boost 1]         # pixel boost: 1=256, 2=512 ... costs boost^2 runs per face
+//          [--enhance]         # gpen_bfr_256 on the swapped crop; needs gpen_<tier>.bin
+//          [--enhance-blend 0.8]
 //          [--largest]         # swap only the largest face
 //
 //   ffswap --lib DIR --skel DIR --probe [--canary DIR]
@@ -51,6 +53,8 @@ int main(int argc, char** argv) {
   float weight = 0.5f, maskBlur = 0.3f;
   int pad = 0, boost = 1;
   bool largestOnly = false;
+  bool enhance = false;
+  float enhanceBlend = 0.8f;
 
   // The loop used to stop at argc-1 so a value-taking flag in last position could not read
   // past the end.  That also silently ignored any flag that appeared last -- fine while
@@ -80,6 +84,8 @@ int main(int argc, char** argv) {
     else if (a == "--pad") pad = num();
     else if (a == "--boost") boost = num();
     else if (a == "--largest") largestOnly = true;
+    else if (a == "--enhance") enhance = true;
+    else if (a == "--enhance-blend") enhanceBlend = (float)atof(v().c_str());
   }
   if (libDir.empty() || (!probe && (modelDir.empty() || srcPath.empty() || tgtPath.empty()))) {
     fprintf(stderr, "missing arguments; see the header of ffswap_main.cpp\n");
@@ -191,6 +197,10 @@ int main(int argc, char** argv) {
   for (int i = 0; i < 4; ++i) cfg.maskPadding[i] = pad;
   cfg.pixelBoost = boost;
   cfg.swapLargestOnly = largestOnly;
+  // Requesting it is not having it: Pipeline skips the stage when gpen_<tier>.bin is
+  // absent, and the banner prints what actually loaded rather than what was asked.
+  cfg.faceEnhance = enhance;
+  cfg.faceEnhancerBlend = enhanceBlend;
   if (swapper == "inswapper") {
     cfg.swapSize = 128; cfg.swapMean = 0.f; cfg.swapStd = 1.f;
     cfg.swapDenorm = false; cfg.swapperIsHyperswap = false;
@@ -241,6 +251,12 @@ int main(int argc, char** argv) {
   printf("weight %.2f  blur %.2f  pad %d  boost %dx (%d px, %d run/face)%s\n",
          weight, maskBlur, pad, boost, 256 * boost, boost * boost,
          largestOnly ? "  largest face only" : "");
+  // Asked-for is not loaded. Saying which avoids reading an unchanged image as
+  // "the enhancer did nothing" when in fact it never ran.
+  if (enhance)
+    printf("enhancer: %s\n", pipe.hasEnhancer()
+           ? "gpen_bfr_256"
+           : "REQUESTED BUT NOT LOADED -- no gpen binary for this tier, stage skipped");
 
   std::vector<uint8_t> srcRaw, tgtRaw;
   if (!readAll(srcPath.c_str(), srcRaw)) { fprintf(stderr, "cannot read %s\n", srcPath.c_str()); return 1; }
@@ -328,8 +344,11 @@ int main(int argc, char** argv) {
   printf("  %-12s %8.1f ms\n", "landmarker", pipe.msLandmark);
   printf("  %-12s %8.1f ms\n", "recogniser", pipe.msRecognise);
   printf("  %-12s %8.1f ms\n", "swapper", pipe.msSwap);
+  if (pipe.msEnhance > 0)
+    printf("  %-12s %8.1f ms\n", "enhancer", pipe.msEnhance);
   printf("  %-12s %8.1f ms  <- CPU geometry\n", "geometry", pipe.msGeom);
-  double npu = pipe.msDetect + pipe.msLandmark + pipe.msRecognise + pipe.msSwap;
+  double npu = pipe.msDetect + pipe.msLandmark + pipe.msRecognise + pipe.msSwap +
+               pipe.msEnhance;
   printf("  NPU %.1f ms (%.0f%%), CPU %.1f ms (%.0f%%)\n",
          npu, 100 * npu / wall, pipe.msGeom, 100 * pipe.msGeom / wall);
   return 0;

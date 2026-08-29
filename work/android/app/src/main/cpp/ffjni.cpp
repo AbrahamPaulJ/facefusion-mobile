@@ -49,7 +49,8 @@ Java_com_facefusion_mobile_NativePipe_initEx(JNIEnv* env, jclass, jstring jLib, 
                                              jfloat weight, jfloat maskBlur,
                                              jintArray jPadding, jfloat detScore,
                                              jfloat lmkScore, jint pixelBoost,
-                                             jboolean largestOnly) {
+                                             jboolean largestOnly,
+                                             jboolean faceEnhance, jfloat enhanceBlend) {
   g_pipe.reset(new ffpipe::Pipeline());
   ffpipe::Config cfg;
   std::string swapper = jstr(env, jSwapper);
@@ -66,6 +67,11 @@ Java_com_facefusion_mobile_NativePipe_initEx(JNIEnv* env, jclass, jstring jLib, 
   cfg.landmarkerScore = std::fmin(1.f, std::fmax(0.f, lmkScore));
   cfg.pixelBoost = pixelBoost < 1 ? 1 : (pixelBoost > 4 ? 4 : pixelBoost);
   cfg.swapLargestOnly = largestOnly == JNI_TRUE;
+  // Asking for the enhancer is not the same as having it: hasEnhancer() decides, and
+  // the stage is skipped silently when gpen_<tier>.bin was not there. A stale saved
+  // preference from a build that had the model must not become a failed run.
+  cfg.faceEnhance = faceEnhance == JNI_TRUE;
+  cfg.faceEnhancerBlend = std::fmin(1.f, std::fmax(0.f, enhanceBlend));
   if (jPadding && env->GetArrayLength(jPadding) == 4) {
     jint pad[4];
     env->GetIntArrayRegion(jPadding, 0, 4, pad);
@@ -109,6 +115,14 @@ Java_com_facefusion_mobile_NativePipe_contentScore(JNIEnv* env, jclass, jbyteArr
 JNIEXPORT jboolean JNICALL
 Java_com_facefusion_mobile_NativePipe_contentGateIsQuantised(JNIEnv*, jclass) {
   return (g_pipe && g_pipe->contentGateIsQuantised()) ? JNI_TRUE : JNI_FALSE;
+}
+
+// Whether gpen_<tier>.bin was present at init. Drives whether the switch is OFFERED, so it
+// is only meaningful after a successful init -- before that it is false, which is the safe
+// direction: the UI hides a control rather than showing one that cannot work.
+JNIEXPORT jboolean JNICALL
+Java_com_facefusion_mobile_NativePipe_hasEnhancer(JNIEnv*, jclass) {
+  return (g_pipe && g_pipe->hasEnhancer()) ? JNI_TRUE : JNI_FALSE;
 }
 
 // Which context-binary tier this chip needs. Callable BEFORE any model exists, which is

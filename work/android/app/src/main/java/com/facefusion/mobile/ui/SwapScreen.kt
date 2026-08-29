@@ -22,6 +22,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.facefusion.mobile.FaceDetectorCard
+import com.facefusion.mobile.FaceEnhancerCard
 import com.facefusion.mobile.FaceMaskerCard
 import com.facefusion.mobile.FaceSwapperCard
 import com.facefusion.mobile.ModelDownload
@@ -68,6 +69,7 @@ fun SwapScreen(
     opts: SwapOptions,
     onOptsChange: (SwapOptions) -> Unit,
     hasInswapper: Boolean,
+    hasEnhancer: Boolean,
     openCard: String,
     onToggleCard: (String) -> Unit,
     advancedOpen: Boolean,
@@ -284,6 +286,11 @@ fun SwapScreen(
                 FaceMaskerCard(opts, onOptsChange, openCard == "masker", { onToggleCard("masker") })
                 FaceDetectorCard(opts, onOptsChange, openCard == "detector",
                                  { onToggleCard("detector") })
+                // Only when gpen_<tier>.bin is actually on the device.
+                if (hasEnhancer) {
+                    FaceEnhancerCard(opts, onOptsChange, openCard == "enhancer",
+                                     { onToggleCard("enhancer") })
+                }
                 if (opts != SwapOptions()) {
                     TextButton(
                         onClick = { onOptsChange(SwapOptions()) },
