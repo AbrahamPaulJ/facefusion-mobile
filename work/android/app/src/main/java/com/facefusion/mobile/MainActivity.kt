@@ -2,7 +2,7 @@ package com.facefusion.mobile
 
 import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Bundle
@@ -106,9 +106,7 @@ class MainActivity : ComponentActivity() {
     private val pickSource = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             sourceUri = uri
-            sourceThumb = runCatching {
-                contentResolver.openInputStream(uri).use { BitmapFactory.decodeStream(it) }
-            }.getOrNull()
+            sourceThumb = decodeOriented(uri)
             status = "Source set"
             // A different face means the loaded pipeline is holding the wrong embedding.
             invalidatePreview()
@@ -128,6 +126,38 @@ class MainActivity : ComponentActivity() {
      * pushed into it.
      */
     private fun modelDir() = File(getExternalFilesDir(null), "models").apply { mkdirs() }
+
+    /**
+     * Decode an image the way the camera meant it to be seen.
+     *
+     * [BitmapFactory] ignores EXIF orientation. A phone stores a portrait photo as
+     * LANDSCAPE pixels plus an Orientation tag, so decoding without applying the tag
+     * yields a sideways image -- and that is not a cosmetic thumbnail problem: `yoloface`
+     * is not rotation invariant, so a face on its side is simply not detected and the run
+     * dies with "no face found in source image". Reported 2026-08-29; the rotated preview
+     * and the missing face were one bug, not two.
+     *
+     * [ImageDecoder] applies the tag itself and also reads HEIC, which is what Samsung
+     * cameras write by default and what BitmapFactory is weakest on.
+     *
+     * ALLOCATOR_SOFTWARE is required, not a preference: every caller reads the pixels back
+     * with getPixels, and a hardware bitmap has no pixel array to read. It throws rather
+     * than returning null on a bad file, hence runCatching.
+     */
+    private fun decodeOriented(uri: Uri): Bitmap? = runCatching {
+        ImageDecoder.decodeBitmap(ImageDecoder.createSource(contentResolver, uri)) { d, _, _ ->
+            d.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            d.isMutableRequired = true
+        }
+    }.getOrNull()
+
+    /** As above, for a file the selftest pushed rather than a picked Uri. */
+    private fun decodeOriented(file: File): Bitmap? = runCatching {
+        ImageDecoder.decodeBitmap(ImageDecoder.createSource(file)) { d, _, _ ->
+            d.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            d.isMutableRequired = true
+        }
+    }.getOrNull()
 
     /**
      * The fp16 canary pair, unpacked out of assets.
@@ -501,9 +531,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 if (!previewWarm) {
-                    val bmp = withContext(Dispatchers.IO) {
-                        contentResolver.openInputStream(src).use { BitmapFactory.decodeStream(it) }
-                    }
+                    val bmp = withContext(Dispatchers.IO) { decodeOriented(src) }
                     if (bmp == null) { previewNote = "Could not read the source image"; return@launch }
                     val soft = bmp.copy(Bitmap.Config.ARGB_8888, false)
                     val px = IntArray(soft.width * soft.height)
@@ -639,9 +667,7 @@ class MainActivity : ComponentActivity() {
                                 if (opts.largestOnly) "  largest face only" else ""))
 
                     status = "Reading source face..."
-                    val bmp = contentResolver.openInputStream(src).use {
-                        BitmapFactory.decodeStream(it)
-                    } ?: error("cannot decode source image")
+                    val bmp = decodeOriented(src) ?: error("cannot decode source image")
 
                     // The content gate, BEFORE anything is processed or previewed. It
                     // blocks, as upstream does, so a refusal ends the run here -- there is
@@ -787,7 +813,7 @@ class MainActivity : ComponentActivity() {
                 // then a swapped selftest.mp4 appeared next to it. A gate that reports
                 // without refusing is decoration.
                 if (srcFile.exists()) {
-                    val b = BitmapFactory.decodeFile(srcFile.absolutePath)
+                    val b = decodeOriented(srcFile)
                     if (b != null) ContentGate.checkImage(b).let {
                         say("gate source: %s score %+.4f %s"
                             .format(it.verdict, it.score, it.detail))
@@ -802,7 +828,7 @@ class MainActivity : ComponentActivity() {
                 if (!srcFile.exists() || !tgtFile.exists()) {
                     say("SELFTEST PARTIAL: DSP reachable, no test assets"); return@launch
                 }
-                val bmp = BitmapFactory.decodeFile(srcFile.absolutePath) ?: return@launch
+                val bmp = decodeOriented(srcFile) ?: return@launch
                 val soft = bmp.copy(Bitmap.Config.ARGB_8888, false)
                 val px = IntArray(soft.width * soft.height)
                 soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
