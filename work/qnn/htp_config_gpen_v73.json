@@ -1,0 +1,3 @@
+{ "graphs": [ { "vtcm_mb": 8, "graph_names": ["gpen"], "O": 3.0 } ],
+  "devices": [ { "dsp_arch": "v73", 
+                 "cores": [ { "perf_profile": "burst", "rpc_control_latency": 100 } ] } ] }

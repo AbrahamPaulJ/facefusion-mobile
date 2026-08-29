@@ -411,6 +411,9 @@ def swap_face(models, source_face, target_face, frame, calib=None):
 		# Capturing the swapper's INPUTS does not require running the swapper.  inswapper
 		# is 174.58 GMAC per face on CPU; skipping it makes its calibration capture as
 		# cheap as hyperswap's.
+		#
+		# ⚠ It also skips the ENHANCER capture below, which is downstream of the swapper's
+		# output and therefore cannot be had for free.  --calib-only produces no `gpen` set.
 		return frame
 
 	out = models.swapper.run(None, {'source': embedding, 'target': prepared})[0][0]
@@ -419,6 +422,27 @@ def swap_face(models, source_face, target_face, frame, calib=None):
 	if spec['denorm']:
 		out = out * spec['std'] + spec['mean']
 	out = out.clip(0, 1)[:, :, ::-1] * 255
+
+	# The face enhancer's calibration set.
+	#
+	# gpen_bfr_256 only ever sees a face the SWAPPER has already written, so its input
+	# distribution is this crop -- not the target crop above.  Calibrating it on target
+	# crops would quantise it against a distribution it never meets at runtime; trap #4 is
+	# about using real tensors, and this is that rule one stage further down.
+	#
+	# Captured in the enhancer's own normalisation (face_enhancer/core.py:prepare_crop_frame
+	# -- BGR->RGB, /255, then (x-0.5)/0.5), which happens to match the swapper's mean/std
+	# but is written out explicitly rather than shared: the two are independent upstream and
+	# a future enhancer with different constants must not silently inherit these.
+	#
+	# Only at 256: gpen is a fixed 256x256 graph, and an inswapper run produces a 128 crop
+	# that is not a valid enhancer input.
+	if calib is not None and out.shape[0] == 256:
+		g = out[:, :, ::-1] / 255.0
+		g = (g - 0.5) / 0.5
+		calib.setdefault('gpen', []).append(
+			g.transpose(2, 0, 1).astype(numpy.float32))
+
 	return paste_back(frame, out, mask, affine)
 
 

@@ -781,8 +781,16 @@ def do_gpen():
 		an = b + '/ff_A'
 		new_inits.append(numpy_helper.from_array(
 			numpy.ascontiguousarray(A.T.astype(numpy.float32)), an))     # [I, O]
+		# eps as the Gemm's BIAS vector, not a separate Add.
+		#
+		# `MatMul -> ElementwiseSum` is the exact pattern the 2.49 converter's squash_sum
+		# folds into a FullyConnected's bias, and it reads input_names[2] unconditionally
+		# -- but ONNX MatMul has no third input, so the pass dies with IndexError
+		# (op_graph_optimizations.py:4201). Gemm computes alpha*A@B + beta*C in one node
+		# with a real bias, which is the same arithmetic and leaves nothing to squash.
 		en = b + '/ff_eps'
-		new_inits.append(numpy_helper.from_array(numpy.asarray(eps, numpy.float32), en))
+		new_inits.append(numpy_helper.from_array(
+			numpy.full((O,), float(numpy.asarray(eps).ravel()[0]), numpy.float32), en))
 		on = b + '/ff_one'
 		new_inits.append(numpy_helper.from_array(numpy.asarray(one, numpy.float32), on))
 
@@ -790,8 +798,8 @@ def do_gpen():
 		conv_out = b + '/ff_conv'
 		out_nodes += [
 			helper.make_node('Mul', [style, style], [s2], name=b + '/ff_s2'),
-			helper.make_node('MatMul', [s2, an], [t], name=b + '/ff_demod_mm'),
-			helper.make_node('Add', [t, en], [t2], name=b + '/ff_demod_eps'),
+			helper.make_node('Gemm', [s2, an, en], [t2], name=b + '/ff_demod',
+							 alpha=1.0, beta=1.0, transA=0, transB=0),
 			helper.make_node('Sqrt', [t2], [r], name=b + '/ff_demod_sqrt'),
 			helper.make_node('Div', [on, r], [d], name=b + '/ff_demod_div'),
 			helper.make_node('Reshape', [d, shape_init([1, O, 1, 1], b + '/ff_d_shape')], [d4],
@@ -904,6 +912,39 @@ def do_gpen():
 		g.node.extend(kept)
 		g.initializer.extend(extra_inits)
 	print('  replaced %d upfirdn2d upsamples with a stride-2 ConvTranspose' % n_up)
+
+	# ---- third pass: an explicit zero bias on every bias-less conv
+	#
+	# The 2.49 converter's `squash_sum` folds an ElementwiseSum into a preceding NN node by
+	# writing into that node's bias, and reads `input_names[2]` without checking the node
+	# HAS three inputs (op_graph_optimizations.py:4201 -> IndexError). StyleGAN convolutions
+	# carry no bias -- it is a separate Add after the noise -- so the graph is full of
+	# two-input convs and the pass dies on the first one it matches.
+	#
+	# A zero bias is numerically inert, and inert under the demodulation scale too, since
+	# 0 * d == 0. Caught by the --layout screen before any device time (trap #12).
+	init_names = {t.name for t in g.initializer}
+	shape_of = {t.name: list(t.dims) for t in g.initializer}
+	n_bias = 0
+	for n in g.node:
+		if n.op_type not in ('Conv', 'ConvTranspose') or len(n.input) >= 3:
+			continue
+		w = shape_of.get(n.input[1])
+		if w is None:
+			continue
+		group = 1
+		for a in n.attribute:
+			if a.name == 'group':
+				group = a.i
+		# Conv kernels are [O, I/group, kh, kw]; ConvTranspose kernels are [I, O/group, ...],
+		# so the output channel count is NOT in the same axis for the two.
+		out_ch = w[0] if n.op_type == 'Conv' else w[1] * group
+		bn = (n.name or ('conv%d' % n_bias)) + '/ff_zero_bias'
+		g.initializer.append(numpy_helper.from_array(
+			numpy.zeros((out_ch,), dtype=numpy.float32), bn))
+		n.input.append(bn)
+		n_bias += 1
+	print('  added a zero bias to %d bias-less convs (converter squash_sum)' % n_bias)
 
 	# The old kernel chains are now unreachable; onnxsim drops them along with the
 	# initialisers they held.

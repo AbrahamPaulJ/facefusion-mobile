@@ -79,6 +79,14 @@ case "$NAME" in
     DIMS=(--input_dim input 1,3,384,384)
     PRESERVE=(--preserve_io layout input)
     ;;
+  gpen)
+    # The face enhancer, after prepare_onnx.py:do_gpen made every modulated conv kernel
+    # static -- 20 of its 45 convs took a COMPUTED kernel as exported, which HTP cannot map,
+    # and that was 87% of the graph's 8.57 GMAC. The surgery is exact to 107.9 dB.
+    ONNX=$FF/work/onnx/gpen_bfr_256_sim.onnx
+    DIMS=(--input_dim input 1,3,256,256)
+    PRESERVE=(--preserve_io layout input output)
+    ;;
   inswapper)
     ONNX=$FF/work/onnx/inswapper_128_split_sim.onnx
     DIMS=(--input_dim target 1,3,128,128 --input_dim source 1,512)

@@ -34,6 +34,11 @@ SPECS = {
 	# than merely the tail of the same sequence (nsfw_reference.py:frames).
 	'nsfw':      dict(onnx='onnx/nsfw_2_sim.onnx',
 					  inputs=[('input', 'calib/nsfw_heldout', (1, 3, 384, 384))]),
+	# Same disjoint-phase rule as nsfw: gpen's held-out crops are the ODD frames of the
+	# capture, calibration the even ones. Consecutive video frames are correlated, so even
+	# this is a friendly test -- but it is at least not the set that trained the encodings.
+	'gpen':      dict(onnx='onnx/gpen_bfr_256_sim.onnx',
+					  inputs=[('input', 'calib/gpen_heldout', (1, 3, 256, 256))]),
 	'inswapper': dict(onnx='onnx/inswapper_128_split_sim.onnx',
 					  inputs=[('target', 'calib/swap_target_128', (1, 3, 128, 128)),
 							  ('source', 'calib/swap_source_128', (1, 512))]),

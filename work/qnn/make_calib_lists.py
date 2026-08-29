@@ -25,6 +25,10 @@ SPECS = {
 	# The content gate.  Its frames are letterboxed by fit_contain_frame -- centred pad,
 	# NOT the detector's corner pad -- so they come from their own capture.
 	'nsfw':      [('input',  'nsfw',        1 * 3 * 384 * 384)],
+	# The face enhancer. Its calibration is the SWAPPER'S OUTPUT crop, captured downstream
+	# of the swapper in run_reference.swap_face -- gpen never sees a target crop, only a
+	# face hyperswap has already written, so `swap_target` would be the wrong distribution.
+	'gpen':      [('input',  'gpen',        1 * 3 * 256 * 256)],
 }
 
 
