@@ -87,8 +87,15 @@ fun SettingsScreen(
                         Column(Modifier.weight(1f)) {
                             Text(m.label, style = MaterialTheme.typography.bodyMedium)
                             Text(
+                                // ONE phrase for one state.  "missing" for required and
+                                // "not installed" for optional read as two different
+                                // STATES when they are the same state at two severities --
+                                // and the severity was already carried by the colour
+                                // below.  The suffix says it in words instead, because
+                                // colour alone is not something every reader gets.
                                 if (m.present) "${m.fileName}   ${mb(m.bytes)}"
-                                else m.fileName + (if (m.required) "   missing" else "   not installed"),
+                                else m.fileName + "   not installed" +
+                                     (if (m.required) " (required)" else ""),
                                 style = MaterialTheme.typography.bodySmall,
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 10.sp,
