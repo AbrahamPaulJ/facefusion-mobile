@@ -81,9 +81,29 @@ class VideoSwapper(
         val muxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
         var muxAudio = -1
         var muxing = false
+        // Audio is PASS-THROUGH, and the MP4 muxer accepts a strictly narrower set of codecs
+        // than MediaExtractor will hand back: Opus, Vorbis, FLAC and raw PCM all extract
+        // fine and all make addTrack throw IllegalStateException("Failed to add the track
+        // to the muxer").  Reported on 0.1.0 by a OnePlus PJZ110 on an 854x476 clip -- the
+        // gate, the decoder and the encoder had all already run, and the whole swap was
+        // lost over a track we do nothing to but copy.
+        //
+        // So audio is best-effort.  On refusal muxAudio stays -1, the copy loop below skips
+        // itself, and the video is still written.  The VIDEO addTrack stays fatal: with no
+        // video track there is no output at all.
+        //
+        // addTrack leaves the muxer in its INITIALIZED state when it rejects a format -- it
+        // throws before touching mState -- so start() below is still valid after a refusal.
         val addTracks: (MediaFormat) -> Int = { fmt ->
             val v = muxer.addTrack(fmt)
-            if (audioTrack >= 0) muxAudio = muxer.addTrack(extractor.getTrackFormat(audioTrack))
+            if (audioTrack >= 0) {
+                val af = extractor.getTrackFormat(audioTrack)
+                val amime = af.getString(MediaFormat.KEY_MIME) ?: "?"
+                muxAudio = runCatching { muxer.addTrack(af) }.getOrElse {
+                    onLog("audio: MP4 will not carry $amime, writing video only")
+                    -1
+                }
+            }
             muxer.start()
             v
         }
@@ -149,29 +169,38 @@ class VideoSwapper(
             muxing = drainEncoder(encoder, muxer, muxing, addTracks = addTracks) { flushed = true }
         }
 
-        if (audioTrack >= 0 && muxAudio >= 0) {
+        // Same principle as addTracks above, one stage later: by this point every frame has
+        // been swapped and encoded, so a throw in the copy-through would discard the entire
+        // run's NPU work for a soundtrack.  A partial audio track is still a valid MP4 --
+        // writeSampleData has already committed whatever it accepted.
+        if (audioTrack >= 0 && muxAudio >= 0) runCatching {
             val ae = MediaExtractor().apply { setDataSource(inputPath); selectTrack(audioTrack) }
-            if (trimStartUs > 0) ae.seekTo(trimStartUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
-            val buf = ByteBuffer.allocate(512 * 1024)
-            val ai = MediaCodec.BufferInfo()
-            var copied = 0
-            while (true) {
-                val n = ae.readSampleData(buf, 0)
-                val pts = ae.sampleTime
-                if (n < 0 || pts > trimEndUs) break
-                if (pts >= trimStartUs) {
-                    ai.offset = 0; ai.size = n
-                    ai.presentationTimeUs = pts - trimStartUs
-                    ai.flags = if (ae.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0)
-                        MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
-                    muxer.writeSampleData(muxAudio, buf, ai)
-                    copied++
+            try {
+                if (trimStartUs > 0) ae.seekTo(trimStartUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+                val buf = ByteBuffer.allocate(512 * 1024)
+                val ai = MediaCodec.BufferInfo()
+                var copied = 0
+                while (true) {
+                    val n = ae.readSampleData(buf, 0)
+                    val pts = ae.sampleTime
+                    if (n < 0 || pts > trimEndUs) break
+                    if (pts >= trimStartUs) {
+                        ai.offset = 0; ai.size = n
+                        ai.presentationTimeUs = pts - trimStartUs
+                        ai.flags = if (ae.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0)
+                            MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
+                        muxer.writeSampleData(muxAudio, buf, ai)
+                        copied++
+                    }
+                    ae.advance()
                 }
-                ae.advance()
+                onLog("audio: $copied packets copied")
+            } finally {
+                // finally, not a trailing call: on a throw the extractor would otherwise
+                // leak a codec handle for the life of the process.
+                ae.release()
             }
-            ae.release()
-            onLog("audio: $copied packets copied")
-        }
+        }.onFailure { onLog("audio: copy-through failed (${it.javaClass.simpleName}), video kept") }
 
         decoder.stop(); decoder.release()
         encoder.stop(); encoder.release()
