@@ -45,8 +45,8 @@ android {
         // every device that already has 0.1.0: it cannot be installed as an update, and
         // anyone upgrading has to uninstall first -- which deletes the downloaded context
         // binaries with the app's private files dir.  Say so in the release notes.
-        versionCode = 2
-        versionName = "0.1.1$variantTag"    // "-dev" == NO content gate
+        versionCode = 3
+        versionName = "0.2.0$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         ndk { abiFilters += "arm64-v8a" }
         externalNativeBuild { cmake { arguments += listOf("-DANDROID_STL=c++_shared") } }

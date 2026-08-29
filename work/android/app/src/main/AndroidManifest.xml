@@ -52,5 +52,16 @@
             android:name=".DownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!--
+            The HTTP API. exported=false is about INTENTS, not about the socket: nothing on
+            the phone can start or stop this service except the app itself, while the port
+            it opens is reachable by whoever the bind address allows. The token is what
+            guards that, not this attribute.
+        -->
+        <service
+            android:name=".ApiService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
 </manifest>

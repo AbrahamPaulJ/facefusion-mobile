@@ -68,9 +68,6 @@ class MainActivity : ComponentActivity() {
     private var preview by mutableStateOf<Bitmap?>(null)
     private var outputFile by mutableStateOf<File?>(null)
 
-    /** The finished still, when the target was an image rather than a video. */
-    private var outputImage by mutableStateOf<Bitmap?>(null)
-
     /**
      * Whether the finished output stopped early because the user cancelled.
      *
@@ -80,6 +77,15 @@ class MainActivity : ComponentActivity() {
      */
     private var outputPartial by mutableStateOf(false)
     private var savedUri by mutableStateOf<Uri?>(null)
+
+    /**
+     * Where the last save actually landed, written by whoever saved it.
+     *
+     * Not rebuilt during composition from `outputFile`: a still goes to Pictures and a
+     * video to Movies, and the pane used to name Movies for both -- so an image result
+     * reported a path with nothing at it.
+     */
+    private var savedPathLabel by mutableStateOf<String?>(null)
 
     // ---- UI shell
     private var screen by mutableStateOf(Screen.Swap)
@@ -136,8 +142,28 @@ class MainActivity : ComponentActivity() {
         get() = if (previewEdge == TrimEdge.End) trimEndMs else trimStartMs
     private var scrubJob: Job? = null
 
+    /** The debounced redraw owned by [previewOptionsChanged]. One at a time. */
+    private var refreshJob: Job? = null
+
     /** Set by the Cancel button, read by the swap worker. Volatile: different threads. */
     @Volatile private var cancelRequested = false
+
+    /**
+     * The file names the hosted manifest publishes for this device's tier.
+     *
+     * Empty until the fetch lands, and empty forever when offline -- both mean "no row
+     * offers a download", which is the honest state rather than a button that cannot work.
+     */
+    private var hostedFiles by mutableStateOf<Set<String>>(emptySet())
+
+    /**
+     * Where the pipeline was, last time this screen had it.
+     *
+     * If the API server used it in between, what is loaded is the server's source and the
+     * server's options, and the preview's warm flag would otherwise be a promise about
+     * somebody else's face. See [PipeGuard.sequence].
+     */
+    private var lastPipeSeq = -2
 
     private val pickSource = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
@@ -145,7 +171,7 @@ class MainActivity : ComponentActivity() {
             sourceThumb = decodeOriented(uri)
             status = "Source set"
             // A different face means the loaded pipeline is holding the wrong embedding.
-            invalidatePreview()
+            previewOptionsChanged()
         }
     }
     // OpenDocument rather than GetContent: GetContent takes ONE mime filter, and the
@@ -273,12 +299,24 @@ class MainActivity : ComponentActivity() {
         NativePipe.ensureLoaded()
         modelDir()
         opts = SwapOptions.load(this)
+        ApiService.restore(this)
 
         if (intent?.getStringExtra("selftest") != null) { selfTest(); return }
+
+        // adb: am start -n com.facefusion.mobile/.MainActivity --es api start
+        //
+        // LOOPBACK ONLY, and deliberately not parameterised: this Activity is exported, so
+        // an extra that could bind 0.0.0.0 would be a remote-exposure switch any app on the
+        // phone could flip without the user seeing the screen. Opening the port to the
+        // network stays a deliberate touch on a switch that says what it does. The token is
+        // required either way.
+        if (intent?.getStringExtra("api") == "start")
+            toggleApi(on = true, lan = false, remember = false)
 
         probeDevice()
 
         refreshModelsMissing()
+        refreshHostedFiles()
 
         setContent {
             FaceFusionTheme {
@@ -290,6 +328,11 @@ class MainActivity : ComponentActivity() {
                         refreshModelsMissing()
                         delay(400)
                     }
+                    // The Settings inventory is not observable state -- it asks the
+                    // filesystem during composition and reads modelsVersion to know when
+                    // to ask again. Without this, a model that finished downloading while
+                    // that screen was open stayed listed as missing.
+                    modelsVersion++
                 }
 
                 // The preview warms ITSELF once both inputs and the models exist.
@@ -314,6 +357,7 @@ class MainActivity : ComponentActivity() {
                                 sourceThumb = sourceThumb,
                                 hasSource = sourceUri != null,
                                 hasTarget = targetFile != null || targetImage != null,
+                                imageTarget = targetImage != null,
                                 durationMs = durationMs,
                                 trimStartMs = trimStartMs,
                                 trimEndMs = trimEndMs,
@@ -324,8 +368,13 @@ class MainActivity : ComponentActivity() {
                                 preview = PreviewUi(
                                     original = originalFrame,
                                     // During a run the pane becomes the live output, which is
-                                    // the same thing one frame later.
-                                    swapped = if (busy) preview else swappedFrame,
+                                    // the same thing one frame later. It KEEPS that frame
+                                    // after the run: the run invalidated the preview to hand
+                                    // the pipeline over, so falling back to swappedFrame here
+                                    // meant the pane emptied itself the instant the swap
+                                    // finished and sat on "Preparing preview..." for good --
+                                    // nothing re-warms a pipeline the finished run released.
+                                    swapped = if (busy) preview else (swappedFrame ?: preview),
                                     timeLabel = if (durationMs > 0) fmt(previewAtMs) else "",
                                     warm = previewWarm,
                                     busy = previewBusy,
@@ -340,8 +389,11 @@ class MainActivity : ComponentActivity() {
                                     opts = o
                                     o.save(this@MainActivity)
                                     // init() consumed the old options; the warm pipeline is
-                                    // now showing something the user did not ask for.
-                                    invalidatePreview()
+                                    // now showing something the user did not ask for. This
+                                    // REDRAWS -- clearing the pane and leaving it cleared is
+                                    // how "Preparing preview..." became permanent, since
+                                    // nothing was left to ask for the next one.
+                                    previewOptionsChanged()
                                 },
                                 hasInswapper = hasInswapper,
                                 hasEnhancer = hasEnhancer,
@@ -349,13 +401,15 @@ class MainActivity : ComponentActivity() {
                                 onToggleCard = { k -> openCard = if (openCard == k) "" else k },
                                 advancedOpen = advancedOpen,
                                 onToggleAdvanced = { advancedOpen = !advancedOpen },
-                                hasOutput = outputFile != null || outputImage != null,
+                                // A still needs no run, so it has no output FILE -- what
+                                // there is to save is the pane itself.
+                                hasOutput = if (targetImage != null) swappedFrame != null
+                                            else outputFile != null,
                                 outputFile = outputFile,
-                                outputImage = outputImage,
                                 outputPartial = outputPartial,
                                 onSaveFrame = ::saveFrameAt,
                                 saved = savedUri != null,
-                                savedPath = savedUri?.let { "Movies/FaceFusion/${outputFile?.name}" },
+                                savedPath = savedPathLabel,
                                 onPickSource = { pickSource.launch("image/*") },
                                 onPickTarget = {
                                     pickTarget.launch(arrayOf("video/*", "image/*"))
@@ -366,19 +420,27 @@ class MainActivity : ComponentActivity() {
                                 modelsMissing = modelsMissing,
                                 onDownload = { onDownloadTapped() },
                                 onShareLog = { shareBugReport() },
-                                onSave = { outputFile?.let { saveToGallery(it) } },
-                                onShare = { outputFile?.let { shareVideo(it) } },
+                                // A still saves the pane; a video saves its file.
+                                onSave = {
+                                    if (targetImage != null) saveSwappedStill()
+                                    else outputFile?.let { saveToGallery(it) }
+                                },
+                                onShare = { shareResult() },
                             )
 
                             Screen.Settings -> SettingsScreen(
                                 models = modelRows(),
                                 modelDirPath = modelDir().absolutePath,
                                 device = deviceUi,
+                                onDownloadModel = { onDownloadTapped() },
                                 onDeleteModel = { m ->
                                     File(modelDir(), m.fileName).delete()
                                     modelsVersion++
-                                    invalidatePreview()
+                                    // Hard: the file behind the loaded pipeline just went
+                                    // away, and the redraw is what reports which one.
+                                    previewOptionsChanged(hard = true)
                                 },
+                                onApiToggle = ::toggleApi,
                             )
                         }
                     }
@@ -427,6 +489,20 @@ class MainActivity : ComponentActivity() {
 
     private fun appendLog(line: String) { log = (log + line + "\n").takeLast(4000) }
 
+    /**
+     * The same start-the-server extra, for an app that is ALREADY running.
+     *
+     * `am start` on a live Activity delivers here, not to onCreate, so without this the
+     * documented headless line silently did nothing whenever the app happened to be open --
+     * which looks identical to the server crashing on startup.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getStringExtra("api") == "start")
+            toggleApi(on = true, lan = false, remember = false)
+    }
+
     // ------------------------------------------------------------------ device
 
     /** Measure the HTP once, off the main thread; the probe brings the backend up. */
@@ -449,6 +525,36 @@ class MainActivity : ComponentActivity() {
                 fp16 = fp16,
             )
         }
+    }
+
+    /**
+     * Ask the manifest what exists for this tier. One ~2 KB request, once per launch.
+     *
+     * Failure is silent and total: [hostedFiles] stays empty, so Settings offers no
+     * downloads at all rather than offering one that cannot succeed.
+     */
+    private fun refreshHostedFiles() = lifecycleScope.launch(Dispatchers.IO) {
+        val names = runCatching {
+            ModelDownload.manifestFor(tierChain.joinToString(",")).second.map { it.name }.toSet()
+        }.getOrDefault(emptySet())
+        withContext(Dispatchers.Main) { hostedFiles = names }
+    }
+
+    // ------------------------------------------------------------------ remote API
+
+    /**
+     * Start, stop, or rebind the HTTP server.
+     *
+     * Rebinding is a restart, not a flag flip: the bind address is fixed when the socket is
+     * created, so a switch that changed [lan] on a live server would report an address it
+     * is not listening on.
+     */
+    private fun toggleApi(on: Boolean, lan: Boolean, remember: Boolean = true) {
+        if (!on) { ApiService.stop(this); return }
+        if (android.os.Build.VERSION.SDK_INT >= 33)
+            askNotify.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        if (ApiService.running && lan != ApiService.allowLan) ApiService.stop(this)
+        ApiService.start(this, lan, remember)
     }
 
     /** Everything we know about this run, handed to whatever the user sends it with. */
@@ -528,26 +634,81 @@ class MainActivity : ComponentActivity() {
         )
         val optional = listOf(
             "inswapper" to "Face swapper (alternative)",
+            // It was absent from BOTH lists, so a 28 MB model that is on the device, that
+            // the Advanced panel offers a switch for, and that /health reports as present,
+            // was invisible on the one screen whose job is to say what is installed.
+            "gpen" to "Face enhancer",
             "fan685" to "Landmark refiner",
             "nsfw" to "Content checker",
             "nsfwq" to "Content checker (quantised)",
         )
+        // What can be fetched is whatever the MANIFEST publishes for this tier -- asked
+        // once over the network, not guessed here. The guess it replaces had the gate wrong
+        // in both directions: a v79 phone would have been offered `nsfwq`, which its tier
+        // does not carry and which would therefore never arrive, while a deleted `nsfw` row
+        // disappeared from the list entirely, because only gpen was allowed to show itself
+        // while absent. Offline the set is empty and no row offers a download, which is
+        // correct -- there is nothing to download from.
         fun row(name: String, label: String, req: Boolean): ModelRow {
             val f = File(modelDir(), "${name}_$t.bin")
-            return ModelRow(label, f.name, if (f.exists()) f.length() else 0L, f.canRead(), req)
+            return ModelRow(label, f.name, if (f.exists()) f.length() else 0L, f.canRead(), req,
+                            downloadable = f.name in hostedFiles)
         }
         return required.map { (n, l) -> row(n, l, true) } +
-            optional.map { (n, l) -> row(n, l, false) }.filter { it.present }
+            optional.map { (n, l) -> row(n, l, false) }.filter { it.present || it.downloadable }
     }
 
     // ------------------------------------------------------------------ previews
 
-    /** The warm pipeline no longer matches what the UI is asking for. */
+    /**
+     * The warm pipeline no longer matches what the UI is asking for.
+     *
+     * Tears the native pipeline DOWN, so this is for the cases that need the global gone --
+     * a run about to init its own, or a model deleted underneath it. An options change must
+     * not come through here: see [previewOptionsChanged].
+     *
+     * `preview` is cleared with the rest. It holds the last live frame of the previous run,
+     * and the swapped pane falls back to it, so leaving it set would show the last frame of
+     * the LAST target after picking a new one.
+     */
     private fun invalidatePreview() {
         previews.invalidate()
         previewWarm = false
         swappedFrame = null
         previewNote = null
+        preview = null
+    }
+
+    /**
+     * An option (or the source face) changed, so the pane is showing a stale swap.
+     *
+     * Deliberately NOT [invalidatePreview]: that releases the native pipeline, and a weight
+     * slider emits a value per pixel of drag, so a release would land in the middle of a
+     * preview swap running on another thread -- a use-after-free reached by dragging.
+     * [PreviewEngine.ensureReady] keys on the options and the source and rebuilds itself
+     * when they differ, so marking the pane stale is enough and the rebuild happens once,
+     * inside the coroutine that owns the pipeline.
+     *
+     * Debounced for the same reason: a drag would otherwise ask for a full model reload
+     * dozens of times a second. The wait outlives previewBusy so a change made DURING a
+     * refresh still lands, rather than being dropped by refreshSwapped's early return.
+     */
+    private fun previewOptionsChanged(hard: Boolean = false) {
+        // `hard` is for a model that went away underneath the loaded pipeline. Still not
+        // while a swap is reading it: the redraw below re-checks the files and reports the
+        // missing one, which is the useful half of tearing it down anyway.
+        if (hard && !previewBusy) previews.invalidate()
+        previewWarm = false
+        swappedFrame = null
+        previewNote = null
+        preview = null
+        savedUri = null; savedPathLabel = null
+        refreshJob?.cancel()
+        refreshJob = lifecycleScope.launch {
+            delay(500)
+            while (previewBusy) delay(100)
+            refreshSwapped(force = true)
+        }
     }
 
     /**
@@ -588,6 +749,20 @@ class MainActivity : ComponentActivity() {
         if (targetFile == null && targetImage == null) return
 
         lifecycleScope.launch {
+            // The API server may be mid-request. Wait briefly rather than bounce: a preview
+            // that quietly does not appear is the bug this whole pass has been about.
+            if (!PipeGuard.acquire("preview", 4000)) {
+                previewNote = "The remote API is using the NPU"
+                return@launch
+            }
+            // Someone else has had the pipeline since this screen last used it, so the warm
+            // flag describes their source, not ours.
+            if (!PipeGuard.uninterrupted(lastPipeSeq)) {
+                previews.invalidate()
+                previewWarm = false
+            }
+            lastPipeSeq = PipeGuard.sequence
+
             previewBusy = true
             previewNote = null
             try {
@@ -652,10 +827,16 @@ class MainActivity : ComponentActivity() {
                         previewNote = "No face detected in this frame"
                         swappedFrame = null
                     }
-                    else -> { swappedFrame = out.bitmap; previewNote = null }
+                    else -> {
+                        swappedFrame = out.bitmap; previewNote = null
+                        // For a still this pane IS the result, so a new one is a different
+                        // image from the one the Save button reported saving.
+                        if (targetImage != null) { savedUri = null; savedPathLabel = null }
+                    }
                 }
             } finally {
                 previewBusy = false
+                PipeGuard.release()
             }
         }
     }
@@ -763,25 +944,40 @@ class MainActivity : ComponentActivity() {
         trimStartMs = 0f; trimEndMs = 0f
         targetAspect = 16f / 9f
         originalFrame = null
-        outputFile = null; outputImage = null; outputPartial = false; savedUri = null
+        outputFile = null; outputPartial = false; savedUri = null; savedPathLabel = null
         invalidatePreview()
         status = ""
     }
 
+    /**
+     * The video path, and only the video path.
+     *
+     * A still target used to have a branch in here, reached by the Swap button. It is gone
+     * with the button: the swapped PANE is already that image -- full resolution, same
+     * pipeline, same options, and gated on both the source and the frame in
+     * [refreshSwapped] -- so a run could only spend a model reload to produce a second copy
+     * of what was on screen. An unreachable branch that processes pixels is exactly the
+     * kind of thing a content-gate audit has to keep re-proving, so it is not left behind.
+     */
     private fun runSwap() {
         val src = sourceUri ?: return
-        val tgtImage = targetImage
-        val tgt = targetFile
-        if (tgt == null && tgtImage == null) return
+        val tgt = targetFile ?: return
         // The preview holds a loaded pipeline and `g_pipe` is a single global, so the run
         // cannot start until it lets go.
         invalidatePreview()
         cancelRequested = false
         busy = true; progress = 0f; log = ""; outputFile = null; savedUri = null
-        outputImage = null; outputPartial = false
+        savedPathLabel = null; outputPartial = false
         preview = null; framesDone = 0; framesTotal = 0; elapsedS = 0.0
 
         lifecycleScope.launch {
+            // The run owns the pipeline for its whole length, minutes on a long clip. The
+            // API server gets 503 for the duration, which is the honest answer.
+            if (!PipeGuard.acquire("swap", 5000)) {
+                status = "The remote API is using the NPU"
+                busy = false
+                return@launch
+            }
             val result = withContext(Dispatchers.Default) {
                 runCatching {
                     val models = modelDir()
@@ -821,27 +1017,16 @@ class MainActivity : ComponentActivity() {
                         appendLog("source content score %+.3f".format(it.score))
                         if (!it.ok) throw ContentGate.Refused(ContentGate.message("the source image", it))
                     }
-                    // The target, gated whichever kind it is. An image target is a
-                    // FOURTH processing path, and the gate has to be on it by construction
-                    // -- a separate runImageSwap is exactly how a path ends up ungated.
-                    if (tgtImage != null) {
-                        ContentGate.checkImage(tgtImage).let {
-                            appendLog("target content score %+.3f".format(it.score))
-                            if (!it.ok)
-                                throw ContentGate.Refused(
-                                    ContentGate.message("the target image", it))
-                        }
-                    } else {
-                        ContentGate.checkVideo(tgt!!).let {
-                            // `detail` is an ARGUMENT, never interpolated into the format
-                            // string: it reads "0/11 flagged (0.0%)", and that trailing `%)`
-                            // is parsed as a conversion -- UnknownFormatConversionException,
-                            // which killed the whole swap after the gate had already passed.
-                            appendLog("target content: %s, worst %+.3f".format(it.detail, it.score))
-                            if (!it.ok)
-                                throw ContentGate.Refused(
-                                    ContentGate.message("the target video", it))
-                        }
+                    // The target, sampled across the clip.
+                    ContentGate.checkVideo(tgt).let {
+                        // `detail` is an ARGUMENT, never interpolated into the format
+                        // string: it reads "0/11 flagged (0.0%)", and that trailing `%)`
+                        // is parsed as a conversion -- UnknownFormatConversionException,
+                        // which killed the whole swap after the gate had already passed.
+                        appendLog("target content: %s, worst %+.3f".format(it.detail, it.score))
+                        if (!it.ok)
+                            throw ContentGate.Refused(
+                                ContentGate.message("the target video", it))
                     }
 
                     val soft = bmp.copy(Bitmap.Config.ARGB_8888, false)
@@ -853,33 +1038,6 @@ class MainActivity : ComponentActivity() {
                     appendLog("source ready (${soft.width}x${soft.height})")
 
                     val t0 = System.currentTimeMillis()
-
-                    // ---- a still target: one frame, no codecs, no muxer.
-                    if (tgtImage != null) {
-                        status = "Swapping..."
-                        val ts = tgtImage.copy(Bitmap.Config.ARGB_8888, false)
-                        val tpx = IntArray(ts.width * ts.height)
-                        ts.getPixels(tpx, 0, ts.width, 0, 0, ts.width, ts.height)
-                        val bgr = NativePipe.argbToBgr(tpx, ts.width, ts.height)
-                        val faces = NativePipe.processFrame(bgr, ts.width, ts.height)
-                        if (faces < 0) error("native: ${NativePipe.lastError()}")
-                        appendLog("$faces face(s) swapped")
-                        val argb = NativePipe.bgrToArgb(bgr, ts.width, ts.height,
-                                                        ts.width, ts.height)
-                        val bmpOut = Bitmap.createBitmap(argb, ts.width, ts.height,
-                                                         Bitmap.Config.ARGB_8888)
-                        // Written to a file as well as held in memory, so Save and Share
-                        // work exactly as they do for a video.
-                        val png = File(getExternalFilesDir(null),
-                            "swapped_${System.currentTimeMillis()}.png")
-                        png.outputStream().use {
-                            bmpOut.compress(Bitmap.CompressFormat.PNG, 100, it)
-                        }
-                        withContext(Dispatchers.Main) { outputImage = bmpOut }
-                        appendLog("total %.1f s".format(
-                            (System.currentTimeMillis() - t0) / 1000.0))
-                        return@runCatching png
-                    }
 
                     val out = File(getExternalFilesDir(null),
                         "swapped_${System.currentTimeMillis()}.mp4")
@@ -936,26 +1094,43 @@ class MainActivity : ComponentActivity() {
                 }
             }
             NativePipe.release()
+            PipeGuard.release()
             busy = false
         }
     }
 
+    /** The finished video, into the shared Movies collection. */
     private fun saveToGallery(file: File) {
         lifecycleScope.launch {
-            // An image result goes to Pictures, a video to Movies. Same button, and the
-            // file itself says which -- the alternative is a second button that is dead
-            // for whichever kind of target you did not pick.
-            val image = outputImage
+            val r = withContext(Dispatchers.IO) { GallerySaver.save(this@MainActivity, file) }
+            r.onSuccess {
+                savedUri = it
+                savedPathLabel = "Movies/FaceFusion/" + file.name
+                status = "Saved to Movies/FaceFusion"
+            }.onFailure { status = "Save failed: ${it.message}" }
+        }
+    }
+
+    /**
+     * The swapped STILL, which is the pane rather than a file.
+     *
+     * There is no run behind a still and so no output file to copy: the bitmap on screen is
+     * the result, produced by the same pipeline at the image's own resolution, and it is
+     * what goes to Pictures. Both the source and this exact frame were gated in
+     * [refreshSwapped] before it was ever drawn, so saving what is displayed cannot save
+     * anything the gate has not already passed.
+     */
+    private fun saveSwappedStill() {
+        val bmp = swappedFrame ?: return
+        lifecycleScope.launch {
+            val name = "facefusion_%d.png".format(System.currentTimeMillis())
             val r = withContext(Dispatchers.IO) {
-                if (image != null)
-                    GallerySaver.saveImage(this@MainActivity, image, file.name)
-                else
-                    GallerySaver.save(this@MainActivity, file)
+                GallerySaver.saveImage(this@MainActivity, bmp, name)
             }
             r.onSuccess {
                 savedUri = it
-                status = if (image != null) "Saved to Pictures/FaceFusion"
-                         else "Saved to Movies/FaceFusion"
+                savedPathLabel = "Pictures/FaceFusion/" + name
+                status = "Saved to Pictures/FaceFusion"
             }.onFailure { status = "Save failed: ${it.message}" }
         }
     }
@@ -988,7 +1163,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun shareVideo(file: File) {
+    private fun shareResult() {
         val uri = savedUri ?: run {
             status = "Save to gallery first, then share"
             return
@@ -996,7 +1171,7 @@ class MainActivity : ComponentActivity() {
         // The mime has to match what was actually saved, or the chooser offers apps that
         // cannot open it -- an image result went out as video/mp4 before image targets
         // existed, and would have silently kept doing so.
-        val image = outputImage != null
+        val image = targetImage != null
         startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
             type = if (image) "image/png" else "video/mp4"
             putExtra(Intent.EXTRA_STREAM, uri)

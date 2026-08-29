@@ -9,10 +9,4 @@
 <resources>
     <color name="ff_background">#FF0D0D10</color>
 
-    <!--
-        The adaptive-icon plate.  White, because FaceFusion's mark is BLACK artwork on
-        transparency: on a dark plate the outer ring would disappear into it and leave a
-        floating face.
-    -->
-    <color name="ic_launcher_background">#FFFFFFFF</color>
 </resources>

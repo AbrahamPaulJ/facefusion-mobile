@@ -205,12 +205,18 @@ fun FaceDetectorCard(
                     if (opts.largestOnly) "largest face" else "every face"),
         expanded, onToggle,
     ) {
-        OptionSlider("Detector score", opts.detectorScore,
+        OptionSlider("Find faces", opts.detectorScore,
                      { onChange(opts.copy(detectorScore = it)) },
-                     hint = "raise it to ignore uncertain detections")
-        OptionSlider("Landmarker score", opts.landmarkerScore,
+                     hint = "higher: only clear, obvious faces are swapped. " +
+                            "lower: it tries harder on small or turned ones")
+        // Was "below it, the detector's 5 points are used unrefined", which describes the
+        // implementation to someone who already knows it and nothing to anyone else. What
+        // the user can actually decide is how well the swap should line up with the face
+        // underneath, so that is what the words are about.
+        OptionSlider("Face alignment", opts.landmarkerScore,
                      { onChange(opts.copy(landmarkerScore = it)) },
-                     hint = "below it, the detector's 5 points are used unrefined")
+                     hint = "how sure the app must be of the face's exact shape before " +
+                            "using it. raise it if a swap looks stretched or crooked")
         OptionSegments(
             "Faces",
             listOf(false to "Every face", true to "Largest only"),

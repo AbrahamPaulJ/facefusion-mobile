@@ -14,6 +14,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.facefusion.mobile.ApiService
+import com.facefusion.mobile.ModelDownload
 
 /** One context binary on disk, or one that should be and is not. */
 data class ModelRow(
@@ -23,6 +25,12 @@ data class ModelRow(
     val present: Boolean,
     /** Required models block a run when absent; optional ones only remove a feature. */
     val required: Boolean,
+    /**
+     * The manifest publishes this file, so an absent one is worth showing WITH a way to
+     * get it. An optional model that is not hosted stays hidden when absent: a download
+     * button for a file nobody serves is a promise the app cannot keep.
+     */
+    val downloadable: Boolean = false,
 )
 
 /** What the HTP said about itself, already parsed out of `NativePipe.probeDeviceInfo`. */
@@ -44,6 +52,10 @@ fun SettingsScreen(
     modelDirPath: String,
     device: DeviceUi,
     onDeleteModel: (ModelRow) -> Unit,
+    /** Fetch whatever the manifest has that this device does not. */
+    onDownloadModel: () -> Unit,
+    /** Start or stop the HTTP server. [lan] binds every interface instead of loopback. */
+    onApiToggle: (on: Boolean, lan: Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var confirming by remember { mutableStateOf<ModelRow?>(null) }
@@ -85,13 +97,17 @@ fun SettingsScreen(
                                 else MaterialTheme.colorScheme.error,
                             )
                         }
+                        // ONE kind of control for both directions. A trash icon on one
+                        // row and a "Download" link on the next made two halves of the
+                        // same decision look like different kinds of thing, and the icon
+                        // was the destructive one -- the half that should read loudest.
                         if (m.present) {
-                            IconButton({ confirming = m }, Modifier.size(32.dp)) {
-                                Icon(
-                                    Icons.Default.Delete, "Delete ${m.label}",
-                                    Modifier.size(18.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                            TextButton({ confirming = m }, enabled = !ModelDownload.running) {
+                                Text("Delete", color = MaterialTheme.colorScheme.error)
+                            }
+                        } else if (m.downloadable) {
+                            TextButton(onDownloadModel, enabled = !ModelDownload.running) {
+                                Text(if (ModelDownload.running) "Downloading" else "Download")
                             }
                         }
                     }
@@ -127,6 +143,71 @@ fun SettingsScreen(
                     }
                 )
                 InfoRow("Context binaries", if (device.tier.isEmpty()) "-" else device.tier)
+            }
+        }
+
+        // ---------------------------------------------------------------- remote API
+        //
+        // Reads ApiService's state directly, the way the download overlay reads
+        // ModelDownload's: the service owns it, and threading it through the Activity would
+        // only add a copy that can be stale.
+        Caption("Remote API")
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Use from a computer",
+                             style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Turn this on and open the address below in a browser on your " +
+                                "computer. Everything still runs on this phone.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = ApiService.running,
+                        onCheckedChange = { onApiToggle(it, ApiService.allowLan) },
+                    )
+                }
+
+                // Changing this restarts the server: the address is fixed when the socket
+                // opens, so a live switch would name an address it is not listening on.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Let other devices connect",
+                             style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            if (ApiService.allowLan)
+                                "On. Anyone who can reach this phone on your network can " +
+                                    "open the page and swap faces with it."
+                            else "Off. Only this phone, or a computer connected by USB.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (ApiService.allowLan) MaterialTheme.colorScheme.error
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = ApiService.allowLan,
+                        onCheckedChange = { onApiToggle(ApiService.running, it) },
+                    )
+                }
+
+                if (ApiService.running) InfoRow("Open this", ApiService.address)
+                if (!ApiService.allowLan) InfoRow(
+                    "Or over USB", "adb forward tcp:8760 tcp:8760")
+                ApiService.error?.let {
+                    Text("Could not start: " + it,
+                         style = MaterialTheme.typography.bodySmall,
+                         color = MaterialTheme.colorScheme.error)
+                }
+
+                if (ApiService.log.isNotEmpty()) Text(
+                    ApiService.log.trimEnd().lines().takeLast(4).joinToString(System.lineSeparator()),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 

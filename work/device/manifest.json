@@ -27,9 +27,14 @@
           "name": "nsfwq_v68.bin",
           "bytes": 6604760,
           "sha256": "27884c9d1835ac45a596650dcdcabf4027475c931f4f9f22037ea5c761f0c629"
+        },
+        {
+          "name": "gpen_v68.bin",
+          "bytes": 28113144,
+          "sha256": "51de3601ffb8baffdcea6b23cb392aa804a028664c52c9b02f0d03d6becfc84b"
         }
       ],
-      "bytes": 284839472
+      "bytes": 312952616
     },
     "v73": {
       "files": [
@@ -57,9 +62,14 @@
           "name": "nsfwq_v73.bin",
           "bytes": 6703064,
           "sha256": "f85590597217088875a39fffd43ddb2b61594528656c1f976e380d56d7b1e930"
+        },
+        {
+          "name": "gpen_v73.bin",
+          "bytes": 27961592,
+          "sha256": "47301cf4febbb695e800d8894f08d06f2681cc31470f04e128dfc44ba514d7d1"
         }
       ],
-      "bytes": 285535792
+      "bytes": 313497384
     },
     "v79": {
       "files": [
@@ -87,9 +97,14 @@
           "name": "nsfw_v79.bin",
           "bytes": 13881320,
           "sha256": "74755eb82955fd03abe7275e93a86e46352e36f9b8aa5a30f67e64da32b9f2d0"
+        },
+        {
+          "name": "gpen_v79.bin",
+          "bytes": 28047648,
+          "sha256": "ae053542098bfa51d8cc686800bf4f4799c6202ad10702ccff5c70b6c8af1ee2"
         }
       ],
-      "bytes": 292726472
+      "bytes": 320774120
     }
   }
 }

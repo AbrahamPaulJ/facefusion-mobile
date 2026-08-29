@@ -117,6 +117,12 @@ object ModelDownload {
             }
 
             val todo = missing(dir, entries)
+            // Say WHAT is about to be fetched and what was kept. A download that quietly
+            // re-fetches a 196 MB file it already has, and one that fetches only the file
+            // you asked for, look identical from outside -- a progress bar and a wait.
+            android.util.Log.i("ffmodels", "manifest " + entries.size + " files, fetching " +
+                todo.map { it.name } + ", keeping " +
+                entries.filterNot { e -> todo.any { it.name == e.name } }.map { it.name })
             fileCount = todo.size
             totalBytes = todo.sumOf { it.bytes }
             doneBytes = 0

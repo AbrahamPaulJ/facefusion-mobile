@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The adaptive-icon plate: the mark's own two tones, continued outward.
+
+    FaceFusion's mark is a disc split down the middle, black on the left, the face in white
+    on the right, and it is drawn at the 66% safe size because anything outside that is
+    cropped by the launcher's mask. So the plate behind it is what actually reaches the
+    icon's edge, and a plate of ONE colour is a border in the wrong colour on one of the two
+    halves: white left a black corner nowhere, and black left the white face sitting in a
+    black frame.
+
+    The split is at exactly x=54 of 108 because that is where the artwork's own split is
+    (measured: white begins at x=216 of 432 on every row it appears on). Each half continues
+    outward in its own colour, and the shape of the whole thing is whatever mask the device
+    applies: circle, squircle, teardrop.
+
+    The artwork lost the disc's rim on the RIGHT to make this work. Left in, it drew a black
+    semicircle floating in the white half, which is the same wrong border in the other
+    direction. The face's white now runs uninterrupted from the profile to the icon's edge;
+    the left half keeps its rim, where it is black on black and invisible anyway.
+
+    Scaling the artwork up to reach the edge instead was tried and rejected: the mask crops
+    everything outside the central 66%, so the face's crown and chin start being cut.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M0,0h54v108h-54z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,0h54v108h-54z" />
+</vector>

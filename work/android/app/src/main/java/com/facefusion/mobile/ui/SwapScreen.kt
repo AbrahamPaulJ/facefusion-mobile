@@ -68,6 +68,15 @@ fun SwapScreen(
     sourceThumb: Bitmap?,
     hasSource: Boolean,
     hasTarget: Boolean,
+    /**
+     * The target is a STILL.
+     *
+     * There is nothing to run: the swapped pane already holds the finished image, at full
+     * resolution and through the same pipeline a run would use. So the Swap button is not
+     * drawn at all -- pressing it would spend seconds reloading the models to produce a
+     * second copy of the picture already on screen.
+     */
+    imageTarget: Boolean,
     durationMs: Long,
     trimStartMs: Float,
     trimEndMs: Float,
@@ -89,11 +98,10 @@ fun SwapScreen(
     onToggleCard: (String) -> Unit,
     advancedOpen: Boolean,
     onToggleAdvanced: () -> Unit,
+    /** There is something to save: a finished video, or a swapped still on the pane. */
     hasOutput: Boolean,
-    /** The finished video, for the output pane. Null for an image result. */
+    /** The finished video, for the output pane. Null when the target was a still. */
     outputFile: File?,
-    /** The finished still, when the target was an image. */
-    outputImage: Bitmap?,
     /** True when the run was cancelled, so the output is only as long as it got. */
     outputPartial: Boolean,
     onSaveFrame: (Int) -> Unit,
@@ -296,7 +304,11 @@ fun SwapScreen(
         // ---------------------------------------------------------------- run
         // One button, two jobs: a separate Cancel would sit dead for the entire time the
         // only thing you can do is start a swap.
-        Button(
+        //
+        // A still target has no button at all. The pane above IS the output, so a Swap
+        // button would offer to compute something the user is already looking at, and the
+        // Save button below is the only thing left to do.
+        if (!imageTarget) Button(
             onClick = if (run.busy) onCancel else onSwap,
             enabled = run.busy || (idle && hasSource && hasTarget && !modelsMissing),
             modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -338,15 +350,7 @@ fun SwapScreen(
         // The result was previously invisible in the app: Save and Share, and no way to see
         // what you were about to save. A video gets a player with a scrub bar; an image
         // result is a still, which is all there is to show.
-        if (outputImage != null) {
-            PreviewPane(
-                label = if (outputPartial) "Output  (partial)" else "Output",
-                height = paneHeight,
-                bitmap = outputImage,
-                placeholder = "",
-                zoom = zoom,
-            )
-        } else if (outputFile != null) {
+        if (outputFile != null) {
             OutputPane(
                 file = outputFile,
                 height = paneHeight,
@@ -403,7 +407,7 @@ fun SwapScreen(
                     TextButton(
                         onClick = { onOptsChange(SwapOptions()) },
                         modifier = Modifier.align(Alignment.End),
-                    ) { Text("Reset to FaceFusion defaults") }
+                    ) { Text("Reset to defaults") }
                 }
             }
         }

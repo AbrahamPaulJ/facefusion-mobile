@@ -2,8 +2,8 @@
 
 Offline face swapping on Android, running entirely on the phone's NPU.
 
-Pick a source face and a target video, trim the clip, and swap — with no server, no
-account, and no upload. Every frame is processed on the device's Qualcomm Hexagon NPU.
+Pick a source face and a target photo or video, trim the clip, and swap — with no server,
+no account, and no upload. Every frame is processed on the device's Qualcomm Hexagon NPU.
 
 This is a mobile port of [FaceFusion](https://github.com/facefusion/facefusion) by
 Henry Ruhs. The pipeline, the models, and the option names, defaults and ranges are all
@@ -17,8 +17,15 @@ FaceFusion's.
   from, and that same frame swapped, side by side at full width.
 - **Real-time on-device processing.** About 19 ms per frame on a Snapdragon 8 Elite — a
   10-second 720p clip takes roughly 6 seconds.
+- **Photos as well as video.** Pick a photo and the preview *is* the result, at the
+  photo's own resolution — there is nothing to run, so there is no button to press.
 - **Higher-resolution output.** Pixel boost renders the swapped face at 512, 768 or 1024
   instead of 256, at a proportional cost in time.
+- **Optional face enhancer.** `gpen_bfr_256` restores detail in the swapped face. It is a
+  separate 28 MB download from **Settings → Models**, and the app works without it.
+- **Use it from a computer.** Turn on **Settings → Remote API** and open the address it
+  shows in a browser on your PC: drop in a face and a target, and the phone does the work.
+  There is an HTTP API behind that page for scripting.
 - **FaceFusion's own controls.** Swapper weight, mask blur and padding, detector and
   landmarker thresholds, and every-face or largest-face selection.
 - **Trim, live progress, cancel a run in progress, save to gallery, share.**
@@ -32,9 +39,10 @@ The app measures your chip at startup and downloads the matching build:
 
 | tier | chips |
 |---|---|
-| `v68` | Snapdragon 888 and older, 8 Gen 1, or parts with under 8 MB VTCM |
-| `v73` | 8 Gen 2, 8 Gen 3, newer v81 parts |
+| `v68` | Snapdragon 888 and older, 8 Gen 1 (v69), or parts with under 8 MB VTCM |
+| `v73` | 8 Gen 2 (v73), 8 Gen 3 (v75), and v79 parts other than the SM8750 |
 | `v79` | Snapdragon 8 Elite (SM8750) |
+| `v81` | Snapdragon 8 Elite Gen 5 and newer |
 
 Devices without a Qualcomm NPU are not supported — there is no CPU fallback.
 

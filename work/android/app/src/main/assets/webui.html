@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FaceFusion</title>
+<style>
+  :root {
+    --bg: #0d0d10; --card: #17171c; --line: #2a2a33; --fg: #e8e8ee;
+    --dim: #9a9aa8; --accent: #d8d8e4; --err: #ff6b6b; --ok: #6bd48a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 24px 16px 60px;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  header { display: flex; align-items: baseline; gap: 14px; margin-bottom: 4px; }
+  h1 { font-size: 20px; letter-spacing: .18em; font-weight: 300; margin: 0; }
+  h1 b { font-weight: 700; }
+  #health { color: var(--dim); font-size: 12px; font-family: ui-monospace, Consolas, monospace; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 18px; }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+  .pane {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 12px; min-height: 260px; display: flex; flex-direction: column;
+  }
+  .pane h2 {
+    font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--dim); margin: 2px 2px 10px; font-weight: 500;
+  }
+  .drop {
+    flex: 1; border: 1px dashed var(--line); border-radius: 10px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; overflow: hidden;
+    color: var(--dim); text-align: center; padding: 10px; transition: border-color .15s;
+  }
+  .drop:hover, .drop.over { border-color: var(--accent); color: var(--fg); }
+  .drop img, .drop video { max-width: 100%; max-height: 340px; border-radius: 8px; display: block; }
+  .opts {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 14px; margin-top: 14px; display: flex; flex-wrap: wrap;
+    gap: 18px; align-items: center;
+  }
+  label { font-size: 12px; color: var(--dim); display: flex; align-items: center; gap: 8px; }
+  input[type=range] { width: 130px; accent-color: var(--accent); }
+  select, button {
+    background: #22222a; color: var(--fg); border: 1px solid var(--line);
+    border-radius: 8px; padding: 7px 10px; font: inherit;
+  }
+  button.go {
+    background: var(--accent); color: #101014; border: 0; font-weight: 600;
+    padding: 13px 20px; border-radius: 12px; cursor: pointer; width: 100%;
+    margin-top: 14px; font-size: 15px;
+  }
+  button.go:disabled { opacity: .45; cursor: default; }
+  #status { margin-top: 12px; min-height: 20px; font-size: 13px; }
+  #status.err { color: var(--err); }
+  #status.ok { color: var(--ok); }
+  a.dl { color: var(--accent); }
+  .hint { color: var(--dim); font-size: 12px; margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>FACE<b>FUSION</b></h1>
+    <span id="health">checking...</span>
+  </header>
+  <div class="hint">
+    Runs on the phone's NPU. The content check runs on every request, exactly as it does on
+    the phone's screen.
+  </div>
+
+  <div class="grid">
+    <div class="pane">
+      <h2>Source face</h2>
+      <div class="drop" id="srcDrop">Drop an image, or click to pick</div>
+    </div>
+    <div class="pane">
+      <h2>Target</h2>
+      <div class="drop" id="tgtDrop">Drop an image or a video, or click to pick</div>
+    </div>
+  </div>
+
+  <div class="opts">
+    <label>Weight <input type="range" id="weight" min="0" max="1" step="0.05" value="0.5">
+      <span id="weightV">0.50</span></label>
+    <label>Detail
+      <select id="boost">
+        <option value="1">256</option>
+        <option value="2">512</option>
+        <option value="3">768</option>
+        <option value="4">1024</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="enhancer"> Face enhancer</label>
+    <label><input type="checkbox" id="largest"> Largest face only</label>
+  </div>
+
+  <button class="go" id="go" disabled>Swap</button>
+  <div id="status"></div>
+
+  <div class="pane" id="resultPane" style="margin-top:14px; display:none">
+    <h2>Result</h2>
+    <div class="drop" id="result" style="cursor:default"></div>
+    <div style="margin-top:10px"><a class="dl" id="dl" download>Download</a></div>
+  </div>
+</div>
+
+<script>
+// One page, no framework, no CDN: it is served by the phone itself and has to work on a
+// network with no internet on it.
+const $ = s => document.querySelector(s);
+let src = null, tgt = null, sourceSent = null;
+
+function picker(dropEl, accept, onPick) {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = accept; input.style.display = 'none';
+  document.body.appendChild(input);
+  dropEl.onclick = () => input.click();
+  input.onchange = () => input.files[0] && onPick(input.files[0]);
+  dropEl.ondragover = e => { e.preventDefault(); dropEl.classList.add('over'); };
+  dropEl.ondragleave = () => dropEl.classList.remove('over');
+  dropEl.ondrop = e => {
+    e.preventDefault(); dropEl.classList.remove('over');
+    if (e.dataTransfer.files[0]) onPick(e.dataTransfer.files[0]);
+  };
+}
+
+function show(el, file) {
+  const url = URL.createObjectURL(file);
+  el.innerHTML = '';
+  const node = document.createElement(file.type.startsWith('video') ? 'video' : 'img');
+  node.src = url;
+  if (node.tagName === 'VIDEO') { node.controls = true; node.muted = true; }
+  el.appendChild(node);
+}
+
+picker($('#srcDrop'), 'image/*', f => {
+  src = f; sourceSent = null; show($('#srcDrop'), f); ready();
+});
+picker($('#tgtDrop'), 'image/*,video/*', f => {
+  tgt = f; show($('#tgtDrop'), f); ready();
+});
+
+function ready() { $('#go').disabled = !(src && tgt); }
+$('#weight').oninput = e => $('#weightV').textContent = (+e.target.value).toFixed(2);
+
+function qs() {
+  const p = new URLSearchParams();
+  p.set('weight', $('#weight').value);
+  p.set('boost', $('#boost').value);
+  p.set('enhancer', $('#enhancer').checked ? 1 : 0);
+  p.set('largest', $('#largest').checked ? 1 : 0);
+  return '?' + p.toString();
+}
+
+function say(msg, cls) { const s = $('#status'); s.textContent = msg; s.className = cls || ''; }
+
+async function post(path, file) {
+  const r = await fetch(path, { method: 'POST', body: file });
+  if (!r.ok) {
+    let msg = 'HTTP ' + r.status;
+    try {
+      const j = await r.json();
+      msg = j.error || msg;
+      if (j.detail) msg += ' (' + j.detail + ')';
+    } catch (e) { /* not json */ }
+    throw new Error(msg);
+  }
+  return r;
+}
+
+$('#go').onclick = async () => {
+  $('#go').disabled = true;
+  const t0 = Date.now();
+  try {
+    // Only when it changed: embedding the face costs a round trip and the phone keeps it.
+    if (sourceSent !== src) {
+      say('reading the source face...');
+      await post('/source' + qs(), src);
+      sourceSent = src;
+    }
+    const video = tgt.type.startsWith('video');
+    say(video ? 'swapping the clip -- this runs at about 18 ms a frame...'
+              : 'swapping...');
+    let r;
+    try {
+      r = await post((video ? '/swap_video' : '/swap') + qs(), tgt);
+    } catch (e) {
+      // The phone forgets the source when the app is killed, which it will be: it holds
+      // ~275 MB of context binaries. Re-send it once rather than making the page look
+      // broken for a reason the person at the browser cannot see.
+      if (!/source first/i.test(e.message)) throw e;
+      say('the phone restarted -- re-sending the source face...');
+      await post('/source' + qs(), src);
+      sourceSent = src;
+      r = await post((video ? '/swap_video' : '/swap') + qs(), tgt);
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    $('#resultPane').style.display = 'flex';
+    $('#result').innerHTML = '';
+    const node = document.createElement(video ? 'video' : 'img');
+    node.src = url;
+    if (video) { node.controls = true; node.autoplay = true; node.muted = true; }
+    $('#result').appendChild(node);
+    const dl = $('#dl');
+    dl.href = url;
+    dl.download = video ? 'swapped.mp4' : 'swapped.png';
+    say('done in ' + ((Date.now() - t0) / 1000).toFixed(1) + ' s', 'ok');
+  } catch (e) {
+    say(e.message, 'err');
+  }
+  $('#go').disabled = false;
+};
+
+fetch('/health').then(r => r.json()).then(h => {
+  $('#health').textContent =
+    h.tier + (h.ready ? '' : '  models missing: ' + (h.models_missing || []).join(' ')) +
+    (h.enhancer ? '  enhancer' : '');
+  if (!h.enhancer) { $('#enhancer').disabled = true; $('#enhancer').parentElement.style.opacity = .4; }
+}).catch(() => $('#health').textContent = 'no answer from the phone');
+</script>
+</body>
+</html>

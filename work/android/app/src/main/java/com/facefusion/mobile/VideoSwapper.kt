@@ -119,16 +119,47 @@ class VideoSwapper(
         decoder.configure(vf, null, null, 0)
         decoder.start()
 
+        val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+
+        /*
+         * ASK the encoder what it will accept, rather than handing it the clip's size.
+         *
+         * A 196x112 clip made `encoder.start()` throw MediaCodec.CodecException -- with an
+         * EMPTY message, so it arrived as a failure with nothing in it. 196 is not a
+         * multiple of 16, and this device's AVC encoder has a width alignment of 16. The
+         * dimensions a hardware encoder takes are a property of the silicon, so they are
+         * asked for here instead of assumed; the alignment is 2 on some parts and 16 on
+         * others, and hardcoding either is how this breaks again on a different phone.
+         *
+         * Aligned DOWN and the frame is cropped to match: rounding up would need padding,
+         * and a black seam on two edges of every frame is worse than losing up to 15 px.
+         */
+        val vcaps = encoder.codecInfo
+            .getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC).videoCapabilities
+        val encW = (outW / vcaps.widthAlignment) * vcaps.widthAlignment
+        val encH = (outH / vcaps.heightAlignment) * vcaps.heightAlignment
+        if (encW < vcaps.supportedWidths.lower || encH < vcaps.supportedHeights.lower) {
+            encoder.release()
+            // A clear sentence rather than a CodecException: nothing about the clip can be
+            // changed by retrying, and the numbers say exactly why.
+            error("this device cannot encode ${outW}x$outH video -- the smallest it takes " +
+                  "is ${vcaps.supportedWidths.lower}x${vcaps.supportedHeights.lower}")
+        }
+        if (encW != outW || encH != outH)
+            onLog("encoder wants multiples of ${vcaps.widthAlignment}x" +
+                  "${vcaps.heightAlignment}: cropping ${outW}x$outH to ${encW}x$encH")
+
         // The encoder is sized to the UPRIGHT frame, so the output needs no orientation
         // hint of its own -- the rotation is baked into the pixels.
-        val encFormat = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, outW, outH).apply {
+        val encFormat = MediaFormat.createVideoFormat(
+                MediaFormat.MIMETYPE_VIDEO_AVC, encW, encH).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT,
                 MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
-            setInteger(MediaFormat.KEY_BIT_RATE, (outW * outH * fps * 0.25).toInt())
+            setInteger(MediaFormat.KEY_BIT_RATE, (encW * encH * fps * 0.25).toInt()
+                .coerceAtLeast(64_000))
             setInteger(MediaFormat.KEY_FRAME_RATE, fps)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
         }
-        val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
         encoder.configure(encFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         encoder.start()
 
@@ -230,7 +261,8 @@ class VideoSwapper(
                         val faces = NativePipe.processFrame(bgr, outW, outH)
                         if (faces < 0) error("native: ${NativePipe.lastError()}")
                         onFrame(bgr, outW, outH)
-                        feedEncoder(encoder, bgr, outW, outH, pts - trimStartUs)
+                        feedEncoder(encoder, cropBgr(bgr, outW, outH, encW, encH),
+                                    encW, encH, pts - trimStartUs)
                         swapped++
                         onProgress(swapped, expected)
                     }
@@ -360,6 +392,23 @@ class VideoSwapper(
         if (!ok) onLog("encoder planes were not direct buffers")
         val size = p[0].rowStride * h * 3 / 2
         encoder.queueInputBuffer(ix, 0, size, ptsUs.coerceAtLeast(0), 0)
+    }
+
+    /**
+     * Centre-crop a BGR frame to what the encoder accepts.
+     *
+     * Returns the input untouched in the common case, which is every clip whose dimensions
+     * already fit. The offsets are forced even so the chroma plane still lines up with the
+     * luma when this is subsampled on the way in.
+     */
+    private fun cropBgr(src: ByteArray, w: Int, h: Int, dw: Int, dh: Int): ByteArray {
+        if (dw == w && dh == h) return src
+        val x0 = ((w - dw) / 2) and 1.inv()
+        val y0 = ((h - dh) / 2) and 1.inv()
+        val out = ByteArray(dw * dh * 3)
+        for (y in 0 until dh)
+            System.arraycopy(src, ((y0 + y) * w + x0) * 3, out, y * dw * 3, dw * 3)
+        return out
     }
 
     private fun signalEncoderEOS(encoder: MediaCodec) {
