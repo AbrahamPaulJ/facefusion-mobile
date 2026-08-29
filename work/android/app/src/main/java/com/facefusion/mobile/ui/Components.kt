@@ -188,7 +188,10 @@ fun PreviewPane(
             // Height only: the shift was vertical, and pinning the width too would clip the
             // "Change" button the original pane carries.
             Box(
-                Modifier.height(28.dp),
+                // 40 dp, not 28: a Material TextButton has a 40 dp minimum height, so
+                // reserving an IconButton's 28 clipped "Change" and "Save frame" to their
+                // top halves. Reserve the tallest thing the slot can hold.
+                Modifier.height(40.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, content = trailing)
@@ -309,7 +312,7 @@ fun OutputPane(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Caption(if (partial) "Output  (partial)" else "Output", Modifier.weight(1f))
-            Box(Modifier.height(28.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.height(40.dp), contentAlignment = Alignment.Center) {
                 TextButton(
                     onClick = { onSaveFrame(positionMs) },
                     enabled = enabled,

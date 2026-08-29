@@ -301,8 +301,8 @@ class MainActivity : ComponentActivity() {
                 //
                 // Keyed on the inputs rather than run in a loop: it fires when the user
                 // finishes picking, and `previewWarm` stops it repeating.
-                LaunchedEffect(sourceUri, targetFile, modelsMissing) {
-                    if (sourceUri != null && targetFile != null &&
+                LaunchedEffect(sourceUri, targetFile, targetImage, modelsMissing) {
+                    if (sourceUri != null && (targetFile != null || targetImage != null) &&
                         !modelsMissing && !previewWarm && !busy) {
                         refreshSwapped(force = true)
                     }
@@ -313,7 +313,7 @@ class MainActivity : ComponentActivity() {
                             Screen.Swap -> SwapScreen(
                                 sourceThumb = sourceThumb,
                                 hasSource = sourceUri != null,
-                                hasTarget = targetFile != null,
+                                hasTarget = targetFile != null || targetImage != null,
                                 durationMs = durationMs,
                                 trimStartMs = trimStartMs,
                                 trimEndMs = trimEndMs,
@@ -360,6 +360,7 @@ class MainActivity : ComponentActivity() {
                                 onPickTarget = {
                                     pickTarget.launch(arrayOf("video/*", "image/*"))
                                 },
+                                onClearTarget = ::clearTarget,
                                 onSwap = { runSwap() },
                                 onCancel = { cancelRequested = true; status = "Cancelling..." },
                                 modelsMissing = modelsMissing,
@@ -582,7 +583,9 @@ class MainActivity : ComponentActivity() {
         if (busy || previewBusy) return
         if (!previewWarm && !force) return
         val src = sourceUri ?: return
-        if (targetFile == null) return
+        // An image target has no targetFile -- it is held as a bitmap. Testing the
+        // video handle here meant an image never previewed at all.
+        if (targetFile == null && targetImage == null) return
 
         lifecycleScope.launch {
             previewBusy = true
@@ -748,6 +751,21 @@ class MainActivity : ComponentActivity() {
             status = "Target ready: ${bmp.width} x ${bmp.height}"
             preparing = false
         }
+    }
+
+    /** Drop the target and everything derived from it. */
+    private fun clearTarget() {
+        previews.closeTarget()
+        targetFile = null
+        targetImage = null
+        targetName = null
+        durationMs = 0L
+        trimStartMs = 0f; trimEndMs = 0f
+        targetAspect = 16f / 9f
+        originalFrame = null
+        outputFile = null; outputImage = null; outputPartial = false; savedUri = null
+        invalidatePreview()
+        status = ""
     }
 
     private fun runSwap() {

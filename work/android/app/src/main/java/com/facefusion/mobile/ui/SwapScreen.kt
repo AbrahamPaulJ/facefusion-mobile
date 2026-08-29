@@ -8,6 +8,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -100,6 +101,7 @@ fun SwapScreen(
     savedPath: String?,
     onPickSource: () -> Unit,
     onPickTarget: () -> Unit,
+    onClearTarget: () -> Unit,
     onSwap: () -> Unit,
     onCancel: () -> Unit,
     modelsMissing: Boolean,
@@ -172,10 +174,30 @@ fun SwapScreen(
                 actionIcon = if (hasTarget) null else Icons.Default.Add,
                 zoom = zoom,
             ) {
-                if (hasTarget) TextButton(onPickTarget, enabled = idle) { Text("Change") }
+                if (hasTarget) {
+                    // Icons rather than the word "Change": two actions fit where one word
+                    // did, and the pane itself is already the picker, so the word was
+                    // saying a third time what the tap and the + icon already say.
+                    IconButton(onPickTarget, enabled = idle, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Default.Add, "Choose another target",
+                             Modifier.size(20.dp),
+                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    IconButton(onClearTarget, enabled = idle, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Default.Delete, "Remove target",
+                             Modifier.size(20.dp),
+                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
             }
 
-            PreviewPane(
+            // Hidden until there IS a target: an empty pane telling you to pick one is
+            // the same instruction the pane above already gives, in the same words.
+            //
+            // `|| modelsMissing` because the download overlay lives on this pane -- it is
+            // the one that cannot draw without the models -- so hiding it unconditionally
+            // would leave a fresh install with no way to fetch them.
+            if (hasTarget || modelsMissing) PreviewPane(
                 label = "Swapped",
                 height = paneHeight,
                 bitmap = preview.swapped,
@@ -184,7 +206,7 @@ fun SwapScreen(
                     preview.note != null -> preview.note
                     preview.busy && !preview.warm -> "Loading models, this takes a few seconds..."
                     preview.busy -> "Swapping this frame..."
-                    !hasSource || !hasTarget -> "Pick a source face and a target"
+                    !hasSource -> "Pick a source face"
                     // No "tap refresh" any more: the preview warms itself as soon as both
                     // inputs exist, so this is a transient state rather than an instruction.
                     else -> "Preparing preview..."
@@ -365,16 +387,18 @@ fun SwapScreen(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Spacer(Modifier.height(2.dp))
+                // Enhancer first: it is the newest control and the one being reached
+                // for, and it is also the only one that can be absent -- so when it IS
+                // there it should not be buried under three cards that are always there.
+                if (hasEnhancer) {
+                    FaceEnhancerCard(opts, onOptsChange, openCard == "enhancer",
+                                     { onToggleCard("enhancer") })
+                }
                 FaceSwapperCard(opts, onOptsChange, openCard == "swapper",
                                 { onToggleCard("swapper") }, inswapperAvailable = hasInswapper)
                 FaceMaskerCard(opts, onOptsChange, openCard == "masker", { onToggleCard("masker") })
                 FaceDetectorCard(opts, onOptsChange, openCard == "detector",
                                  { onToggleCard("detector") })
-                // Only when gpen_<tier>.bin is actually on the device.
-                if (hasEnhancer) {
-                    FaceEnhancerCard(opts, onOptsChange, openCard == "enhancer",
-                                     { onToggleCard("enhancer") })
-                }
                 if (opts != SwapOptions()) {
                     TextButton(
                         onClick = { onOptsChange(SwapOptions()) },
