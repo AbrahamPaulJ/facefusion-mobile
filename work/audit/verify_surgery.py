@@ -24,13 +24,25 @@ CASES = [
      'work/calib/yoloface/*.raw',  (1,3,640,640),  ['input'], None),
     ('hyperswap', 'work/models/hyperswap_1a_256.onnx',  'work/onnx/hyperswap_1a_256_sim.onnx',
      'work/calib/swap_target/*.raw', (1,3,256,256), ['target','source'], 'output'),
+    # The enhancer's calibration crops are the SWAPPER'S OUTPUT, not raw target frames --
+    # it only ever sees a face that hyperswap already wrote.  Capture them from the stage
+    # boundary in work/pipeline, or this measures a distribution the model never meets.
+    ('gpen',      'work/models/gpen_bfr_256.onnx',       'work/onnx/gpen_bfr_256_sim.onnx',
+     'work/calib/gpen/*.raw',      (1,3,256,256),  ['input'], 'output'),
 ]
 
 n_cases = int(sys.argv[1]) if len(sys.argv) > 1 else 8
 worst_overall = None
+n_checked = 0
 for name, orig_p, new_p, pattern, shape, inputs, out_name in CASES:
     if not os.path.exists(new_p):
         print('%-11s SKIP (no %s)' % (name, new_p)); continue
+    # A graph WITH no calibration data used to reach the print below with worst=None and
+    # die on the %-format.  Say what is missing instead: an absent calib dir is a thing to
+    # go capture, not a crash.
+    if not sorted(glob.glob(pattern)):
+        print('%-11s SKIP (graph is built, but no calibration data at %s)' % (name, pattern))
+        continue
     a, b = sess(orig_p), sess(new_p)
     a_names = [i.name for i in a.get_inputs()]
     a_outs  = [o.name for o in a.get_outputs()]
@@ -53,8 +65,15 @@ for name, orig_p, new_p, pattern, shape, inputs, out_name in CASES:
     print('%-11s %2d cases  worst SNR vs original: %s dB   (output `%s`)'
           % (name, len(files), ('inf' if worst == float('inf') else '%.1f' % worst),
              out_name or a_outs[0]))
+    n_checked += 1
     if worst != float('inf'):
         worst_overall = worst if worst_overall is None else min(worst_overall, worst)
 
-print('\nworst finite SNR across all surgeries: %s dB' %
-      ('none - all bit-exact' if worst_overall is None else '%.1f' % worst_overall))
+# Distinguish "every surgery was exact" from "nothing ran".  The summary used to print
+# `all bit-exact` for both, which reads as a pass when in fact nothing was checked.
+if not n_checked:
+    print('\nNOTHING CHECKED - no graph had both a build and calibration data')
+else:
+    print('\n%d surgeries checked, worst finite SNR: %s dB' %
+          (n_checked, 'none - all bit-exact' if worst_overall is None
+           else '%.1f' % worst_overall))

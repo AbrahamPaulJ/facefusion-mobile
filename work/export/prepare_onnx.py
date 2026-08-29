@@ -606,6 +606,331 @@ def do_nsfw():
 	return save(s, 'nsfw_2_sim')
 
 
+# ---------------------------------------------------------------------- gpen
+
+def do_gpen():
+	"""`gpen_bfr_256`, the face enhancer: make every modulated conv kernel STATIC.
+
+	GPEN is a StyleGAN2 generator, and StyleGAN2 modulates its convolution weights with the
+	style vector at RUNTIME.  As exported, 20 of the 45 convs take a computed kernel:
+
+	    style -> Mul(W) -> Pow/ReduceSum/Sqrt/Div (demodulate) -> Reshape -> Conv
+
+	HTP maps Conv only when the kernel is a static parameter, and those 20 carry 7.44 of
+	the graph's 8.57 GMAC -- 87% of the model would not lower.  The chain also builds 97
+	rank>=5 activations (12 at rank 6, e.g. [1,256,256,3,3]), where the converter's
+	elementwise broadcast path is `max_rank <= 5` and the arch linter's MAX_RANK is 4.
+
+	The refactor is exact algebra, not an approximation.  Modulation scales per INPUT
+	channel, demodulation per OUTPUT channel, and batch is 1 (hence group 1), so
+
+	    Conv(x, W[o,i,..] * s[i])[o] * d[o]  ==  Conv(x * s[i], W)[o] * d[o]
+
+	and the demodulator itself drops out of rank 5, because
+
+	    d[o] = 1/sqrt( sum_{i,kh,kw} (W[o,i,kh,kw] * s[i])^2 + eps )
+	         = 1/sqrt( sum_i s[i]^2 * A[o,i] + eps ),  A[o,i] = sum_{kh,kw} W[o,i,kh,kw]^2
+
+	A is CONSTANT, so the whole demodulator becomes one [1,I]x[I,O] MatMul.  Every kernel
+	ends up static, every rank-5/6 tensor disappears, and the Pow/ReduceSum over a 5-D
+	weight goes with it.
+
+	The 20 split cleanly and the code asserts it: 13 demodulated convs (7 Conv 3x3 + 6
+	ConvTranspose 3x3 s2) that carry NO bias, and 7 `to_rgb` 1x1 convs that carry a bias
+	and are modulated but NOT demodulated.  That matters -- a bias must be added AFTER the
+	demodulation scale, never folded through it, so a demodulated conv that also had a bias
+	would need a code path this does not have.  It bails instead of guessing.
+
+	NOT bit-exact: the two sums reassociate.  verify_surgery.py measures the cost.
+	"""
+	import onnxsim
+
+	m = load('gpen_bfr_256')
+
+	# Fold FIRST.  The export declares 128 initialisers as graph inputs as well (the old
+	# PyTorch pattern onnxsim warns about), and every blur kernel reaches its Conv through a
+	# Reshape, which makes 18 more convs look dynamic than are.  Folding takes dynamic
+	# kernels 38 -> 20 and leaves exactly the modulated ones, so the matcher sees a clean
+	# pattern instead of having to tell the two apart.
+	s, ok = onnxsim.simplify(m, overwrite_input_shapes={'input': [1, 3, 256, 256]})
+	if not ok:
+		sys.exit('  onnxsim reported failure (pre-pass)')
+	m = s
+	g = m.graph
+	init = {t.name: t for t in g.initializer}
+	prod = {o: n for n in g.node for o in n.output}
+
+	def const_val(name):
+		if name in init:
+			return numpy_helper.to_array(init[name])
+		n = prod.get(name)
+		if n is not None and n.op_type == 'Constant':
+			return numpy_helper.to_array(n.attribute[0].t)
+		return None
+
+	def expect(cond, node, what):
+		if not cond:
+			sys.exit('  %s: %s' % (node.name, what))
+
+	new_inits = []
+	out_nodes = []
+	n_demod = n_plain = 0
+
+	def shape_init(dims, tag):
+		name = tag
+		new_inits.append(numpy_helper.from_array(
+			numpy.asarray(dims, dtype=numpy.int64), name))
+		return name
+
+	for node in g.node:
+		if node.op_type not in ('Conv', 'ConvTranspose') or node.input[1] in init:
+			out_nodes.append(node)
+			continue
+
+		b = node.name
+		# ---- walk the kernel chain: Reshape [ <- Transpose ] <- Mul
+		rs = prod.get(node.input[1])
+		expect(rs is not None and rs.op_type == 'Reshape', node, 'kernel is not a Reshape')
+		src = prod.get(rs.input[0])
+		transposed = False
+		if src is not None and src.op_type == 'Transpose':
+			perm = next((list(a.ints) for a in src.attribute if a.name == 'perm'), None)
+			# [1,O,I,kh,kw] -> [1,I,O,kh,kw], i.e. ONNX's ConvTranspose kernel layout
+			expect(perm == [0, 2, 1, 3, 4], node, 'unexpected kernel Transpose perm %s' % perm)
+			transposed = True
+			src = prod.get(src.input[0])
+		expect(src is not None and src.op_type == 'Mul', node, 'kernel chain does not end in Mul')
+
+		def modulate_of(mul):
+			"""(base weight, style tensor) if `mul` is the modulating Mul, else (None, None)."""
+			for a, other in ((mul.input[0], mul.input[1]), (mul.input[1], mul.input[0])):
+				w = const_val(a)
+				if w is not None and w.ndim == 5:
+					return w, other
+			return None, None
+
+		W5, style_r = modulate_of(src)
+		demod_t = None
+		if W5 is None:
+			# `src` is the DEMODULATING Mul: one operand is the modulating Mul, the other
+			# the reshaped 1/sqrt(...) vector.
+			mod = None
+			for a, other in ((src.input[0], src.input[1]), (src.input[1], src.input[0])):
+				n = prod.get(a)
+				if n is not None and n.op_type == 'Mul':
+					mod, demod_t = n, other
+					break
+			expect(mod is not None, node, 'no modulating Mul beneath the demodulating one')
+			W5, style_r = modulate_of(mod)
+			expect(W5 is not None, node, 'modulating Mul carries no 5-D weight')
+
+		sr = prod.get(style_r)
+		expect(sr is not None and sr.op_type == 'Reshape', node, 'style is not reshaped')
+		style = sr.input[0]                       # [1, I], straight off the modulation Gemm
+
+		_, O, I, kh, kw = W5.shape
+		attrs = {a.name: helper.get_attribute_value(a) for a in node.attribute}
+		expect(attrs.get('group', 1) == 1, node, 'group != 1 breaks the per-channel identity')
+
+		# ---- static kernel
+		W4 = W5[0]                                            # [O, I, kh, kw]
+		if transposed:
+			W4 = W4.transpose(1, 0, 2, 3)                     # [I, O, kh, kw]
+		wn = b + '/ff_W'
+		new_inits.append(numpy_helper.from_array(numpy.ascontiguousarray(W4), wn))
+
+		# ---- fold the style onto the ACTIVATION instead of the kernel
+		s4 = b + '/ff_style4'
+		out_nodes.append(helper.make_node(
+			'Reshape', [style, shape_init([1, I, 1, 1], b + '/ff_style_shape')], [s4],
+			name=b + '/ff_style_reshape'))
+		xs = b + '/ff_x'
+		out_nodes.append(helper.make_node('Mul', [node.input[0], s4], [xs], name=b + '/ff_xscale'))
+
+		has_bias = len(node.input) > 2
+		conv_ins = [xs, wn]
+		if demod_t is None:
+			# No demodulation: the bias rides along inside the conv, exactly as before.
+			if has_bias:
+				conv_ins.append(node.input[2])
+			out_nodes.append(helper.make_node(
+				node.op_type, conv_ins, [node.output[0]], name=b, **attrs))
+			n_plain += 1
+			continue
+
+		# A demodulated conv must not carry a bias: the scale below would multiply it.
+		expect(not has_bias, node, 'demodulated conv has a bias; would need folding after the scale')
+
+		# ---- rebuild the demodulator at rank 2
+		dr = prod.get(demod_t)
+		expect(dr is not None and dr.op_type == 'Reshape', node, 'demod is not reshaped')
+		dv = prod.get(dr.input[0])
+		expect(dv is not None and dv.op_type == 'Div', node, 'demod does not come from a Div')
+		one = const_val(dv.input[0])
+		sq = prod.get(dv.input[1])
+		expect(sq is not None and sq.op_type == 'Sqrt', node, 'demod divisor is not a Sqrt')
+		ad = prod.get(sq.input[0])
+		expect(ad is not None and ad.op_type == 'Add', node, 'no epsilon Add under the Sqrt')
+		eps = const_val(ad.input[1])
+		expect(one is not None and eps is not None, node, 'demod eps/numerator are not constant')
+
+		# A[o,i] = sum over the kernel window of W^2, accumulated in float64 -- this is the
+		# one place the refactor could lose precision that the original did not, and it is
+		# free to do it wide.
+		A = (W5[0].astype(numpy.float64) ** 2).sum(axis=(2, 3))          # [O, I]
+		an = b + '/ff_A'
+		new_inits.append(numpy_helper.from_array(
+			numpy.ascontiguousarray(A.T.astype(numpy.float32)), an))     # [I, O]
+		en = b + '/ff_eps'
+		new_inits.append(numpy_helper.from_array(numpy.asarray(eps, numpy.float32), en))
+		on = b + '/ff_one'
+		new_inits.append(numpy_helper.from_array(numpy.asarray(one, numpy.float32), on))
+
+		s2, t, t2, r, d, d4 = (b + '/ff_' + k for k in ('s2', 't', 't2', 'r', 'd', 'd4'))
+		conv_out = b + '/ff_conv'
+		out_nodes += [
+			helper.make_node('Mul', [style, style], [s2], name=b + '/ff_s2'),
+			helper.make_node('MatMul', [s2, an], [t], name=b + '/ff_demod_mm'),
+			helper.make_node('Add', [t, en], [t2], name=b + '/ff_demod_eps'),
+			helper.make_node('Sqrt', [t2], [r], name=b + '/ff_demod_sqrt'),
+			helper.make_node('Div', [on, r], [d], name=b + '/ff_demod_div'),
+			helper.make_node('Reshape', [d, shape_init([1, O, 1, 1], b + '/ff_d_shape')], [d4],
+							 name=b + '/ff_demod_reshape'),
+			helper.make_node(node.op_type, conv_ins, [conv_out], name=b, **attrs),
+			helper.make_node('Mul', [conv_out, d4], [node.output[0]], name=b + '/ff_demod_scale'),
+		]
+		n_demod += 1
+
+	print('  rewrote %d demodulated + %d modulated-only convs' % (n_demod, n_plain))
+	if n_demod + n_plain != 20:
+		print('  WARNING: expected 20 modulated convs, matched %d' % (n_demod + n_plain))
+
+	del g.node[:]
+	g.node.extend(out_nodes)
+	g.initializer.extend(new_inits)
+
+	# ---- second pass: the six `to_rgbs.N/upsample` blocks, the last rank-6 tensors
+	#
+	# StyleGAN's upfirdn2d upsample inserts a zero after every sample by reshaping NHWC to
+	# SIX dimensions and padding the two unit axes:
+	#
+	#   [1,C,H,W] -Transpose-> [1,H,W,C] -Reshape-> [1,H,1,W,1,C] -Pad-> [1,H,2,W,2,C]
+	#                                              -Reshape-> [1,2H,2W,C]
+	#
+	# Rank 6 is past every limit that matters (the converter's elementwise broadcast path
+	# is `max_rank <= 5`, the arch linter's MAX_RANK is 4), and it exists only to express
+	# "scatter each pixel onto an even grid position" -- which IS a stride-2 transposed
+	# convolution with an identity kernel.  Same values, rank 4, one op:
+	#
+	#   ConvTranspose(x, I[C,C,1,1], strides 2, output_padding 1) -> [1,C,2H,2W]
+	#
+	# output_padding 1 is what makes it 2H rather than 2*(H-1)+1: the zero-insert leaves a
+	# trailing zero after the LAST sample too, and without it that column is dropped.
+	m = shape_inference.infer_shapes(strip_value_info(m), strict_mode=False)
+	g = m.graph
+	rank = {vi.name: len(vi.type.tensor_type.shape.dim) for vi in g.value_info}
+	dims = {vi.name: [d.dim_value for d in vi.type.tensor_type.shape.dim] for vi in g.value_info}
+	init = {t.name: t for t in g.initializer}
+	prod = {o: n for n in g.node for o in n.output}
+	cons = {}
+	for n in g.node:
+		for i in n.input:
+			cons.setdefault(i, []).append(n)
+
+	def only(t):
+		c = cons.get(t, [])
+		return c[0] if len(c) == 1 else None
+
+	rewired = {}          # old tensor name -> new tensor name
+	extra_nodes = {}      # id(node to splice before) -> replacement nodes
+	extra_inits = []
+	drop = set()
+	n_up = 0
+
+	for rs1 in list(g.node):
+		if rs1.op_type != 'Reshape' or rank.get(rs1.output[0]) != 6:
+			continue
+		tp = prod.get(rs1.input[0])
+		if tp is None or tp.op_type != 'Transpose':
+			continue
+		perm = next((list(a.ints) for a in tp.attribute if a.name == 'perm'), None)
+		if perm != [0, 2, 3, 1]:
+			continue
+		pad = only(rs1.output[0])
+		if pad is None or pad.op_type != 'Pad':
+			continue
+		rs2 = only(pad.output[0])
+		if rs2 is None or rs2.op_type != 'Reshape' or rank.get(rs2.output[0]) != 4:
+			continue
+		pv = numpy_helper.to_array(init[pad.input[1]]).tolist() if pad.input[1] in init else None
+		# begins[6] + ends[6]: one trailing element on the two unit axes, nothing else.
+		if pv != [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0]:
+			print('  to_rgbs upsample: unexpected pad %s, left alone' % pv)
+			continue
+
+		x = tp.input[0]
+		C = dims[x][1]
+		wn = rs1.name + '/ff_up_I'
+		eye = numpy.eye(C, dtype=numpy.float32).reshape(C, C, 1, 1)
+		extra_inits.append(numpy_helper.from_array(eye, wn))
+		up = rs1.name + '/ff_up'
+		ct = helper.make_node(
+			'ConvTranspose', [x, wn], [up], name=rs1.name + '/ff_upsample',
+			kernel_shape=[1, 1], strides=[2, 2], pads=[0, 0, 0, 0], output_padding=[1, 1])
+		# back to NHWC, because Pad_1 and the blur conv downstream still work there
+		nhwc = rs1.name + '/ff_up_nhwc'
+		tr = helper.make_node(
+			'Transpose', [up], [nhwc], name=rs1.name + '/ff_up_t', perm=[0, 2, 3, 1])
+		rewired[rs2.output[0]] = nhwc
+		# The replacement is spliced in AT the Transpose it replaces, not prepended: its
+		# input is the previous block's conv output, which is produced partway down the
+		# graph, and ONNX requires the node list to stay topologically sorted.
+		extra_nodes[id(tp)] = [ct, tr]
+		drop.update(id(n) for n in (tp, rs1, pad, rs2))
+		n_up += 1
+
+	if rewired:
+		kept = []
+		for n in g.node:
+			if id(n) in extra_nodes:
+				kept.extend(extra_nodes[id(n)])
+			if id(n) in drop:
+				continue
+			for k, i in enumerate(n.input):
+				if i in rewired:
+					n.input[k] = rewired[i]
+			kept.append(n)
+		del g.node[:]
+		g.node.extend(kept)
+		g.initializer.extend(extra_inits)
+	print('  replaced %d upfirdn2d upsamples with a stride-2 ConvTranspose' % n_up)
+
+	# The old kernel chains are now unreachable; onnxsim drops them along with the
+	# initialisers they held.
+	m = shape_inference.infer_shapes(strip_value_info(m), strict_mode=False)
+	s, ok = onnxsim.simplify(m, overwrite_input_shapes={'input': [1, 3, 256, 256]})
+	if not ok:
+		sys.exit('  onnxsim reported failure (post-pass)')
+	m = shape_inference.infer_shapes(strip_value_info(s), strict_mode=False)
+	checker.check_model(m)
+
+	# The two properties the whole surgery exists for, asserted rather than assumed.
+	statics = {t.name for t in m.graph.initializer}
+	dyn = [n.name for n in m.graph.node
+		   if n.op_type in ('Conv', 'ConvTranspose') and n.input[1] not in statics]
+	ranks = {}
+	for vi in m.graph.value_info:
+		ranks[len(vi.type.tensor_type.shape.dim)] = \
+			ranks.get(len(vi.type.tensor_type.shape.dim), 0) + 1
+	print('  dynamic kernels left: %d %s' % (len(dyn), dyn[:4]))
+	print('  activation ranks    :', dict(sorted(ranks.items())))
+	if dyn:
+		sys.exit('  a computed kernel survived -- HTP will not map it')
+	if any(k >= 5 for k in ranks):
+		print('  WARNING: rank>=5 activations survived')
+	return save(m, 'gpen_bfr_256_sim')
+
+
 TASKS = {
 	'arcface': do_arcface,
 	'2dfan4': do_2dfan4,
@@ -616,6 +941,7 @@ TASKS = {
 	# stops at a missing file.
 	'hyperswap_fp32': do_hyperswap_fp32,
 	'nsfw': do_nsfw,
+	'gpen': do_gpen,
 	'yoloface_slicefix': do_yoloface_slicefix,
 	'inswapper': do_inswapper,
 }
