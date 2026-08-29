@@ -40,8 +40,13 @@ android {
         applicationId = "com.facefusion.mobile"
         minSdk = 31                 // SM8750 / HTP v79 is far above this
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0$variantTag"    // "-dev" == NO content gate
+        // ⚠ 0.1.1 IS SIGNED WITH A DIFFERENT KEY THAN 0.1.0.  The 0.1.0 keystore was lost,
+        // and Android identifies an app by its signature, so this is a DIFFERENT app to
+        // every device that already has 0.1.0: it cannot be installed as an update, and
+        // anyone upgrading has to uninstall first -- which deletes the downloaded context
+        // binaries with the app's private files dir.  Say so in the release notes.
+        versionCode = 2
+        versionName = "0.1.1$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         ndk { abiFilters += "arm64-v8a" }
         externalNativeBuild { cmake { arguments += listOf("-DANDROID_STL=c++_shared") } }
