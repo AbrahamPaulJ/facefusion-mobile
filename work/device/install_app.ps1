@@ -39,6 +39,13 @@ if (-not $serial) {
 if (-not $serial) { Write-Output "no adb device; connect one or set FF_ADB_SERIAL"; exit 1 }
 # Must match build.gradle.kts, which derives the id from whether ContentGate.kt exists.
 $pkg    = if ($Dev) { "com.facefusion.mobile.dev" } else { "com.facefusion.mobile" }
+# FULLY QUALIFIED, and NOT "$pkg/.MainActivity".  A leading dot is resolved against the
+# applicationId, which -Dev changes; the CLASS is in the namespace, which it does not.
+# `am start -n com.facefusion.mobile.dev/.MainActivity` therefore asks for a class that
+# does not exist -- and its "Error type 3" is printed and then walked straight past, so
+# the app never launches, never mkdirs its own models dir, and the push below creates it
+# as `shell` instead: trap #13, with the app unable to traverse its own directory.
+$act    = "com.facefusion.mobile.MainActivity"
 $files  = "/sdcard/Android/data/$pkg/files"
 
 & $adb connect $serial | Out-Null
@@ -78,7 +85,14 @@ if (-not $NoModels) {
     # into a 266 MB transfer; over Tailscale on mobile data that cost ~190 MB and then died
     # mid-push, leaving a truncated hyperswap the app could not load. Each file is now
     # compared by hash and pushed only if it differs (trap #19).
-    & $adb -s $serial shell "am start -n $pkg/.MainActivity" | Out-Null
+    $started = (& $adb -s $serial shell "am start -n $pkg/$act 2>&1") -join "`n"
+    # Checked, not assumed.  This is the step that decides who owns the directory, and
+    # it failed silently once already.
+    if ($started -match 'Error|does not exist') {
+        Write-Output "cannot launch $pkg/$act -- aborting before adb creates its dir:"
+        Write-Output $started
+        exit 1
+    }
     Start-Sleep -Seconds 3
     & $adb -s $serial shell "am force-stop $pkg"
 
