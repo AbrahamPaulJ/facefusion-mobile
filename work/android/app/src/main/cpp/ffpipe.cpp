@@ -157,14 +157,24 @@ ContentVerdict Pipeline::checkContent(const ffcv::Image& frame) {
   int x0 = std::max(0, (S - nw) / 2), y0 = std::max(0, (S - nh) / 2);
   ffcv::Image temp = ffcv::resizeLinear(frame, nw, nh);
 
-  // content_analyser.py:prepare_detect_frame -- BGR -> RGB, /255, mean 0, std 1, NCHW.
-  std::vector<float> in((size_t)3 * S * S, 0.f);
+  // content_analyser.py:prepare_detect_frame -- BGR -> RGB, /255, then mean 0.5 / std 0.5.
+  //
+  // ⚠ mean 0.5 and std 0.5, i.e. [0,1] -> [-1,1].  This read `/ 255.0f` alone until
+  // 2026-08-30 and handed the model [0,1], which is not the range facefusion 3.8.2 feeds
+  // it.  nsfw_reference.py carried the identical mistake, so every device-vs-host
+  // comparison agreed and none of them was evidence about upstream.  The decision
+  // statistic moves by -1.15 on average against a 0.25 threshold, so this was not a
+  // rounding matter -- the gate was judging on a distribution the model never saw.
+  //
+  // The zero-padded border is left at the pad value the model expects for "no pixel",
+  // which after this normalisation is -1, not 0 -- so the buffer is initialised to -1.f.
+  std::vector<float> in((size_t)3 * S * S, -1.f);
   for (int y = 0; y < nh; ++y) {
     const uint8_t* row = temp.row(y);
     for (int x = 0; x < nw; ++x)
       for (int c = 0; c < 3; ++c)
         in[(size_t)c * S * S + (size_t)(y + y0) * S + (x + x0)] =
-            row[x * 3 + (2 - c)] / 255.0f;   // (2 - c): the [:, :, ::-1] flip
+            row[x * 3 + (2 - c)] / 127.5f - 1.0f;   // (2 - c): the [:, :, ::-1] flip
   }
 
   std::vector<std::vector<float>> out;

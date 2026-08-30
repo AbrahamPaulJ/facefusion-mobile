@@ -35,8 +35,16 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
 # content_analyser.py:create_static_model_set -- nsfw_2
 MODEL_SIZE = (384, 384)
-MODEL_MEAN = (0.0, 0.0, 0.0)
-MODEL_STD = (1.0, 1.0, 1.0)
+# ⚠ 0.5/0.5, NOT 0/1.  facefusion 3.8.2 content_analyser.py gives nsfw_2
+# `mean (0.5,0.5,0.5)` and `standard_deviation (0.5,0.5,0.5)`, i.e. [0,1] -> [-1,1].
+# This port used 0/1 from the gate's first commit and fed the model [0,1] instead.
+#
+# It survived every check because ffpipe.cpp did it the same wrong way, so device-vs-host
+# agreement was never evidence about UPSTREAM -- both sides were wrong together. Measured
+# cost on 12 real frames: the decision statistic moves by -1.15 on average, against a
+# threshold of 0.25.  Corrected 2026-08-30.
+MODEL_MEAN = (0.5, 0.5, 0.5)
+MODEL_STD = (0.5, 0.5, 0.5)
 # content_analyser.py:detect_with_nsfw_2
 SCORE_THRESHOLD = 0.25
 # content_analyser.py:analyse_video -- a video is refused when more than this percentage
