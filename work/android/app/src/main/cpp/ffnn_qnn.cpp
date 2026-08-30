@@ -38,6 +38,15 @@ void qnnUseTier(const std::string& t) { g_tier = t; }
 const std::string& qnnTier() { return g_tier; }
 const std::vector<std::string>& qnnChain() { return g_chain; }
 
+// The detector is the probe: mandatory, and the smallest file in a tier at 3.8 MB. A tier
+// is never half-present -- the downloader writes a `.part` and renames only after the
+// SHA256 matches -- so yoloface existing means the rest of that tier does too.
+bool qnnVariantPresent(const std::string& v) {
+  std::string probe = g_spec.modelDir + "/yoloface_" + v + ".bin";
+  if (FILE* f = std::fopen(probe.c_str(), "rb")) { std::fclose(f); return true; }
+  return false;
+}
+
 Handle qnnOpen(const std::string& logicalName) {
   std::string path = g_spec.modelDir + "/" + logicalName + "_" + g_tier + ".bin";
   Handle h = ffqnn::load(path);

@@ -45,6 +45,7 @@ namespace ffnn {
 enum class Backend {
   Qnn,    // Hexagon NPU via QAIRT context binaries
   Ncnn,   // CPU (NEON) or GPU (Vulkan), for parts with no Qualcomm NPU
+  Auto,   // try Qnn, fall back to Ncnn -- see init()
 };
 
 // Where a MODEL should run. Meaningful only for backends that have a choice: QNN always
@@ -63,6 +64,12 @@ struct InitSpec {
 };
 
 // Choose and start a backend. One per process, as ffqnn already required.
+//
+// ⚠ Prefer `Backend::Auto`. Whether this part has a usable HTP cannot be answered WITHOUT
+// starting QNN -- `QnnDevice_getPlatformInfo` needs the backend dlopen'd and the skels on
+// ADSP_LIBRARY_PATH -- so any "ask first, then choose" API is a lie that reports no-NPU on
+// every device. Auto tries Qnn and falls back to Ncnn, which is the only order that can
+// actually tell them apart. `active()` reports which one won.
 bool init(Backend b, const InitSpec& spec);
 Backend active();
 
@@ -105,9 +112,18 @@ DeviceInfo deviceInfo(Backend b);
 // files runs everywhere. Callers must not assume the strings mean an architecture.
 std::vector<std::string> variantChain(Backend b);
 
-// Which backend should this device use when nothing overrides it: Qnn wherever the HTP
-// probe succeeds, Ncnn otherwise. Kept here rather than in Kotlin so the CLI and the app
-// cannot disagree about it.
-Backend preferredBackend();
+// Is this variant's model set actually on disk?
+//
+// The caller must not answer this itself: "is v73 present" is `yoloface_v73.bin` on QNN and
+// a `.ncnn.param`/`.ncnn.bin` PAIR on ncnn, and a pipeline that knows that is not backend
+// neutral. Asking the backend keeps the one thing the seam exists to hide -- filenames --
+// on the far side of it.
+bool variantPresent(const std::string& v);
+
+// Commit to a variant. Selection stays with the CALLER because only the caller can tell
+// whether a variant is good: that takes executing a model, and ffpipe is what can do it.
+// The seam supplies the candidates and resolves the filenames; it does not choose.
+void useVariant(const std::string& v);
+const std::string& variant();
 
 }  // namespace ffnn

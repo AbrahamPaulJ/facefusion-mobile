@@ -15,6 +15,9 @@ Handle qnnOpen(const std::string&);
 const char* qnnLastError();
 DeviceInfo qnnDeviceInfo();
 const std::vector<std::string>& qnnChain();
+bool qnnVariantPresent(const std::string&);
+void qnnUseTier(const std::string&);
+const std::string& qnnTier();
 
 namespace {
 Backend g_active = Backend::Qnn;
@@ -22,11 +25,21 @@ bool g_ready = false;
 }  // namespace
 
 bool init(Backend b, const InitSpec& spec) {
+  // Auto is the honest form of the question. Whether the HTP is usable cannot be known
+  // before QNN is started, so "probe, then pick" cannot work -- an earlier draft of this
+  // file had a preferredBackend() that probed first and reported no-NPU on every device,
+  // including the one it was running on.
+  if (b == Backend::Auto) {
+    if (init(Backend::Qnn, spec)) return true;
+    return init(Backend::Ncnn, spec);
+  }
   g_active = b;
   switch (b) {
     case Backend::Qnn:
       g_ready = qnnInit(spec);
       return g_ready;
+    case Backend::Auto:
+      return false;   // handled above; here only to keep the switch exhaustive
     case Backend::Ncnn:
       // ffnn_ncnn.cpp is not written yet. Answering "no" is the honest result and keeps the
       // seam usable meanwhile; it must never silently fall through to QNN, because a caller
@@ -48,6 +61,7 @@ Handle open(const std::string& logicalName, Placement p) {
   if (!g_ready) return nullptr;
   switch (g_active) {
     case Backend::Qnn: return qnnOpen(logicalName);
+    case Backend::Auto:
     case Backend::Ncnn: return nullptr;
   }
   return nullptr;
@@ -68,6 +82,7 @@ std::vector<std::vector<int>> outputShapes(Handle h) { return ffqnn::outputShape
 const char* lastError() {
   switch (g_active) {
     case Backend::Qnn: return qnnLastError();
+    case Backend::Auto:
     case Backend::Ncnn: return "ncnn backend not built";
   }
   return "unknown backend";
@@ -76,6 +91,7 @@ const char* lastError() {
 DeviceInfo deviceInfo(Backend b) {
   switch (b) {
     case Backend::Qnn: return qnnDeviceInfo();
+    case Backend::Auto:
     case Backend::Ncnn: {
       DeviceInfo d;
       d.backend = Backend::Ncnn;
@@ -89,6 +105,7 @@ DeviceInfo deviceInfo(Backend b) {
 std::vector<std::string> variantChain(Backend b) {
   switch (b) {
     case Backend::Qnn: return qnnChain();
+    case Backend::Auto: return {};
     // One set of ncnn files runs on every part, so the chain is a single entry. It is NOT
     // an architecture and callers must not read it as one.
     case Backend::Ncnn: return {"ncnn"};
@@ -96,10 +113,22 @@ std::vector<std::string> variantChain(Backend b) {
   return {};
 }
 
-Backend preferredBackend() {
-  // The HTP probe is the whole test: it needs no model and answers before anything is
-  // downloaded, which is exactly when this question gets asked.
-  return ffqnn::deviceInfo().ok ? Backend::Qnn : Backend::Ncnn;
+bool variantPresent(const std::string& v) {
+  switch (g_active) {
+    case Backend::Qnn: return qnnVariantPresent(v);
+    case Backend::Auto:
+    case Backend::Ncnn: return false;
+  }
+  return false;
+}
+
+void useVariant(const std::string& v) {
+  if (g_active == Backend::Qnn) qnnUseTier(v);
+}
+
+const std::string& variant() {
+  static const std::string none;
+  return g_active == Backend::Qnn ? qnnTier() : none;
 }
 
 }  // namespace ffnn

@@ -6,7 +6,7 @@
 #include <cmath>
 #include <cstring>
 
-#include "ffqnn.h"
+#include "ffnn.h"
 
 // FFDEBUG=1 prints what each stage actually produced.  Cheap, and the alternative is
 // guessing at a tensor layout from the host side.
@@ -26,10 +26,10 @@ double nowMs() {
 // is negligible; here it runs on the NPU alongside the rest simply because it is already
 // a graph and that avoids porting its weights separately.
 struct Nets {
-  ffqnn::Handle det = nullptr, fan = nullptr, fan685 = nullptr, arc = nullptr, swap = nullptr;
-  ffqnn::Handle nsfw = nullptr;
+  ffnn::Handle det = nullptr, fan = nullptr, fan685 = nullptr, arc = nullptr, swap = nullptr;
+  ffnn::Handle nsfw = nullptr;
   // Optional, like fan685: absent simply means the enhancer cannot be offered.
-  ffqnn::Handle enh = nullptr;
+  ffnn::Handle enh = nullptr;
 };
 
 // content_analyser.py:create_static_model_set -- nsfw_2 is 384x384, mean 0, std 1.
@@ -57,7 +57,7 @@ Pipeline::~Pipeline() {
   if (p_) {
     for (auto h : {p_->n.det, p_->n.fan, p_->n.fan685, p_->n.arc, p_->n.swap, p_->n.nsfw,
                    p_->n.enh})
-      if (h) ffqnn::release(h);
+      if (h) ffnn::release(h);
   }
 }
 
@@ -67,8 +67,14 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
   p_.reset(new Impl());
   p_->cfg = cfg;
 
-  if (!ffqnn::init(libDir + "/libQnnHtp.so", libDir + "/libQnnSystem.so", skelDir)) {
-    err_ = std::string("qnn init: ") + ffqnn::lastError();
+  // Which RUNTIME, before which model. Auto because the HTP cannot be probed before QNN is
+  // started -- asking first and choosing after reports no-NPU on every device.
+  ffnn::InitSpec spec;
+  spec.libDir = libDir;
+  spec.skelDir = skelDir;
+  spec.modelDir = modelDir;
+  if (!ffnn::init(ffnn::Backend::Auto, spec)) {
+    err_ = std::string("backend init: ") + ffnn::lastError();
     return false;
   }
   // Which arch tier this chip needs, measured rather than assumed. Everything before
@@ -92,19 +98,17 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
   // The detector is the probe because it is mandatory and the smallest -- 3.8 MB. A tier is
   // never half-present: the downloader writes a `.part` and renames only after the SHA256
   // matches, so yoloface existing means the rest of that tier does too.
-  const std::vector<std::string> chain = ffqnn::tierChain(ffqnn::deviceInfo());
+  const std::vector<std::string> chain = ffnn::variantChain(ffnn::active());
   std::vector<std::string> candidates;
-  for (const std::string& t : chain) {
-    std::string probe = modelDir + "/yoloface_" + t + ".bin";
-    if (FILE* f = std::fopen(probe.c_str(), "rb")) { std::fclose(f); candidates.push_back(t); }
-  }
+  for (const std::string& t : chain)
+    if (ffnn::variantPresent(t)) candidates.push_back(t);
   if (candidates.empty() && !chain.empty()) candidates.push_back(chain.front());
   if (candidates.empty()) { err_ = "no tier: the HTP probe returned nothing"; return false; }
 
   auto dropNets = [&]() {
-    for (ffqnn::Handle* h : {&p_->n.det, &p_->n.fan, &p_->n.fan685, &p_->n.arc,
-                             &p_->n.swap, &p_->n.nsfw, &p_->n.enh}) {
-      if (*h) ffqnn::release(*h);
+    for (ffnn::Handle* h : {&p_->n.det, &p_->n.fan, &p_->n.fan685, &p_->n.arc,
+                            &p_->n.swap, &p_->n.nsfw, &p_->n.enh}) {
+      if (*h) ffnn::release(*h);
       *h = nullptr;
     }
     nsfwQuantised_ = false;
@@ -113,10 +117,16 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
   // One tier's worth of loading, plus the proof that it actually RUNS.
   auto tryTier = [&](const std::string& t) -> bool {
     tier_ = t;
-    auto open = [&](const char* name) -> ffqnn::Handle {
-      std::string path = modelDir + "/" + name + "_" + tier_ + ".bin";
-      ffqnn::Handle h = ffqnn::load(path);
-      if (!h) err_ = std::string("load ") + path + ": " + ffqnn::lastError();
+    ffnn::useVariant(t);
+    // PLACEMENT is a property of the MODEL, measured 2026-08-30 and not a preference:
+    // the content gate and the enhancer must not run on a GPU. The gate because ncnn's
+    // Vulkan moves its decision statistic toward ALLOWING -- the one direction a gate must
+    // not err -- and the enhancer because it fails outright on every GPU backend tried.
+    // On QNN this is a no-op, since everything runs on the HTP there either way.
+    auto open = [&](const char* name,
+                    ffnn::Placement place = ffnn::Placement::Default) -> ffnn::Handle {
+      ffnn::Handle h = ffnn::open(name, place);
+      if (!h) err_ = std::string("open ") + name + " (" + tier_ + "): " + ffnn::lastError();
       return h;
     };
     p_->n.det = open("yoloface");             if (!p_->n.det) return false;
@@ -127,7 +137,7 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
 
     // The face enhancer. Optional in the strongest sense: a separate download, most
     // installs will not have it, and a missing file must never be an init failure.
-    p_->n.enh = open("gpen");
+    p_->n.enh = open("gpen", ffnn::Placement::Cpu);
 
     // The content gate is MANDATORY, because it blocks. A gate that silently does not run
     // is worse than no gate: it reports "checked" to every caller above it.
@@ -135,11 +145,11 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
     // fp32 is the build that tracks the host, but it only finalizes on v79 -- below that
     // the GELU cannot be created in float, and v81 refuses it too (docs/traps.md #10), so
     // every other tier carries the quantised one.
-    p_->n.nsfw = open("nsfw");
+    p_->n.nsfw = open("nsfw", ffnn::Placement::Cpu);
     if (!p_->n.nsfw) {
       // nsfwq2, not nsfwq: the quantised gate is calibrated for the input range this file
       // feeds it, and that range changed. See work/qnn/convert.sh.
-      p_->n.nsfw = open("nsfwq2");
+      p_->n.nsfw = open("nsfwq2", ffnn::Placement::Cpu);
       nsfwQuantised_ = p_->n.nsfw != nullptr;
     }
     if (!p_->n.nsfw) {
@@ -223,8 +233,8 @@ ContentVerdict Pipeline::checkContent(const ffcv::Image& frame) {
   }
 
   std::vector<std::vector<float>> out;
-  if (!ffqnn::execute(p_->n.nsfw, {"input"}, {in.data()}, out)) {
-    err_ = std::string("content gate: ") + ffqnn::lastError();
+  if (!ffnn::execute(p_->n.nsfw, {"input"}, {in.data()}, out)) {
+    err_ = std::string("content gate: ") + ffnn::lastError();
     return v;
   }
   if (out.empty() || out[0].size() < 2) {
@@ -265,14 +275,14 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame) {
 
   t0 = nowMs();
   std::vector<std::vector<float>> out;
-  if (!ffqnn::execute(p_->n.det, {"input"}, {in.data()}, out)) {
-    err_ = std::string("detector: ") + ffqnn::lastError();
+  if (!ffnn::execute(p_->n.det, {"input"}, {in.data()}, out)) {
+    err_ = std::string("detector: ") + ffnn::lastError();
     return faces;
   }
   msDetect += nowMs() - t0;
 
   if (ffdebug()) {
-    auto sh = ffqnn::outputShapes(p_->n.det);
+    auto sh = ffnn::outputShapes(p_->n.det);
     fprintf(stderr, "[dbg] detector out elems=%zu shape=", out[0].size());
     for (int v : sh[0]) fprintf(stderr, "%d,", v);
     float mx = -1e9f, mn = 1e9f;
@@ -324,7 +334,7 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame) {
     float lm68_5[136];
     if (p_->n.fan685) {
       std::vector<std::vector<float>> o5;
-      if (ffqnn::execute(p_->n.fan685, {"input"}, {f.landmark5}, o5) && o5[0].size() >= 136)
+      if (ffnn::execute(p_->n.fan685, {"input"}, {f.landmark5}, o5) && o5[0].size() >= 136)
         std::memcpy(lm68_5, o5[0].data(), sizeof(lm68_5));
       else
         std::memset(lm68_5, 0, sizeof(lm68_5));
@@ -367,8 +377,8 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame) {
 
     t0 = nowMs();
     std::vector<std::vector<float>> hm;
-    if (!ffqnn::execute(p_->n.fan, {"input"}, {fin.data()}, hm)) {
-      err_ = std::string("landmarker: ") + ffqnn::lastError();
+    if (!ffnn::execute(p_->n.fan, {"input"}, {fin.data()}, hm)) {
+      err_ = std::string("landmarker: ") + ffnn::lastError();
       return faces;
     }
     msLandmark += nowMs() - t0;
@@ -411,8 +421,8 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame) {
 
     t0 = nowMs();
     std::vector<std::vector<float>> emb;
-    if (!ffqnn::execute(p_->n.arc, {"input"}, {rin.data()}, emb)) {
-      err_ = std::string("recogniser: ") + ffqnn::lastError();
+    if (!ffnn::execute(p_->n.arc, {"input"}, {rin.data()}, emb)) {
+      err_ = std::string("recogniser: ") + ffnn::lastError();
       return faces;
     }
     msRecognise += nowMs() - t0;
@@ -520,8 +530,8 @@ bool Pipeline::swapAll(ffcv::Image& frame, const std::vector<Face>& faces) {
 
       t0 = nowMs();
       std::vector<std::vector<float>> so;
-      if (!ffqnn::execute(p_->n.swap, {"target", "source"}, {tin.data(), src.data()}, so)) {
-        err_ = std::string("swapper: ") + ffqnn::lastError();
+      if (!ffnn::execute(p_->n.swap, {"target", "source"}, {tin.data(), src.data()}, so)) {
+        err_ = std::string("swapper: ") + ffnn::lastError();
         return false;
       }
       msSwap += nowMs() - t0;
@@ -575,8 +585,8 @@ bool Pipeline::swapAll(ffcv::Image& frame, const std::vector<Face>& faces) {
 
         t0 = nowMs();
         std::vector<std::vector<float>> eo;
-        if (!ffqnn::execute(p_->n.enh, {"input"}, {ein.data()}, eo)) {
-          err_ = std::string("enhancer: ") + ffqnn::lastError();
+        if (!ffnn::execute(p_->n.enh, {"input"}, {ein.data()}, eo)) {
+          err_ = std::string("enhancer: ") + ffnn::lastError();
           return false;
         }
         msEnhance += nowMs() - t0;
