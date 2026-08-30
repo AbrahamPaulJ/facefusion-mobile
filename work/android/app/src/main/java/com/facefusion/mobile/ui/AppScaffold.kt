@@ -9,6 +9,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.facefusion.mobile.R
 
 enum class Screen { Swap, Settings }
 
@@ -49,14 +51,14 @@ fun AppScaffold(
                 NavigationBarItem(
                     selected = screen == Screen.Swap,
                     onClick = { onScreen(Screen.Swap) },
-                    icon = { Icon(Icons.Default.Face, "Swap") },
-                    label = { Text("Swap") },
+                    icon = { Icon(Icons.Default.Face, stringResource(R.string.nav_swap)) },
+                    label = { Text(stringResource(R.string.nav_swap)) },
                 )
                 NavigationBarItem(
                     selected = screen == Screen.Settings,
                     onClick = { onScreen(Screen.Settings) },
-                    icon = { Icon(Icons.Default.Settings, "Settings") },
-                    label = { Text("Settings") },
+                    icon = { Icon(Icons.Default.Settings, stringResource(R.string.nav_settings)) },
+                    label = { Text(stringResource(R.string.nav_settings)) },
                 )
             }
         },

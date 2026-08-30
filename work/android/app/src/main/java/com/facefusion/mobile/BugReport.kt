@@ -95,15 +95,51 @@ object BugReport {
         return sb.toString()
     }
 
-    /** Hand the text to whatever the user wants to send it with. */
-    fun share(context: Context, text: String) {
+    /**
+     * The most an EXTRA_TEXT may carry.
+     *
+     * An Intent crosses a Binder transaction, and the whole transaction buffer is about
+     * 1 MB and SHARED with everything else in flight. Going over it throws
+     * TransactionTooLargeException from `startActivity` -- so the report that would fail is
+     * the enormous one from the device that crashed hardest, which is the report most worth
+     * having. The run log is capped at 4 KB, but the persisted crash is not bounded at all.
+     *
+     * 128 KB is far below the limit and far above any real report.
+     */
+    private const val MAX_SHARE_CHARS = 128 * 1024
+
+    /**
+     * Hand the text to whatever the user wants to send it with.
+     *
+     * @return null on success, or a reason the report could not be handed over.
+     *
+     * Returns rather than throws, and the caller SAYS SO. A share that silently does
+     * nothing is indistinguishable from a dead button -- which is exactly how this feature
+     * was reported.
+     */
+    fun share(context: Context, text: String): String? {
+        // Trim the MIDDLE, not the tail: the header (version, device, models) is at the top
+        // and the crash is at the bottom, and those are the two ends worth keeping.
+        val body = if (text.length <= MAX_SHARE_CHARS) text else {
+            val half = MAX_SHARE_CHARS / 2
+            text.take(half) + "\n\n... [" + (text.length - MAX_SHARE_CHARS) +
+                " characters omitted] ...\n\n" + text.takeLast(half)
+        }
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
             putExtra(Intent.EXTRA_SUBJECT, "FaceFusion Mobile bug report")
             // EXTRA_TEXT rather than a file attachment: no FileProvider to configure, and
             // every target -- mail, chat, notes -- accepts plain text.
-            putExtra(Intent.EXTRA_TEXT, text)
+            putExtra(Intent.EXTRA_TEXT, body)
         }
-        context.startActivity(Intent.createChooser(send, "Send bug report"))
+        return try {
+            context.startActivity(Intent.createChooser(send, "Send bug report"))
+            null
+        } catch (t: Throwable) {
+            // ActivityNotFoundException on a device with nothing that accepts text/plain,
+            // and TransactionTooLargeException if the cap above is ever raised past what
+            // Binder will carry.
+            t.message ?: t.javaClass.simpleName
+        }
     }
 }

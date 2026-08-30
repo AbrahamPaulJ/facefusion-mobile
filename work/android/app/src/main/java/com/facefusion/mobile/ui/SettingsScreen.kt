@@ -16,6 +16,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.facefusion.mobile.ApiService
 import com.facefusion.mobile.ModelDownload
+import androidx.compose.ui.res.stringResource
+import com.facefusion.mobile.R
 
 /** One context binary on disk, or one that should be and is not. */
 data class ModelRow(
@@ -87,6 +89,8 @@ fun SettingsScreen(
     onDownloadModel: () -> Unit,
     /** Start or stop the HTTP server. [lan] binds every interface instead of loopback. */
     onApiToggle: (on: Boolean, lan: Boolean) -> Unit,
+    /** Assemble the report and hand it to a share target. */
+    onShareBugReport: () -> Unit,
     /** "" | "qnn" | "ncnn" -- which runtime the user has pinned, "" being automatic. */
     forcedBackend: String = "",
     /**
@@ -106,11 +110,13 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         // ---------------------------------------------------------------- models
-        Caption("Models")
+        Caption(stringResource(R.string.set_models))
         val onDisk = models.filter { it.present }.sumOf { it.bytes }
         Text(
-            "${models.count { it.present }} of ${models.size} present, ${mb(onDisk)} on disk" +
-                (models.count { it.outdated }.let { if (it > 0) ", $it update available" else "" }),
+            stringResource(R.string.set_models_summary,
+                           models.count { it.present }, models.size, mb(onDisk)) +
+                (models.count { it.outdated }
+                    .let { if (it > 0) stringResource(R.string.set_models_updates, it) else "" }),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -132,10 +138,17 @@ fun SettingsScreen(
                                 // and the severity was already carried by the colour
                                 // below.  The suffix says it in words instead, because
                                 // colour alone is not something every reader gets.
-                                if (m.outdated) "${m.fileName}   ${mb(m.bytes)}   update available"
-                                else if (m.present) "${m.fileName}   ${mb(m.bytes)}"
-                                else m.fileName + "   not installed" +
-                                     (if (m.required) " (required)" else ""),
+                                // The FILENAME is never translated -- it is the name
+                                // on disk and in the manifest.
+                                if (m.outdated)
+                                    m.fileName + "   " + mb(m.bytes) + "   " +
+                                        stringResource(R.string.set_update_available)
+                                else if (m.present) m.fileName + "   " + mb(m.bytes)
+                                else m.fileName + "   " +
+                                     stringResource(R.string.set_not_installed) +
+                                     (if (m.required)
+                                          " " + stringResource(R.string.set_required_suffix)
+                                      else ""),
                                 style = MaterialTheme.typography.bodySmall,
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 10.sp,
@@ -155,15 +168,20 @@ fun SettingsScreen(
                             // superseded, and the useful action is to replace it. Deleting
                             // it first would reach the same place through a broken app.
                             TextButton(onDownloadModel, enabled = !ModelDownload.running) {
-                                Text(if (ModelDownload.running) "Updating" else "Update")
+                                Text(stringResource(if (ModelDownload.running)
+                                                       R.string.set_updating
+                                                   else R.string.set_update))
                             }
                         } else if (m.present) {
                             TextButton({ confirming = m }, enabled = !ModelDownload.running) {
-                                Text("Delete", color = MaterialTheme.colorScheme.error)
+                                Text(stringResource(R.string.set_delete),
+                                     color = MaterialTheme.colorScheme.error)
                             }
                         } else if (m.downloadable) {
                             TextButton(onDownloadModel, enabled = !ModelDownload.running) {
-                                Text(if (ModelDownload.running) "Downloading" else "Download")
+                                Text(stringResource(if (ModelDownload.running)
+                                                       R.string.set_downloading
+                                                   else R.string.set_download))
                             }
                         }
                     }
@@ -174,59 +192,59 @@ fun SettingsScreen(
         Spacer(Modifier.height(6.dp))
 
         // ---------------------------------------------------------------- device
-        Caption("This device")
+        Caption(stringResource(R.string.set_this_device))
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 // The RUNTIME first, because on a non-Qualcomm phone it is the only row on
                 // this card about the machine the user is actually holding. Everything
                 // below it describes a Hexagon NPU, which such a device does not have.
                 InfoRow(
-                    "Runtime", when (device.backend) {
-                        "qnn" -> "Hexagon NPU"
-                        "ncnn" -> if (device.gpu) "GPU (Vulkan) + CPU" else "CPU"
-                        "none" -> "none started"
-                        else -> "-"
-                    }
+                    stringResource(R.string.set_runtime), stringResource(when (device.backend) {
+                        "qnn" -> R.string.set_runtime_npu
+                        "ncnn" -> if (device.gpu) R.string.set_runtime_gpu_cpu
+                                  else R.string.set_runtime_cpu
+                        "none" -> R.string.set_runtime_none
+                        else -> R.string.set_unknown_dash
+                    })
                 )
                 if (device.backend == "ncnn") {
                     // Say the two things a preview user needs before they reach for a
                     // stopwatch or file a report, and say them here rather than in a
                     // release note nobody has open.
                     Text(
-                        "This device has no Qualcomm NPU, so the swap runs on the GPU and " +
-                            "CPU: expect roughly 13x the time per frame. The face " +
-                            "enhancer and the content checker always run on the CPU here " +
-                            "-- on the GPU they are measurably wrong, not merely slower.",
+                        stringResource(R.string.set_ncnn_note),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else if (!device.ok) {
                     Text(
-                        "The HTP could not be measured. The app falls back to the most " +
-                            "permissive build, so this is not necessarily a failure to run.",
+                        stringResource(R.string.set_htp_unmeasured),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
                 } else {
-                    InfoRow("Hexagon arch", "v${device.arch}")
-                    InfoRow("VTCM", "${device.vtcmMb} MB")
-                    InfoRow("SoC model", "${device.soc}")
+                    InfoRow(stringResource(R.string.set_hexagon_arch), "v${device.arch}")
+                    InfoRow(stringResource(R.string.set_vtcm), "${device.vtcmMb} MB")
+                    InfoRow(stringResource(R.string.set_soc_model), "${device.soc}")
                 }
                 // Both rows below are QNN facts. On ncnn there is no context binary and no
                 // fp16 canary was ever run -- printing "could not be measured" there would
                 // report a failure where nothing was attempted.
                 if (device.backend != "ncnn") {
                     InfoRow(
-                        "fp16 execution", when (device.fp16) {
-                            "yes" -> "supported"
-                            "no" -> "not supported"
+                        stringResource(R.string.set_fp16), stringResource(when (device.fp16) {
+                            "yes" -> R.string.set_fp16_yes
+                            "no" -> R.string.set_fp16_no
                             // The control canary failed. Reporting this as "no" would push
                             // a working device onto the slower compatibility build.
-                            else -> "could not be measured"
-                        }
+                            else -> R.string.set_fp16_unknown
+                        })
                     )
-                    InfoRow("Context binaries",
-                            if (device.tier.isEmpty()) "-" else device.tier)
+                    // The tier is an identifier, not a word: "v79" reads the same in
+                    // every language and is what a bug report has to quote.
+                    InfoRow(stringResource(R.string.set_context_binaries),
+                            if (device.tier.isEmpty()) stringResource(R.string.set_unknown_dash)
+                            else device.tier)
                 }
             }
         }
@@ -242,20 +260,20 @@ fun SettingsScreen(
         // ncnn path could only ever be exercised on hardware that is not on the bench.
         if (onForceBackend != null && device.backend == "qnn") {
             Spacer(Modifier.height(6.dp))
-            Caption("Runtime")
+            Caption(stringResource(R.string.set_runtime))
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(14.dp),
                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "This phone has a Hexagon NPU and uses it. Forcing the GPU/CPU " +
-                            "path shows what a non-Qualcomm device does -- it needs its " +
-                            "own model set and is far slower.",
+                        stringResource(R.string.set_runtime_override_note),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         // "" is automatic, and it is what a fresh install has.
-                        listOf("" to "Automatic", "qnn" to "NPU", "ncnn" to "GPU + CPU")
+                        listOf("" to stringResource(R.string.set_runtime_auto),
+                               "qnn" to stringResource(R.string.set_runtime_force_npu),
+                               "ncnn" to stringResource(R.string.set_runtime_force_gpu))
                             .forEach { (value, label) ->
                                 FilterChip(
                                     selected = forcedBackend == value,
@@ -265,9 +283,7 @@ fun SettingsScreen(
                             }
                     }
                     if (forcedBackend.isNotEmpty()) Text(
-                        "Forced to " + forcedBackend + ". A testing control: it restarts " +
-                            "the pipeline, and the other runtime's models are a separate " +
-                            "download.",
+                        stringResource(R.string.set_runtime_forced, forcedBackend),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -280,16 +296,15 @@ fun SettingsScreen(
         // Reads ApiService's state directly, the way the download overlay reads
         // ModelDownload's: the service owns it, and threading it through the Activity would
         // only add a copy that can be stale.
-        Caption("Remote API")
+        Caption(stringResource(R.string.set_remote_api))
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Use from a computer",
+                        Text(stringResource(R.string.set_api_title),
                              style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "Turn this on and open the address below in a browser on your " +
-                                "computer. Everything still runs on this phone.",
+                            stringResource(R.string.set_api_body),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -304,13 +319,12 @@ fun SettingsScreen(
                 // opens, so a live switch would name an address it is not listening on.
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Let other devices connect",
+                        Text(stringResource(R.string.set_api_lan_title),
                              style = MaterialTheme.typography.bodyMedium)
                         Text(
                             if (ApiService.allowLan)
-                                "On. Anyone who can reach this phone on your network can " +
-                                    "open the page and swap faces with it."
-                            else "Off. Only this phone, or a computer connected by USB.",
+                                stringResource(R.string.set_api_lan_on)
+                            else stringResource(R.string.set_api_lan_off),
                             style = MaterialTheme.typography.bodySmall,
                             color = if (ApiService.allowLan) MaterialTheme.colorScheme.error
                                     else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -322,11 +336,12 @@ fun SettingsScreen(
                     )
                 }
 
-                if (ApiService.running) InfoRow("Open this", ApiService.address)
+                if (ApiService.running)
+                    InfoRow(stringResource(R.string.set_api_open_this), ApiService.address)
                 if (!ApiService.allowLan) InfoRow(
-                    "Or over USB", "adb forward tcp:8760 tcp:8760")
+                    stringResource(R.string.set_api_over_usb), "adb forward tcp:8760 tcp:8760")
                 ApiService.error?.let {
-                    Text("Could not start: " + it,
+                    Text(stringResource(R.string.set_api_failed, it),
                          style = MaterialTheme.typography.bodySmall,
                          color = MaterialTheme.colorScheme.error)
                 }
@@ -340,10 +355,11 @@ fun SettingsScreen(
             }
         }
 
-        Caption("Supported devices")
+        Caption(stringResource(R.string.set_supported_devices))
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(vertical = 4.dp)) {
-                TIERS.forEachIndexed { i, (tier, chips) ->
+                TIERS.forEachIndexed { i, (tier, chipsRes) ->
+                    val chips = stringResource(chipsRes)
                     if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     val active = tier == device.tier
                     Row(
@@ -369,7 +385,7 @@ fun SettingsScreen(
                         )
                         if (active)
                             Text(
-                                "in use",
+                                stringResource(R.string.set_in_use),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary,
                             )
@@ -380,37 +396,60 @@ fun SettingsScreen(
         Spacer(Modifier.height(6.dp))
 
         // ---------------------------------------------------------------- about
-        Caption("About")
+        // -------------------------------------------------------------- bug report
+        //
+        // ⚠ This card is why the whole feature is not a feature. The README, the release
+        // notes and the "Tested on" box have all told people for four releases to use
+        // "Settings > Share bug report" -- and there has never been a control here. The
+        // only one in the app was on the Swap screen, and it appeared solely when the
+        // status line began with the word "Failed". So the reports this project most needs,
+        // from devices it does not own and cannot reproduce on, were the ones with no
+        // button: a swap that finishes and looks wrong is not a failure, and neither is
+        // "Cannot read video".
+        //
+        // Reported by a user who went looking for it exactly where the documentation said.
+        Caption(stringResource(R.string.set_bug_report))
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    stringResource(R.string.set_bug_report_body),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedButton(onShareBugReport, Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.set_bug_report_button))
+                }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+
+        Caption(stringResource(R.string.set_about))
         val uris = LocalUriHandler.current
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "This app is an offline port of FaceFusion's default face-swap path to " +
-                        "the Qualcomm Hexagon NPU. The pipeline, the models, the option " +
-                        "names, defaults and ranges are all FaceFusion's.",
+                    stringResource(R.string.set_about_body),
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Text(
-                    "Created by Henry Ruhs.",
+                    stringResource(R.string.set_about_author),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 OutlinedButton(
                     { uris.openUri("https://github.com/AbrahamPaulJ/facefusion-mobile") },
                     Modifier.fillMaxWidth(),
-                ) { Text("This project on GitHub") }
+                ) { Text(stringResource(R.string.set_link_project)) }
                 OutlinedButton(
                     { uris.openUri("https://github.com/facefusion/facefusion") },
                     Modifier.fillMaxWidth(),
-                ) { Text("FaceFusion (original) on GitHub") }
+                ) { Text(stringResource(R.string.set_link_upstream)) }
                 OutlinedButton(
                     { uris.openUri("https://github.com/facefusion/facefusion/blob/master/LICENSE.md") },
                     Modifier.fillMaxWidth(),
-                ) { Text("Upstream licence (OpenRAIL-AS)") }
+                ) { Text(stringResource(R.string.set_link_licence)) }
                 Text(
-                    "Model licences differ and are not all permissive: yoloface_8n is " +
-                        "GPL-3.0, arcface_w600k_r50 and inswapper_128 are non-commercial, " +
-                        "and hyperswap_1a_256 is ResearchRAIL.",
+                    stringResource(R.string.set_licence_note),
                     style = MaterialTheme.typography.bodySmall,
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -424,20 +463,23 @@ fun SettingsScreen(
     confirming?.let { m ->
         AlertDialog(
             onDismissRequest = { confirming = null },
-            title = { Text("Delete ${m.label}?") },
+            title = { Text(stringResource(R.string.set_delete_title, m.label)) },
             text = {
                 Text(
-                    "${m.fileName} is ${mb(m.bytes)}. Deleting it frees that space; the app " +
-                        "can download it again when you next swap." +
-                        if (m.required) "\n\nSwapping will not work until it is back." else ""
+                    stringResource(R.string.set_delete_body, m.fileName, mb(m.bytes)) +
+                        if (m.required) stringResource(R.string.set_delete_required_warning)
+                        else ""
                 )
             },
             confirmButton = {
                 TextButton({ onDeleteModel(m); confirming = null }) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.set_delete),
+                         color = MaterialTheme.colorScheme.error)
                 }
             },
-            dismissButton = { TextButton({ confirming = null }) { Text("Cancel") } },
+            dismissButton = {
+                TextButton({ confirming = null }) { Text(stringResource(R.string.set_cancel)) }
+            },
         )
     }
 }
@@ -461,9 +503,17 @@ private fun InfoRow(label: String, value: String) {
  * ⚠ If pickTier changes, this table has to change with it. The CLI's `--probe` asserts the
  * mapping against a 9-case synthetic table; this is only its human-readable form.
  */
+/**
+ * Arch tier -> which chips it covers.
+ *
+ * The tier and the CHIP NAMES are identifiers and stay as they are in every language; the
+ * connecting prose ("and older", "or any part with under 8 MB VTCM") is a sentence and does
+ * not. Hence a resource per row rather than one big translated blob: a translator who
+ * rewrote "SM8750" would break the one row a user matches their phone against.
+ */
 private val TIERS = listOf(
-    "v68" to "Snapdragon 888 and older (v68), 8 Gen 1 (v69), or any part with under 8 MB VTCM",
-    "v73" to "8 Gen 2 (v73), 8 Gen 3 (v75), and v79 parts other than SM8750",
-    "v79" to "Snapdragon 8 Elite (SM8750)",
-    "v81" to "Snapdragon 8 Elite Gen 5 (v81) and newer",
+    "v68" to R.string.tier_v68,
+    "v73" to R.string.tier_v73,
+    "v79" to R.string.tier_v79,
+    "v81" to R.string.tier_v81,
 )

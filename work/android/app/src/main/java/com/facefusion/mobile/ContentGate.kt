@@ -1,5 +1,6 @@
 package com.facefusion.mobile
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import java.io.File
@@ -181,25 +182,51 @@ object ContentGate {
         )
     }
 
-    fun message(what: String, res: Result): String = when (res.verdict) {
-        // The decision statistic is NOT in here. It goes to the log, where it is useful
-        // for debugging; aimed at the person holding the phone it is only noise wrapped
-        // around a refusal, and a threshold is an invitation to work out how to sit under
-        // it.
-        Verdict.BLOCK -> "Explicit content not allowed in $what"
-        // Kept distinct on purpose. A gate that could not run has not refused anything and
-        // has not permitted anything either, and saying "not allowed" here would blame the
-        // user for our own failure.
-        //
-        // ⚠ The REASON is included, unlike the BLOCK case above. `detail` already carried
-        // the native error -- "content gate: <qnn error>" -- and nothing ever showed it, so
-        // a field report of this failure said only that it happened. That cost a day of
-        // guessing at a bug the app could name itself. A refusal must not leak a threshold;
-        // a FAULT should say what broke.
-        Verdict.ERROR ->
-            "The content check could not run on $what, so it cannot be processed" +
-                (if (res.detail.isNotBlank()) " (${res.detail})" else "")
+    /**
+     * The user-facing sentence for a verdict.
+     *
+     * @param what one of the `R.string.gate_subject_*` resources -- a RESOURCE, not a
+     *   string, so a caller cannot pass a sentence fragment that was never translated.
+     *
+     * ⚠ The two branches must stay distinguishable in every language. BLOCK is a refusal;
+     * ERROR is a fault, and translating it into something that reads like a refusal blames
+     * the user for our own failure. That is the one thing to check when reviewing a
+     * translation of this file's strings.
+     *
+     * The decision statistic is NOT in the BLOCK sentence. It goes to the log, where it is
+     * useful for debugging; aimed at the person holding the phone it is only noise wrapped
+     * around a refusal, and a threshold is an invitation to work out how to sit under it.
+     *
+     * ⚠ The REASON is included for ERROR, unlike BLOCK. `detail` already carried the native
+     * error -- "content gate: <qnn error>" -- and nothing ever showed it, so a field report
+     * of this failure said only that it happened. That cost a day of guessing at a bug the
+     * app could name itself. A refusal must not leak a threshold; a FAULT should say what
+     * broke.
+     */
+    fun message(ctx: Context, what: Int, res: Result): String = when (res.verdict) {
+        Verdict.BLOCK -> ctx.getString(R.string.gate_blocked, ctx.getString(what))
+        Verdict.ERROR -> ctx.getString(R.string.gate_error, ctx.getString(what)).let {
+            if (res.detail.isNotBlank())
+                // The detail is a native error string. It stays as it came: it is for the
+                // bug report, and a translated QNN message matches nothing anyone can search.
+                ctx.getString(R.string.gate_error_detail, it, res.detail)
+            else it
+        }
         Verdict.ALLOW -> ""
+    }
+
+    /**
+     * The English sentence, for the HTTP API.
+     *
+     * `ApiServer` answers a machine. A script that matches on an error must not have it
+     * change when the phone's owner changes their language, so the API asks for its message
+     * through a Context pinned to English -- which keeps ONE copy of these sentences, in
+     * strings.xml, rather than a second hardcoded set that can drift from it.
+     */
+    fun messageEnglish(ctx: Context, what: Int, res: Result): String {
+        val cfg = android.content.res.Configuration(ctx.resources.configuration)
+        cfg.setLocale(java.util.Locale.ENGLISH)
+        return message(ctx.createConfigurationContext(cfg), what, res)
     }
 
     /**

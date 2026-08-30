@@ -1,3 +1,303 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Every user-visible string in the app.
+
+  What is NOT in here, deliberately:
+
+   * MODEL AND TIER NAMES, and FaceFusion's own option vocabulary (`hyperswap`, `arcface`,
+     `v79`, "pixel boost"). They are the words FaceFusion's own documentation uses, and a
+     translated model name makes the app harder to follow, not easier — there is nothing to
+     search for and nothing to compare against upstream.
+   * FILENAMES. `ModelPaths` and `ModelDownload` are string-heavy for reasons that have
+     nothing to do with the user, and a `hyperswap_v79.bin` that reached this file would
+     produce a download that 404s in one locale and works in every other.
+   * THE LOG BOX AND THE BUG REPORT. They exist to be read by whoever fixes the bug. A
+     translated stack of tier-fallback messages in a report is worse for everyone, including
+     the person who filed it.
+   * THE LAUNCHER LABEL. It is a Gradle manifest placeholder derived from whether
+     ContentGate.kt exists, which is what keeps `main` and `dev` installable side by side.
+     It is a brand name.
+   * THE HTTP API's responses. `ApiServer` answers a machine, and a script that matches on
+     an error string must not have it change with the phone's locale. The API asks
+     ContentGate for its message through an English-forced Context, so the sentences still
+     live here once rather than twice.
+
+  The web UI at assets/webui.html is a SECOND, independent table: it is read on a different
+  machine by someone who may not be holding the phone, so it follows the browser's
+  Accept-Language rather than this.
+-->
 <resources>
+
+    <!-- ==================================================== navigation and chrome -->
+    <string name="nav_swap">Swap</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- ==================================================== swap screen -->
+    <string name="swap_source_face">Source face</string>
+    <string name="swap_source_selected">Source face selected</string>
+    <string name="swap_source_pick">Pick source face</string>
+    <string name="swap_pane_original">Original</string>
+    <!-- %1$s is a timestamp like "0.42s" -->
+    <string name="swap_pane_original_at">Original  %1$s</string>
+    <string name="swap_pane_swapped">Swapped</string>
+    <string name="swap_reading_video">Reading video…</string>
+    <string name="swap_seeking">Seeking…</string>
+    <string name="swap_add_target">Add a target</string>
+    <string name="swap_choose_another_target">Choose another target</string>
+    <string name="swap_remove_target">Remove target</string>
+    <string name="swap_loading_models">Loading models, this takes a few seconds…</string>
+    <string name="swap_swapping_frame">Swapping this frame…</string>
+    <string name="swap_pick_a_source">Pick a source face</string>
+    <string name="swap_preparing_preview">Preparing preview…</string>
+
+    <string name="swap_clip">Clip</string>
+    <!-- %1$d frames, %2$s duration, %3$d frames per second -->
+    <string name="swap_clip_summary">%1$d frames of %2$s   %3$d fps</string>
+    <string name="swap_frame_rate">Frame rate</string>
+    <!-- %1$d is the video's own frame rate -->
+    <string name="swap_rate_same">Same (%1$d)</string>
+    <string name="swap_rate_hint_every">every frame of the source</string>
+    <string name="swap_rate_hint_drop">drops frames before the swap, so it is faster too</string>
+
+    <string name="swap_action">Swap</string>
+    <string name="swap_cancel">Cancel</string>
+    <!-- %1$d done, %2$d total, %3$s frames per second, %4$d seconds remaining -->
+    <string name="swap_progress">Frame %1$d / %2$d   %3$s fps   ETA %4$ds</string>
+    <string name="swap_share_bug_report">Share bug report</string>
+    <string name="swap_save_to_gallery">Save to gallery</string>
+    <string name="swap_saved_to_gallery">Saved to gallery</string>
+    <string name="swap_share">Share</string>
+
+    <string name="swap_advanced">Advanced</string>
+    <string name="swap_defaults">FaceFusion defaults</string>
+    <!-- %1$s weight, %2$s pixel boost label, %3$s mask blur -->
+    <string name="swap_advanced_summary">weight %1$s   %2$s   blur %3$s</string>
+    <string name="swap_reset_defaults">Reset to defaults</string>
+
+    <!-- ==================================================== output pane -->
+    <string name="out_output">Output</string>
+    <string name="out_output_partial">Output  (partial)</string>
+    <string name="out_save_frame">Save frame</string>
+    <string name="out_play">Play</string>
+    <string name="out_pause">Pause</string>
+    <string name="out_log">Log</string>
+    <string name="out_expand">Expand</string>
+    <string name="out_collapse">Collapse</string>
+
+    <!-- ==================================================== model download overlay -->
+    <string name="dl_models_required">Models required</string>
+    <string name="dl_not_on_device">The face models are not on this device yet.</string>
+    <string name="dl_download">Download models</string>
+    <string name="dl_retry">Retry download</string>
+    <!-- %1$d MB done, %2$d MB total, %3$d file index, %4$d file count -->
+    <string name="dl_progress">%1$d / %2$d MB   file %3$d of %4$d</string>
+    <string name="dl_metered_title">Download on mobile data?</string>
+    <string name="dl_metered_body">The models are about 275 MB. You appear to be on a metered connection, so this may use your data allowance.</string>
+    <string name="dl_metered_confirm">Download anyway</string>
+    <string name="dl_metered_wait">Wait for Wi‑Fi</string>
+
+    <!-- ==================================================== option cards -->
+    <string name="opt_face_swapper">Face Swapper</string>
+    <!-- %1$s weight, %2$s pixel boost label, %3$s model name (never translated) -->
+    <string name="opt_swapper_summary">weight %1$s   %2$s   %3$s</string>
+    <string name="opt_weight">Weight</string>
+    <string name="opt_weight_hint_high">source amplified, target identity subtracted</string>
+    <string name="opt_weight_hint_low">some of the target\'s own identity kept</string>
+    <string name="opt_weight_hint_default">the source embedding, unmodified (default)</string>
+    <string name="opt_pixel_boost">Pixel boost</string>
+    <string name="opt_pixel_boost_native">the model\'s native size</string>
+    <!-- %1$d is how many times the swapper runs per face -->
+    <string name="opt_pixel_boost_cost">%1$dx the swapper cost per face — fine for stills, slow for video</string>
+    <string name="opt_model">Model</string>
+    <string name="opt_model_hint">hyperswap is 256², inswapper 128² and slower</string>
+
+    <string name="opt_face_masker">Face Masker</string>
+    <!-- %1$s blur amount, %2$s padding -->
+    <string name="opt_masker_summary">blur %1$s   padding %2$s</string>
+    <string name="opt_blur">Blur</string>
+    <string name="opt_blur_hint">how soft the edge of the swapped region is</string>
+    <string name="opt_padding">Padding</string>
+    <string name="opt_padding_hint">shrinks the swapped region, letting more of the original show</string>
+    <string name="opt_padding_per_edge">Per-edge padding</string>
+    <string name="opt_edge_top">Top</string>
+    <string name="opt_edge_right">Right</string>
+    <string name="opt_edge_bottom">Bottom</string>
+    <string name="opt_edge_left">Left</string>
+
+    <string name="opt_face_detector">Face Detector</string>
+    <!-- %1$s detector score, %2$s landmarker score, %3$s face selection -->
+    <string name="opt_detector_summary">score %1$s   landmarker %2$s   %3$s</string>
+    <string name="opt_find_faces">Find faces</string>
+    <string name="opt_find_faces_hint">higher: only clear, obvious faces are swapped. lower: it tries harder on small or turned ones</string>
+    <string name="opt_face_alignment">Face alignment</string>
+    <string name="opt_face_alignment_hint">how sure the app must be of the face\'s exact shape before using it. raise it if a swap looks stretched or crooked</string>
+    <string name="opt_faces">Faces</string>
+    <string name="opt_faces_every">Every face</string>
+    <string name="opt_faces_largest">Largest only</string>
+    <string name="opt_faces_every_short">every face</string>
+    <string name="opt_faces_largest_short">largest face</string>
+    <string name="opt_faces_hint">swap every face in the frame, or only the largest one</string>
+    <string name="opt_detector_note">detector size is fixed at 640 and the swapper at 256 — both are compiled into the NPU binaries</string>
+
+    <string name="opt_face_enhancer">Face Enhancer</string>
+    <!-- %1$s is the blend amount -->
+    <string name="opt_enhancer_summary">gpen_bfr_256   blend %1$s</string>
+    <string name="opt_enhancer_off_summary">off</string>
+    <string name="opt_enhancer">Enhancer</string>
+    <string name="opt_on">On</string>
+    <string name="opt_off">Off</string>
+    <string name="opt_enhancer_hint">restores detail the swapper loses — about +4 ms per face</string>
+    <string name="opt_blend">Blend</string>
+    <string name="opt_blend_hint_full">the enhancer\'s output alone</string>
+    <string name="opt_blend_hint_none">no effect — the swap is left untouched</string>
+    <string name="opt_blend_hint_mixed">mixed with the unenhanced swap (upstream default 0.80)</string>
+    <!-- %1$s is the resolution the enhancer runs at, e.g. "512" -->
+    <string name="opt_enhancer_note">runs on the swapped face at %1$s, before it is pasted back</string>
+
+    <!-- ==================================================== settings: models -->
+    <string name="set_models">Models</string>
+    <!-- %1$d present, %2$d total, %3$s size on disk -->
+    <string name="set_models_summary">%1$d of %2$d present, %3$s on disk</string>
+    <!-- %1$d is how many models have a newer published build -->
+    <string name="set_models_updates">, %1$d update available</string>
+    <string name="set_update_available">update available</string>
+    <string name="set_not_installed">not installed</string>
+    <string name="set_required_suffix">(required)</string>
+    <string name="set_update">Update</string>
+    <string name="set_updating">Updating</string>
+    <string name="set_delete">Delete</string>
+    <string name="set_download">Download</string>
+    <string name="set_downloading">Downloading</string>
+    <!-- %1$s is the model's display name -->
+    <string name="set_delete_title">Delete %1$s?</string>
+    <!-- %1$s filename, %2$s size -->
+    <string name="set_delete_body">%1$s is %2$s. Deleting it frees that space; the app can download it again when you next swap.</string>
+    <string name="set_delete_required_warning">\n\nSwapping will not work until it is back.</string>
+    <string name="set_cancel">Cancel</string>
+
+    <!-- model row labels. The ROLE is translated; the model's own name is not. -->
+    <string name="model_detector">Face detector</string>
+    <string name="model_landmarker">Face landmarker</string>
+    <string name="model_recogniser">Face recogniser</string>
+    <string name="model_swapper">Face swapper</string>
+    <string name="model_swapper_alt">Face swapper (alternative)</string>
+    <string name="model_content_checker">Content checker</string>
+    <string name="model_content_checker_quantised">Content checker (quantised)</string>
+    <string name="model_enhancer">Face enhancer</string>
+    <string name="model_landmark_refiner">Landmark refiner</string>
+
+    <!-- ==================================================== settings: device -->
+    <string name="set_this_device">This device</string>
+    <string name="set_runtime">Runtime</string>
+    <string name="set_runtime_npu">Hexagon NPU</string>
+    <string name="set_runtime_gpu_cpu">GPU (Vulkan) + CPU</string>
+    <string name="set_runtime_cpu">CPU</string>
+    <string name="set_runtime_none">none started</string>
+    <string name="set_unknown_dash">-</string>
+    <string name="set_ncnn_note">This device has no Qualcomm NPU, so the swap runs on the GPU and CPU: expect roughly 13x the time per frame. The face enhancer and the content checker always run on the CPU here — on the GPU they are measurably wrong, not merely slower.</string>
+    <string name="set_htp_unmeasured">The HTP could not be measured. The app falls back to the most permissive build, so this is not necessarily a failure to run.</string>
+    <string name="set_hexagon_arch">Hexagon arch</string>
+    <string name="set_vtcm">VTCM</string>
+    <string name="set_soc_model">SoC model</string>
+    <string name="set_fp16">fp16 execution</string>
+    <string name="set_fp16_yes">supported</string>
+    <string name="set_fp16_no">not supported</string>
+    <string name="set_fp16_unknown">could not be measured</string>
+    <string name="set_context_binaries">Context binaries</string>
+    <string name="set_supported_devices">Supported devices</string>
+    <string name="set_in_use">in use</string>
+
+    <!-- ==================================================== settings: runtime override -->
+    <string name="set_runtime_override_note">This phone has a Hexagon NPU and uses it. Forcing the GPU/CPU path shows what a non-Qualcomm device does — it needs its own model set and is far slower.</string>
+    <string name="set_runtime_auto">Automatic</string>
+    <string name="set_runtime_force_npu">NPU</string>
+    <string name="set_runtime_force_gpu">GPU + CPU</string>
+    <!-- %1$s is "qnn" or "ncnn", which are not translated -->
+    <string name="set_runtime_forced">Forced to %1$s. A testing control: it restarts the pipeline, and the other runtime\'s models are a separate download.</string>
+
+    <!-- ==================================================== settings: remote API -->
+    <string name="set_remote_api">Remote API</string>
+    <string name="set_api_title">Use from a computer</string>
+    <string name="set_api_body">Turn this on and open the address below in a browser on your computer. Everything still runs on this phone.</string>
+    <string name="set_api_lan_title">Let other devices connect</string>
+    <string name="set_api_lan_on">On. Anyone who can reach this phone on your network can open the page and swap faces with it.</string>
+    <string name="set_api_lan_off">Off. Only this phone, or a computer connected by USB.</string>
+    <string name="set_api_open_this">Open this</string>
+    <string name="set_api_over_usb">Or over USB</string>
+    <!-- %1$s is an error from the server, which is not translated -->
+    <string name="set_api_failed">Could not start: %1$s</string>
+
+    <!-- ==================================================== settings: about -->
+    <string name="set_about">About</string>
+    <string name="set_about_body">This app is an offline port of FaceFusion\'s default face-swap path to the Qualcomm Hexagon NPU. The pipeline, the models, the option names, defaults and ranges are all FaceFusion\'s.</string>
+    <string name="set_about_author">Created by Henry Ruhs.</string>
+    <string name="set_link_project">This project on GitHub</string>
+    <string name="set_link_upstream">FaceFusion (original) on GitHub</string>
+    <string name="set_link_licence">Upstream licence (OpenRAIL-AS)</string>
+    <string name="set_licence_note">Model licences differ and are not all permissive: yoloface_8n is GPL-3.0, arcface_w600k_r50 and inswapper_128 are non-commercial, and hyperswap_1a_256 is ResearchRAIL.</string>
+
+    <!-- Chip tiers. The tier names and the chip names are identifiers: translate the
+         prose around them, never "SM8750", "Snapdragon" or "VTCM". -->
+    <string name="tier_v68">Snapdragon 888 and older (v68), 8 Gen 1 (v69), or any part with under 8 MB VTCM</string>
+    <string name="tier_v73">8 Gen 2 (v73), 8 Gen 3 (v75), and v79 parts other than SM8750</string>
+    <string name="tier_v79">Snapdragon 8 Elite (SM8750)</string>
+    <string name="tier_v81">Snapdragon 8 Elite Gen 5 (v81) and newer</string>
+
+    <!-- ==================================================== bug report -->
+    <string name="set_bug_report">Bug report</string>
+    <string name="set_bug_report_body">Sends the app version, your device, which models are installed and the run log. No photos or videos, and nothing is sent anywhere until you choose an app to send it with.</string>
+    <string name="set_bug_report_button">Share bug report</string>
+
+    <!-- ==================================================== status line -->
+    <!-- %1$s is a system error, which is not translated -->
+    <string name="status_share_failed">Could not share the report: %1$s</string>
+    <string name="status_source_set">Source set</string>
+    <string name="status_cancelling">Cancelling…</string>
+    <string name="status_cancelled">Cancelled</string>
+    <string name="status_loading_models">Loading models…</string>
+    <string name="status_reading_source">Reading source face…</string>
+    <string name="status_content_check">content check…</string>
+    <string name="status_swapping">Swapping…</string>
+    <!-- %1$d is the output size in kilobytes -->
+    <string name="status_done">Done - %1$d KB</string>
+    <!-- %1$s is an underlying error message, which is not translated -->
+    <string name="status_failed">Failed: %1$s</string>
+    <string name="status_failed_prefix">Failed</string>
+    <!-- %1$d width, %2$d height, %3$s duration -->
+    <string name="status_target_ready_video">Target ready: %1$d x %2$d, %3$s</string>
+    <!-- %1$d width, %2$d height -->
+    <string name="status_target_ready_image">Target ready: %1$d x %2$d</string>
+    <!-- %1$s is an underlying error message, which is not translated -->
+    <string name="status_cannot_read_video">Cannot read video: %1$s</string>
+    <string name="status_cannot_read_image">Cannot read image</string>
+    <string name="status_saved_movies">Saved to Movies/FaceFusion</string>
+    <string name="status_saved_pictures">Saved to Pictures/FaceFusion</string>
+    <string name="status_frame_saved">Frame saved to Pictures/FaceFusion</string>
+    <!-- %1$s is an underlying error message, which is not translated -->
+    <string name="status_save_failed">Save failed: %1$s</string>
+    <string name="status_save_frame_failed">Save frame failed: %1$s</string>
+    <string name="status_save_first">Save to gallery first, then share</string>
+    <string name="status_api_busy">The remote API is using the NPU</string>
+    <string name="status_no_face">No face detected in this frame</string>
+    <string name="status_cannot_read_frame">Could not read that frame</string>
+    <string name="status_cannot_read_source">Could not read the source image</string>
+    <string name="share_swapped_image">Share swapped image</string>
+    <string name="share_swapped_video">Share swapped video</string>
+
+    <!-- ==================================================== content gate
+         The one place where a soft translation changes what the app appears to promise.
+         BLOCK is a refusal and must read as one; ERROR must NOT read as a refusal, because
+         a check that could not run has neither permitted nor refused anything, and saying
+         "not allowed" there blames the user for our own failure. -->
+    <string name="gate_subject_source_image">the source image</string>
+    <string name="gate_subject_target_image">the target image</string>
+    <string name="gate_subject_target_video">the target video</string>
+    <string name="gate_subject_this_frame">this frame</string>
+    <!-- %1$s is one of the gate_subject_* strings above -->
+    <string name="gate_blocked">Explicit content not allowed in %1$s</string>
+    <string name="gate_error">The content check could not run on %1$s, so it cannot be processed</string>
+    <!-- %1$s is the gate_error sentence, %2$s a technical reason that is not translated -->
+    <string name="gate_error_detail">%1$s (%2$s)</string>
+    <string name="gate_blocked_generic">Explicit content not allowed</string>
+
 </resources>

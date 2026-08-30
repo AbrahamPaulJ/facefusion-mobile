@@ -25,6 +25,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.math.roundToInt
+import androidx.compose.ui.res.stringResource
 
 /**
  * Source image + target video -> swapped MP4, entirely on device.
@@ -57,7 +58,35 @@ class MainActivity : ComponentActivity() {
     private var opts by mutableStateOf(SwapOptions())
     private var openCard by mutableStateOf("")
 
-    private var status by mutableStateOf("")
+    private var statusText by mutableStateOf("")
+
+    /**
+     * Whether [status] is a FAILURE, as opposed to progress or a refusal.
+     *
+     * Kept beside the text instead of being recovered from it. SwapScreen used to decide
+     * this with `status.startsWith("Failed")`, which reads a sentence written for the user
+     * -- so the moment that sentence is translated, the bug-report button disappears in
+     * every language except English.
+     *
+     * A content refusal is deliberately NOT an error: nothing malfunctioned, and offering
+     * to file a bug about a working gate is noise. That matches what the prefix test did,
+     * since the gate's own sentence never began with "Failed".
+     */
+    private var statusIsError by mutableStateOf(false)
+
+    /**
+     * The status line. Assigning it clears [statusIsError]; use [failStatus] for a failure.
+     *
+     * A property rather than a plain field so that every one of the two dozen
+     * `status = "..."` sites keeps meaning "this is not an error" without each having to
+     * say so.
+     */
+    private var status: String
+        get() = statusText
+        set(value) { statusText = value; statusIsError = false }
+
+    /** A status that IS a failure, and should offer the bug report. */
+    private fun failStatus(value: String) { statusText = value; statusIsError = true }
     private var log by mutableStateOf("")
     private var busy by mutableStateOf(false)
     private var preparing by mutableStateOf(false)
@@ -179,7 +208,7 @@ class MainActivity : ComponentActivity() {
         if (uri != null) {
             sourceUri = uri
             sourceThumb = decodeOriented(uri)
-            status = "Source set"
+            status = getString(R.string.status_source_set)
             // A different face means the loaded pipeline is holding the wrong embedding.
             previewOptionsChanged()
         }
@@ -431,6 +460,7 @@ class MainActivity : ComponentActivity() {
                                 run = RunUi(busy, preparing, progress, framesDone,
                                             framesTotal, elapsedS),
                                 status = status,
+                                statusIsError = statusIsError,
                                 log = log,
                                 opts = opts,
                                 onOptsChange = { o ->
@@ -464,7 +494,10 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onClearTarget = ::clearTarget,
                                 onSwap = { runSwap() },
-                                onCancel = { cancelRequested = true; status = "Cancelling..." },
+                                onCancel = {
+                                    cancelRequested = true
+                                    status = getString(R.string.status_cancelling)
+                                },
                                 modelsMissing = modelsMissing,
                                 onDownload = { onDownloadTapped() },
                                 onShareLog = { shareBugReport() },
@@ -491,6 +524,7 @@ class MainActivity : ComponentActivity() {
                                     previewOptionsChanged(hard = true)
                                 },
                                 onApiToggle = ::toggleApi,
+                                onShareBugReport = { shareBugReport() },
                                 forcedBackend = forcedBackend,
                                 // null in a QNN-only build, which is what hides the
                                 // control rather than drawing a dead one.
@@ -504,21 +538,21 @@ class MainActivity : ComponentActivity() {
                     if (confirmMetered) {
                         AlertDialog(
                             onDismissRequest = { confirmMetered = false },
-                            title = { Text("Download on mobile data?") },
+                            title = { Text(stringResource(R.string.dl_metered_title)) },
                             text = {
                                 Text(
-                                    "The models are about 275 MB. You appear to be on a " +
-                                        "metered connection, so this may use your data " +
-                                        "allowance."
+                                    stringResource(R.string.dl_metered_body)
                                 )
                             },
                             confirmButton = {
                                 TextButton({ confirmMetered = false; beginDownload() }) {
-                                    Text("Download anyway")
+                                    Text(stringResource(R.string.dl_metered_confirm))
                                 }
                             },
                             dismissButton = {
-                                TextButton({ confirmMetered = false }) { Text("Wait for Wi-Fi") }
+                                TextButton({ confirmMetered = false }) {
+                                    Text(stringResource(R.string.dl_metered_wait))
+                                }
                             },
                         )
                     }
@@ -655,7 +689,14 @@ class MainActivity : ComponentActivity() {
         else "not measured"
         val models = modelDir().listFiles()?.map { it.name + "  " + it.length() + " bytes" }
             ?.sorted().orEmpty()
-        BugReport.share(this, BugReport.compose(this, log, npu, models, status))
+        // Say so when it does not go. The share used to be fire-and-forget, so a device
+        // with nothing that accepts text/plain -- or a report too large for a Binder
+        // transaction -- produced a button that did visibly nothing.
+        val err = BugReport.share(this, BugReport.compose(this, log, npu, models, status))
+        if (err != null) {
+            status = getString(R.string.status_share_failed, err)
+            return
+        }
         BugReport.clearCrash(this)
     }
 
@@ -719,10 +760,10 @@ class MainActivity : ComponentActivity() {
         // alternative.
         val alt = if (opts.swapper == "inswapper") "hyperswap" else "inswapper"
         val required = listOf(
-            "yoloface" to "Face detector",
-            "fan2d" to "Face landmarker",
-            "arcface" to "Face recogniser",
-            opts.swapper to "Face swapper",
+            "yoloface" to getString(R.string.model_detector),
+            "fan2d" to getString(R.string.model_landmarker),
+            "arcface" to getString(R.string.model_recogniser),
+            opts.swapper to getString(R.string.model_swapper),
         )
         // The content gate is required -- missing() blocks a run without it and
         // ffpipe::init will not come up -- but it is satisfied by EITHER build, so neither
@@ -740,16 +781,16 @@ class MainActivity : ComponentActivity() {
         val gateOk = ModelPaths.present(modelDir(), t, "nsfw") ||
                      ModelPaths.present(modelDir(), t, "nsfwq2")
         val gate = listOf(
-            "nsfw" to "Content checker",
-            "nsfwq2" to "Content checker (quantised)",
+            "nsfw" to getString(R.string.model_content_checker),
+            "nsfwq2" to getString(R.string.model_content_checker_quantised),
         )
         val optional = listOf(
-            alt to "Face swapper (alternative)",
+            alt to getString(R.string.model_swapper_alt),
             // It was absent from BOTH lists, so a 28 MB model that is on the device, that
             // the Advanced panel offers a switch for, and that /health reports as present,
             // was invisible on the one screen whose job is to say what is installed.
-            "gpen" to "Face enhancer",
-            "fan685" to "Landmark refiner",
+            "gpen" to getString(R.string.model_enhancer),
+            "fan685" to getString(R.string.model_landmark_refiner),
         )
         // What can be fetched is whatever the MANIFEST publishes for this tier -- asked
         // once over the network, not guessed here. The guess it replaces had the gate wrong
@@ -887,7 +928,7 @@ class MainActivity : ComponentActivity() {
             // The API server may be mid-request. Wait briefly rather than bounce: a preview
             // that quietly does not appear is the bug this whole pass has been about.
             if (!PipeGuard.acquire("preview", 4000)) {
-                previewNote = "The remote API is using the NPU"
+                previewNote = getString(R.string.status_api_busy)
                 return@launch
             }
             // Someone else has had the pipeline since this screen last used it, so the warm
@@ -904,13 +945,16 @@ class MainActivity : ComponentActivity() {
                 val frame = originalFrame ?: previews.frameAt(previewAtMs)?.also {
                     originalFrame = it
                 } ?: run {
-                    previewNote = "Could not read that frame"
+                    previewNote = getString(R.string.status_cannot_read_frame)
                     return@launch
                 }
 
                 if (!previewWarm) {
                     val bmp = withContext(Dispatchers.IO) { decodeOriented(src) }
-                    if (bmp == null) { previewNote = "Could not read the source image"; return@launch }
+                    if (bmp == null) {
+                        previewNote = getString(R.string.status_cannot_read_source)
+                        return@launch
+                    }
                     val soft = bmp.copy(Bitmap.Config.ARGB_8888, false)
                     val px = IntArray(soft.width * soft.height)
                     soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
@@ -938,7 +982,7 @@ class MainActivity : ComponentActivity() {
                             // dropped on the floor.
                             appendLog("preview source score %+.3f".format(v.score) +
                                       (if (v.detail.isNotBlank()) "  [" + v.detail + "]" else ""))
-                            if (v.ok) null else ContentGate.message("the source image", v)
+                            if (v.ok) null else ContentGate.message(this@MainActivity, R.string.gate_subject_source_image, v)
                         },
                     )
                     if (err != null) { previewNote = err; return@launch }
@@ -950,7 +994,7 @@ class MainActivity : ComponentActivity() {
                 // handle can reach any frame in the clip and this pane displays it.
                 ContentGate.checkImage(frame).let { v ->
                     if (!v.ok) {
-                        previewNote = ContentGate.message("this frame", v)
+                        previewNote = ContentGate.message(this@MainActivity, R.string.gate_subject_this_frame, v)
                         swappedFrame = null
                         return@launch
                     }
@@ -963,7 +1007,7 @@ class MainActivity : ComponentActivity() {
                         // processFrame leaves the buffer untouched when it finds nothing, so
                         // without this the pane would show the ORIGINAL and look like a
                         // swap that did nothing.
-                        previewNote = "No face detected in this frame"
+                        previewNote = getString(R.string.status_no_face)
                         swappedFrame = null
                     }
                     else -> {
@@ -1035,12 +1079,15 @@ class MainActivity : ComponentActivity() {
                 trimStartMs = 0f; trimEndMs = l.durationMs.toFloat()
                 targetAspect = if (l.width > 0 && l.height > 0)
                     l.width.toFloat() / l.height else 16f / 9f
-                status = "Target ready: ${l.width} x ${l.height}, ${fmt(l.durationMs.toFloat())}"
+                status = getString(R.string.status_target_ready_video,
+                                   l.width, l.height, fmt(l.durationMs.toFloat()))
                 // Open it for scrubbing and show the first frame straight away.
                 previews.openTarget(l.file.absolutePath)
                 swappedFrame = null; previewNote = null
                 originalFrame = previews.frameAt(0f)
-            }.onFailure { status = "Cannot read video: ${it.message}" }
+            }.onFailure {
+                status = getString(R.string.status_cannot_read_video, it.message ?: "")
+            }
             preparing = false
         }
     }
@@ -1058,7 +1105,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             val bmp = withContext(Dispatchers.IO) { decodeOriented(uri) }
             if (bmp == null) {
-                status = "Cannot read image"
+                status = getString(R.string.status_cannot_read_image)
                 preparing = false
                 return@launch
             }
@@ -1073,7 +1120,7 @@ class MainActivity : ComponentActivity() {
             swappedFrame = null; previewNote = null
             invalidatePreview()
             originalFrame = bmp
-            status = "Target ready: ${bmp.width} x ${bmp.height}"
+            status = getString(R.string.status_target_ready_image, bmp.width, bmp.height)
             preparing = false
         }
     }
@@ -1173,7 +1220,7 @@ class MainActivity : ComponentActivity() {
             // The run owns the pipeline for its whole length, minutes on a long clip. The
             // API server gets 503 for the duration, which is the honest answer.
             if (!PipeGuard.acquire("swap", 5000)) {
-                status = "The remote API is using the NPU"
+                status = getString(R.string.status_api_busy)
                 busy = false
                 return@launch
             }
@@ -1193,7 +1240,7 @@ class MainActivity : ComponentActivity() {
                         error("cannot read ${missing.joinToString()} for tier $tier in " +
                               "${models.absolutePath} -- run work/device/install_app.ps1")
 
-                    status = "Loading models..."
+                    status = getString(R.string.status_loading_models)
                     val libDir = applicationInfo.nativeLibraryDir
                     if (!NativePipe.init(libDir, libDir, models.absolutePath, opts))
                         error("init: ${NativePipe.lastError()}")
@@ -1202,19 +1249,20 @@ class MainActivity : ComponentActivity() {
                                 opts.maskPadding.joinToString("/"), opts.pixelBoostLabel,
                                 if (opts.largestOnly) "  largest face only" else ""))
 
-                    status = "Reading source face..."
+                    status = getString(R.string.status_reading_source)
                     val bmp = decodeOriented(src) ?: error("cannot decode source image")
 
                     // The content gate, BEFORE anything is processed or previewed. It
                     // blocks, as upstream does, so a refusal ends the run here -- there is
                     // no partial output and nothing reaches the preview surface.
-                    status = "content check..."
+                    status = getString(R.string.status_content_check)
                     if (NativePipe.contentGateIsQuantised())
                         appendLog("content gate: W8A16 build, biased " +
                                   "+${ContentGate.QUANTISED_BIAS} toward refusing")
                     ContentGate.checkImage(bmp).let {
                         appendLog("source content score %+.3f".format(it.score))
-                        if (!it.ok) throw ContentGate.Refused(ContentGate.message("the source image", it))
+                        if (!it.ok) throw ContentGate.Refused(ContentGate.message(this@MainActivity,
+                                                                R.string.gate_subject_source_image, it))
                     }
                     // The target, sampled across the clip.
                     ContentGate.checkVideo(tgt).let {
@@ -1225,7 +1273,8 @@ class MainActivity : ComponentActivity() {
                         appendLog("target content: %s, worst %+.3f".format(it.detail, it.score))
                         if (!it.ok)
                             throw ContentGate.Refused(
-                                ContentGate.message("the target video", it))
+                                ContentGate.message(this@MainActivity,
+                                                    R.string.gate_subject_target_video, it))
                     }
 
                     val soft = bmp.copy(Bitmap.Config.ARGB_8888, false)
@@ -1240,7 +1289,7 @@ class MainActivity : ComponentActivity() {
 
                     val out = File(outputDir(),
                         "swapped_${System.currentTimeMillis()}.mp4")
-                    status = "Swapping..."
+                    status = getString(R.string.status_swapping)
                     var lastPreview = 0L
 
                     VideoSwapper(
@@ -1277,18 +1326,20 @@ class MainActivity : ComponentActivity() {
                 outputFile = it; progress = 1f
                 // The run kept whatever it had when Cancel was pressed, so say which it is.
                 outputPartial = cancelRequested
-                status = "Done - ${it.length() / 1024} KB"
+                status = getString(R.string.status_done, it.length() / 1024)
             }.onFailure {
                 // A refusal is already a finished sentence aimed at the user, and it is not
                 // a fault: prefixing it with "Failed:" and dumping a stack trace would
                 // present a working safety check as a crash.
                 if (it.message == "cancelled") {
                     // Asked for, not gone wrong: no "Failed:", no stack trace.
-                    status = "Cancelled"
+                    status = getString(R.string.status_cancelled)
                 } else if (it is ContentGate.Refused) {
-                    status = it.message ?: "Explicit content not allowed"
+                    // The gate's own finished sentence, already localized. NOT an
+                    // error: nothing malfunctioned, so this offers no bug report.
+                    status = it.message ?: getString(R.string.gate_blocked_generic)
                 } else {
-                    status = "Failed: ${it.message}"
+                    failStatus(getString(R.string.status_failed, it.message ?: ""))
                     appendLog(it.stackTraceToString().take(700))
                 }
             }
@@ -1305,8 +1356,10 @@ class MainActivity : ComponentActivity() {
             r.onSuccess {
                 savedUri = it
                 savedPathLabel = "Movies/FaceFusion/" + file.name
-                status = "Saved to Movies/FaceFusion"
-            }.onFailure { status = "Save failed: ${it.message}" }
+                status = getString(R.string.status_saved_movies)
+            }.onFailure {
+                status = getString(R.string.status_save_failed, it.message ?: "")
+            }
         }
     }
 
@@ -1329,8 +1382,10 @@ class MainActivity : ComponentActivity() {
             r.onSuccess {
                 savedUri = it
                 savedPathLabel = "Pictures/FaceFusion/" + name
-                status = "Saved to Pictures/FaceFusion"
-            }.onFailure { status = "Save failed: ${it.message}" }
+                status = getString(R.string.status_saved_pictures)
+            }.onFailure {
+                status = getString(R.string.status_save_failed, it.message ?: "")
+            }
         }
     }
 
@@ -1357,14 +1412,16 @@ class MainActivity : ComponentActivity() {
                     GallerySaver.saveImage(this@MainActivity, bmp, name).getOrThrow()
                 }
             }
-            r.onSuccess { status = "Frame saved to Pictures/FaceFusion" }
-             .onFailure { status = "Save frame failed: ${it.message}" }
+            r.onSuccess { status = getString(R.string.status_frame_saved) }
+             .onFailure {
+                 status = getString(R.string.status_save_frame_failed, it.message ?: "")
+             }
         }
     }
 
     private fun shareResult() {
         val uri = savedUri ?: run {
-            status = "Save to gallery first, then share"
+            status = getString(R.string.status_save_first)
             return
         }
         // The mime has to match what was actually saved, or the chooser offers apps that
@@ -1375,7 +1432,8 @@ class MainActivity : ComponentActivity() {
             type = if (image) "image/png" else "video/mp4"
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }, if (image) "Share swapped image" else "Share swapped video"))
+        }, getString(if (image) R.string.share_swapped_image
+                     else R.string.share_swapped_video)))
     }
 
     /**

@@ -65,28 +65,28 @@
 <div class="wrap">
   <header>
     <h1>FACE<b>FUSION</b></h1>
-    <span id="health">checking...</span>
+    <span id="health" data-i18n="checking">checking...</span>
   </header>
-  <div class="hint">
+  <div class="hint" data-i18n="hint">
     Runs on the phone's NPU. The content check runs on every request, exactly as it does on
     the phone's screen.
   </div>
 
   <div class="grid">
     <div class="pane">
-      <h2>Source face</h2>
-      <div class="drop" id="srcDrop">Drop an image, or click to pick</div>
+      <h2 data-i18n="source">Source face</h2>
+      <div class="drop" id="srcDrop" data-i18n="dropSrc">Drop an image, or click to pick</div>
     </div>
     <div class="pane">
-      <h2>Target</h2>
-      <div class="drop" id="tgtDrop">Drop an image or a video, or click to pick</div>
+      <h2 data-i18n="target">Target</h2>
+      <div class="drop" id="tgtDrop" data-i18n="dropTgt">Drop an image or a video, or click to pick</div>
     </div>
   </div>
 
   <div class="opts">
-    <label>Weight <input type="range" id="weight" min="0" max="1" step="0.05" value="0.5">
+    <label><span data-i18n="weight">Weight</span> <input type="range" id="weight" min="0" max="1" step="0.05" value="0.5">
       <span id="weightV">0.50</span></label>
-    <label>Detail
+    <label><span data-i18n="detail">Detail</span>
       <select id="boost">
         <option value="1">256</option>
         <option value="2">512</option>
@@ -94,17 +94,17 @@
         <option value="4">1024</option>
       </select>
     </label>
-    <label><input type="checkbox" id="enhancer"> Face enhancer</label>
-    <label><input type="checkbox" id="largest"> Largest face only</label>
+    <label><input type="checkbox" id="enhancer"> <span data-i18n="enhancer">Face enhancer</span></label>
+    <label><input type="checkbox" id="largest"> <span data-i18n="largest">Largest face only</span></label>
   </div>
 
-  <button class="go" id="go" disabled>Swap</button>
+  <button class="go" id="go" data-i18n="swap" disabled>Swap</button>
   <div id="status"></div>
 
   <div class="pane" id="resultPane" style="margin-top:14px; display:none">
-    <h2>Result</h2>
+    <h2 data-i18n="result">Result</h2>
     <div class="drop" id="result" style="cursor:default"></div>
-    <div style="margin-top:10px"><a class="dl" id="dl" download>Download</a></div>
+    <div style="margin-top:10px"><a class="dl" id="dl" data-i18n="download" download>Download</a></div>
   </div>
 </div>
 
@@ -156,6 +156,75 @@ function qs() {
   return '?' + p.toString();
 }
 
+// ---------------------------------------------------------------------------
+// Language.
+// ---------------------------------------------------------------------------
+// A SECOND, independent string table from the app's strings.xml, and deliberately so: this
+// page is read on a different machine by someone who may not be the phone's owner, so it
+// follows THE BROWSER, not the phone's locale. A PC in English driving a phone set to
+// Chinese should stay in English, and the reverse should work too.
+//
+// navigator.language is the browser's own Accept-Language in JS form, which is the same
+// preference the server would see -- but resolved on the client, so the page stays a single
+// static file that the app serves without negotiating anything.
+//
+// Kept INLINE. Being self-contained is the whole point of this file: it is served from a
+// phone with no network of its own, so a fetched translation bundle is a request that can
+// only fail.
+const STRINGS = {
+  'zh-CN': {
+    checking: '正在检查…',
+    hint: '在手机的 NPU 上运行。每次请求都会执行内容检查，与在手机屏幕上完全一致。',
+    source: '源人脸', dropSrc: '拖入一张图片，或点击选择',
+    target: '目标', dropTgt: '拖入图片或视频，或点击选择',
+    weight: '强度', detail: '细节', enhancer: '人脸增强', largest: '仅最大的人脸',
+    swap: '开始换脸', result: '结果', download: '下载',
+    readingSource: '正在读取源人脸…',
+    swappingVideo: '正在处理视频 —— 每帧约 18 毫秒…',
+    swapping: '正在换脸…',
+    restarted: '手机已重启 —— 正在重新发送源人脸…',
+    doneIn: function (s) { return '完成，用时 ' + s + ' 秒'; },
+    modelsMissing: '缺少模型：', enhancerTag: '  人脸增强', noAnswer: '手机没有响应',
+  },
+  'zh-TW': {
+    checking: '正在檢查…',
+    hint: '在手機的 NPU 上執行。每次請求都會執行內容檢查，與在手機螢幕上完全一致。',
+    source: '來源人臉', dropSrc: '拖入一張圖片，或點擊選擇',
+    target: '目標', dropTgt: '拖入圖片或影片，或點擊選擇',
+    weight: '強度', detail: '細節', enhancer: '人臉增強', largest: '僅最大的人臉',
+    swap: '開始換臉', result: '結果', download: '下載',
+    readingSource: '正在讀取來源人臉…',
+    swappingVideo: '正在處理影片 —— 每格約 18 毫秒…',
+    swapping: '正在換臉…',
+    restarted: '手機已重新啟動 —— 正在重新傳送來源人臉…',
+    doneIn: function (s) { return '完成，耗時 ' + s + ' 秒'; },
+    modelsMissing: '缺少模型：', enhancerTag: '  人臉增強', noAnswer: '手機沒有回應',
+  },
+};
+
+// Traditional for zh-TW / zh-HK / zh-Hant, simplified for every other Chinese tag.
+// Everything else falls through to the English already in the markup.
+const L = (function () {
+  const tags = navigator.languages || [navigator.language || ''];
+  for (const raw of tags) {
+    const t = String(raw).toLowerCase();
+    if (!t.startsWith('zh')) continue;
+    return (/hant|tw|hk|mo/.test(t)) ? STRINGS['zh-TW'] : STRINGS['zh-CN'];
+  }
+  return null;
+})();
+
+if (L) {
+  document.documentElement.lang = (L === STRINGS['zh-TW']) ? 'zh-Hant' : 'zh-Hans';
+  document.querySelectorAll('[data-i18n]').forEach(function (el) {
+    const v = L[el.getAttribute('data-i18n')];
+    if (v) el.textContent = v;
+  });
+}
+
+/** A key from the table, or the English fallback the caller supplies. */
+function t(key, fallback) { return (L && L[key]) || fallback; }
+
 function say(msg, cls) { const s = $('#status'); s.textContent = msg; s.className = cls || ''; }
 
 async function post(path, file) {
@@ -178,13 +247,13 @@ $('#go').onclick = async () => {
   try {
     // Only when it changed: embedding the face costs a round trip and the phone keeps it.
     if (sourceSent !== src) {
-      say('reading the source face...');
+      say(t('readingSource', 'reading the source face...'));
       await post('/source' + qs(), src);
       sourceSent = src;
     }
     const video = tgt.type.startsWith('video');
-    say(video ? 'swapping the clip -- this runs at about 18 ms a frame...'
-              : 'swapping...');
+    say(video ? t('swappingVideo', 'swapping the clip -- this runs at about 18 ms a frame...')
+              : t('swapping', 'swapping...'));
     let r;
     try {
       r = await post((video ? '/swap_video' : '/swap') + qs(), tgt);
@@ -193,7 +262,7 @@ $('#go').onclick = async () => {
       // ~275 MB of context binaries. Re-send it once rather than making the page look
       // broken for a reason the person at the browser cannot see.
       if (!/source first/i.test(e.message)) throw e;
-      say('the phone restarted -- re-sending the source face...');
+      say(t('restarted', 'the phone restarted -- re-sending the source face...'));
       await post('/source' + qs(), src);
       sourceSent = src;
       r = await post((video ? '/swap_video' : '/swap') + qs(), tgt);
@@ -209,7 +278,8 @@ $('#go').onclick = async () => {
     const dl = $('#dl');
     dl.href = url;
     dl.download = video ? 'swapped.mp4' : 'swapped.png';
-    say('done in ' + ((Date.now() - t0) / 1000).toFixed(1) + ' s', 'ok');
+    const secs = ((Date.now() - t0) / 1000).toFixed(1);
+    say(L ? L.doneIn(secs) : 'done in ' + secs + ' s', 'ok');
   } catch (e) {
     say(e.message, 'err');
   }
@@ -217,11 +287,15 @@ $('#go').onclick = async () => {
 };
 
 fetch('/health').then(r => r.json()).then(h => {
+  // The TIER is an identifier and stays as it is in every language; only the words
+  // around it are words.
   $('#health').textContent =
-    h.tier + (h.ready ? '' : '  models missing: ' + (h.models_missing || []).join(' ')) +
-    (h.enhancer ? '  enhancer' : '');
+    h.tier +
+    (h.ready ? '' : '  ' + t('modelsMissing', 'models missing: ') +
+                    (h.models_missing || []).join(' ')) +
+    (h.enhancer ? t('enhancerTag', '  enhancer') : '');
   if (!h.enhancer) { $('#enhancer').disabled = true; $('#enhancer').parentElement.style.opacity = .4; }
-}).catch(() => $('#health').textContent = 'no answer from the phone');
+}).catch(() => $('#health').textContent = t('noAnswer', 'no answer from the phone'));
 </script>
 </body>
 </html>

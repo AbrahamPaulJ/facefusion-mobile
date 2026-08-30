@@ -31,6 +31,8 @@ import com.facefusion.mobile.OptionSegments
 import com.facefusion.mobile.SwapOptions
 import java.io.File
 import kotlin.math.roundToInt
+import androidx.compose.ui.res.stringResource
+import com.facefusion.mobile.R
 
 /** Everything the two preview panes need to draw themselves. */
 data class PreviewUi(
@@ -89,6 +91,16 @@ fun SwapScreen(
     preview: PreviewUi,
     run: RunUi,
     status: String,
+    /**
+     * Whether [status] describes a FAILURE, decided by the Activity rather than re-derived
+     * here.
+     *
+     * This used to be `status.startsWith("Failed")` -- a test on a string that is shown to
+     * the user. Translating the status would have silently removed the bug-report button in
+     * every language but English, which is precisely the language whose users are least
+     * likely to need it.
+     */
+    statusIsError: Boolean,
     log: String,
     opts: SwapOptions,
     onOptsChange: (SwapOptions) -> Unit,
@@ -146,14 +158,15 @@ fun SwapScreen(
         ) {
             if (sourceThumb != null) {
                 Image(
-                    sourceThumb.asImageBitmap(), "Source face",
+                    sourceThumb.asImageBitmap(), stringResource(R.string.swap_source_face),
                     Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)),
                     contentScale = ContentScale.Crop,
                 )
             }
             OutlinedButton(onPickSource, enabled = idle, modifier = Modifier.weight(1f),
                            shape = RoundedCornerShape(14.dp)) {
-                Text(if (hasSource) "Source face selected" else "Pick source face")
+                Text(stringResource(if (hasSource) R.string.swap_source_selected
+                                   else R.string.swap_source_pick))
             }
         }
         // ---------------------------------------------------------------- previews
@@ -166,15 +179,16 @@ fun SwapScreen(
         val portrait = targetAspect < 1f
         val panes: @Composable (Modifier) -> Unit = { paneModifier ->
             PreviewPane(
-                label = if (preview.timeLabel.isEmpty()) "Original"
-                        else "Original  ${preview.timeLabel}",
+                label = if (preview.timeLabel.isEmpty())
+                            stringResource(R.string.swap_pane_original)
+                        else stringResource(R.string.swap_pane_original_at, preview.timeLabel),
                 height = paneHeight,
                 bitmap = preview.original,
-                placeholder = when {
-                    run.preparing -> "Reading video..."
-                    hasTarget -> "Seeking..."
-                    else -> "Add a target"
-                },
+                placeholder = stringResource(when {
+                    run.preparing -> R.string.swap_reading_video
+                    hasTarget -> R.string.swap_seeking
+                    else -> R.string.swap_add_target
+                }),
                 modifier = paneModifier,
                 // The pane IS the picker. A separate full-width button said the same thing
                 // twice and cost a row of height the wordmark needed.
@@ -187,12 +201,12 @@ fun SwapScreen(
                     // did, and the pane itself is already the picker, so the word was
                     // saying a third time what the tap and the + icon already say.
                     IconButton(onPickTarget, enabled = idle, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Default.Add, "Choose another target",
+                        Icon(Icons.Default.Add, stringResource(R.string.swap_choose_another_target),
                              Modifier.size(20.dp),
                              tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     IconButton(onClearTarget, enabled = idle, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Default.Delete, "Remove target",
+                        Icon(Icons.Default.Delete, stringResource(R.string.swap_remove_target),
                              Modifier.size(20.dp),
                              tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -206,18 +220,21 @@ fun SwapScreen(
             // the one that cannot draw without the models -- so hiding it unconditionally
             // would leave a fresh install with no way to fetch them.
             if (hasTarget || modelsMissing) PreviewPane(
-                label = "Swapped",
+                label = stringResource(R.string.swap_pane_swapped),
                 height = paneHeight,
                 bitmap = preview.swapped,
                 placeholder = when {
                     modelsMissing -> ""
+                    // Already a finished, localized sentence from the Activity -- notably
+                    // the content gate's refusal, which must not be rebuilt here.
                     preview.note != null -> preview.note
-                    preview.busy && !preview.warm -> "Loading models, this takes a few seconds..."
-                    preview.busy -> "Swapping this frame..."
-                    !hasSource -> "Pick a source face"
+                    preview.busy && !preview.warm ->
+                        stringResource(R.string.swap_loading_models)
+                    preview.busy -> stringResource(R.string.swap_swapping_frame)
+                    !hasSource -> stringResource(R.string.swap_pick_a_source)
                     // No "tap refresh" any more: the preview warms itself as soon as both
                     // inputs exist, so this is a transient state rather than an instruction.
-                    else -> "Preparing preview..."
+                    else -> stringResource(R.string.swap_preparing_preview)
                 },
                 modifier = paneModifier,
                 // The download lives here rather than in a bar of its own: this is the pane
@@ -250,7 +267,7 @@ fun SwapScreen(
         if (durationMs > 0) {
             Column {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Caption("Clip", Modifier.weight(1f))
+                    Caption(stringResource(R.string.swap_clip), Modifier.weight(1f))
                     Text(
                         "${fmt(trimStartMs)} – ${fmt(trimEndMs)}",
                         style = MaterialTheme.typography.bodySmall,
@@ -276,7 +293,8 @@ fun SwapScreen(
                 val effFps = if (opts.outputFps in 1..inputFps) opts.outputFps else inputFps
                 val estFrames = ((trimEndMs - trimStartMs) / 1000f * effFps).roundToInt()
                 Text(
-                    "$estFrames frames of ${fmt(durationMs.toFloat())}   ${effFps} fps",
+                    stringResource(R.string.swap_clip_summary,
+                                   estFrames, fmt(durationMs.toFloat()), effFps),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -284,18 +302,18 @@ fun SwapScreen(
                 // Frame rate. Only rates at or below the input's are offered: a higher one
                 // would duplicate frames, and each duplicate costs a full swap to produce
                 // nothing new. Dropping frames is the only direction that saves anything.
-                val rates = listOf(0 to "Same ($inputFps)") +
+                val rates = listOf(0 to stringResource(R.string.swap_rate_same, inputFps)) +
                     listOf(24, 30, 60).filter { it < inputFps }.map { it to "$it" }
                 if (rates.size > 1) {
                     Spacer(Modifier.height(6.dp))
                     OptionSegments(
-                        "Frame rate",
+                        stringResource(R.string.swap_frame_rate),
                         rates,
                         if (opts.outputFps in 1..inputFps) opts.outputFps else 0,
                         { onOptsChange(opts.copy(outputFps = it)) },
                         hint = if (opts.outputFps == 0 || opts.outputFps >= inputFps)
-                                   "every frame of the source"
-                               else "drops frames before the swap, so it is faster too",
+                                   stringResource(R.string.swap_rate_hint_every)
+                               else stringResource(R.string.swap_rate_hint_drop),
                     )
                 }
             }
@@ -315,7 +333,8 @@ fun SwapScreen(
             // 14.dp everywhere: the stadium default made the two primary buttons the only
             // fully-round things on a screen of 14.dp panes and cards.
             shape = RoundedCornerShape(14.dp),
-        ) { Text(if (run.busy) "Cancel" else "Swap", fontSize = 16.sp) }
+        ) { Text(stringResource(if (run.busy) R.string.swap_cancel else R.string.swap_action),
+                 fontSize = 16.sp) }
 
         if (run.busy || run.progress > 0f) {
             LinearProgressIndicator(
@@ -326,8 +345,8 @@ fun SwapScreen(
                 val fps = if (run.elapsedS > 0) run.framesDone / run.elapsedS else 0.0
                 val eta = if (fps > 0) (run.framesTotal - run.framesDone) / fps else 0.0
                 Text(
-                    "Frame ${run.framesDone} / ${run.framesTotal}   " +
-                        "%.1f fps   ETA %ds".format(fps, eta.toInt()),
+                    stringResource(R.string.swap_progress, run.framesDone, run.framesTotal,
+                                   "%.1f".format(fps), eta.toInt()),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -340,8 +359,8 @@ fun SwapScreen(
             Text(status, style = MaterialTheme.typography.bodyMedium)
             // Only on a failure. A crash leaves no in-app log at all, which is why
             // BugReport also persists uncaught exceptions for the next launch.
-            if (status.startsWith("Failed")) {
-                TextButton(onShareLog) { Text("Share bug report") }
+            if (statusIsError) {
+                TextButton(onShareLog) { Text(stringResource(R.string.swap_share_bug_report)) }
             }
         }
 
@@ -364,10 +383,13 @@ fun SwapScreen(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(onSave, enabled = idle, modifier = Modifier.weight(1f),
                        shape = RoundedCornerShape(14.dp)) {
-                    Text(if (saved) "Saved to gallery" else "Save to gallery")
+                    Text(stringResource(if (saved) R.string.swap_saved_to_gallery
+                                        else R.string.swap_save_to_gallery))
                 }
                 OutlinedButton(onShare, enabled = idle,
-                               shape = RoundedCornerShape(14.dp)) { Text("Share") }
+                               shape = RoundedCornerShape(14.dp)) {
+                        Text(stringResource(R.string.swap_share))
+                    }
             }
             if (savedPath != null)
                 Text(
@@ -383,9 +405,11 @@ fun SwapScreen(
         // slider and the Swap button, i.e. across the primary path, for settings almost
         // every run leaves alone.
         Accordion(
-            "Advanced",
-            if (opts == SwapOptions()) "FaceFusion defaults"
-            else "weight %.2f   %s   blur %.2f".format(opts.weight, opts.pixelBoostLabel, opts.maskBlur),
+            stringResource(R.string.swap_advanced),
+            if (opts == SwapOptions()) stringResource(R.string.swap_defaults)
+            else stringResource(R.string.swap_advanced_summary,
+                                "%.2f".format(opts.weight), opts.pixelBoostLabel,
+                                "%.2f".format(opts.maskBlur)),
             advancedOpen,
             onToggleAdvanced,
         ) {
@@ -407,7 +431,7 @@ fun SwapScreen(
                     TextButton(
                         onClick = { onOptsChange(SwapOptions()) },
                         modifier = Modifier.align(Alignment.End),
-                    ) { Text("Reset to defaults") }
+                    ) { Text(stringResource(R.string.swap_reset_defaults)) }
                 }
             }
         }
@@ -445,7 +469,7 @@ private fun DownloadOverlay(onDownload: () -> Unit) {
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "%d / %d MB   file %d of %d".format(
+                        stringResource(R.string.dl_progress,
                             ModelDownload.doneBytes / 1048576,
                             ModelDownload.totalBytes / 1048576,
                             ModelDownload.fileIndex, ModelDownload.fileCount,
@@ -455,11 +479,11 @@ private fun DownloadOverlay(onDownload: () -> Unit) {
                     )
                 }
                 else -> {
-                    Text("Models required",
+                    Text(stringResource(R.string.dl_models_required),
                          style = MaterialTheme.typography.titleSmall)
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        ModelDownload.error ?: "The face models are not on this device yet.",
+                        ModelDownload.error ?: stringResource(R.string.dl_not_on_device),
                         style = MaterialTheme.typography.bodySmall,
                         textAlign = TextAlign.Center,
                         color = if (ModelDownload.error != null)
@@ -468,7 +492,8 @@ private fun DownloadOverlay(onDownload: () -> Unit) {
                     )
                     Spacer(Modifier.height(12.dp))
                     Button(onDownload, shape = RoundedCornerShape(14.dp)) {
-                        Text(if (ModelDownload.error != null) "Retry download" else "Download models")
+                        Text(stringResource(if (ModelDownload.error != null) R.string.dl_retry
+                                            else R.string.dl_download))
                     }
                 }
             }

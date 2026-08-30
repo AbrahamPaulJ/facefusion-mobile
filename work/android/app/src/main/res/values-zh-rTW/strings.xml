@@ -1,0 +1,247 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  繁體中文 (Traditional Chinese, Taiwan).
+
+  ⚠ NOT a character conversion of values-zh-rCN. The vocabulary genuinely differs, and a
+  converted file reads as mainland text in traditional characters:
+      影片 not 视频 · 預設 not 默认 · 設定 not 设置 · 儲存 not 保存 · 載入 not 加载
+      檔案 not 文件 · 偵測 not 检测 · 辨識 not 识别 · 支援 not 支持 · 影格 not 帧
+      相簿 not 相册 · 網路 not 网络 · 二進位 not 二进制 · 執行 not 运行
+  That is why this is a separate file rather than values-zh plus a converter.
+
+  Left in English, as in values/strings.xml: model and tier names, filenames, and units
+  (MB, fps, ms, VTCM, SoC, fp16, GPU, CPU, NPU, Vulkan).
+
+  ⚠ gate_blocked and gate_error MUST stay distinguishable. The first is a refusal; the
+  second is a fault in our own code, and wording it like a refusal blames the user for it.
+-->
+<resources>
+
+    <string name="nav_swap">換臉</string>
+    <string name="nav_settings">設定</string>
+
+    <string name="swap_source_face">來源人臉</string>
+    <string name="swap_source_selected">已選擇來源人臉</string>
+    <string name="swap_source_pick">選擇來源人臉</string>
+    <string name="swap_pane_original">原圖</string>
+    <string name="swap_pane_original_at">原圖  %1$s</string>
+    <string name="swap_pane_swapped">換臉結果</string>
+    <string name="swap_reading_video">正在讀取影片…</string>
+    <string name="swap_seeking">正在定位…</string>
+    <string name="swap_add_target">新增目標</string>
+    <string name="swap_choose_another_target">更換目標</string>
+    <string name="swap_remove_target">移除目標</string>
+    <string name="swap_loading_models">正在載入模型，需要幾秒鐘…</string>
+    <string name="swap_swapping_frame">正在處理這一格…</string>
+    <string name="swap_pick_a_source">請選擇來源人臉</string>
+    <string name="swap_preparing_preview">正在準備預覽…</string>
+
+    <string name="swap_clip">片段</string>
+    <string name="swap_clip_summary">%1$d 影格，共 %2$s   %3$d fps</string>
+    <string name="swap_frame_rate">影格率</string>
+    <string name="swap_rate_same">與原片相同 (%1$d)</string>
+    <string name="swap_rate_hint_every">處理來源影片的每一格</string>
+    <string name="swap_rate_hint_drop">換臉前先捨棄影格，因此速度也更快</string>
+
+    <string name="swap_action">開始換臉</string>
+    <string name="swap_cancel">取消</string>
+    <string name="swap_progress">第 %1$d / %2$d 格   %3$s fps   剩餘 %4$d 秒</string>
+    <string name="swap_share_bug_report">分享錯誤報告</string>
+    <string name="swap_save_to_gallery">儲存至相簿</string>
+    <string name="swap_saved_to_gallery">已儲存至相簿</string>
+    <string name="swap_share">分享</string>
+
+    <string name="swap_advanced">進階</string>
+    <string name="swap_defaults">FaceFusion 預設值</string>
+    <string name="swap_advanced_summary">強度 %1$s   %2$s   模糊 %3$s</string>
+    <string name="swap_reset_defaults">回復預設值</string>
+
+    <string name="out_output">輸出</string>
+    <string name="out_output_partial">輸出（未完成）</string>
+    <string name="out_save_frame">儲存此格</string>
+    <string name="out_play">播放</string>
+    <string name="out_pause">暫停</string>
+    <string name="out_log">紀錄</string>
+    <string name="out_expand">展開</string>
+    <string name="out_collapse">收合</string>
+
+    <string name="dl_models_required">需要下載模型</string>
+    <string name="dl_not_on_device">此裝置上還沒有人臉模型。</string>
+    <string name="dl_download">下載模型</string>
+    <string name="dl_retry">重新下載</string>
+    <string name="dl_progress">%1$d / %2$d MB   第 %3$d / %4$d 個檔案</string>
+    <string name="dl_metered_title">使用行動數據下載？</string>
+    <string name="dl_metered_body">模型約 275 MB。目前似乎是計量付費的連線，這可能會消耗你的流量。</string>
+    <string name="dl_metered_confirm">仍要下載</string>
+    <string name="dl_metered_wait">等待 Wi‑Fi</string>
+
+    <string name="opt_face_swapper">人臉替換</string>
+    <string name="opt_swapper_summary">強度 %1$s   %2$s   %3$s</string>
+    <string name="opt_weight">強度</string>
+    <string name="opt_weight_hint_high">增強來源人臉特徵，削弱目標人臉的身分</string>
+    <string name="opt_weight_hint_low">保留一部分目標人臉本身的身分</string>
+    <string name="opt_weight_hint_default">直接使用來源人臉特徵，不做修改（預設）</string>
+    <string name="opt_pixel_boost">像素增強</string>
+    <string name="opt_pixel_boost_native">模型的原生尺寸</string>
+    <string name="opt_pixel_boost_cost">每張臉的換臉成本變為 %1$d 倍 —— 處理相片沒問題，處理影片會很慢</string>
+    <string name="opt_model">模型</string>
+    <string name="opt_model_hint">hyperswap 為 256²，inswapper 為 128² 且更慢</string>
+
+    <string name="opt_face_masker">遮罩</string>
+    <string name="opt_masker_summary">模糊 %1$s   邊界 %2$s</string>
+    <string name="opt_blur">模糊</string>
+    <string name="opt_blur_hint">換臉區域邊緣的柔和程度</string>
+    <string name="opt_padding">邊界</string>
+    <string name="opt_padding_hint">縮小換臉區域，讓更多原圖顯露出來</string>
+    <string name="opt_padding_per_edge">分別設定各邊</string>
+    <string name="opt_edge_top">上</string>
+    <string name="opt_edge_right">右</string>
+    <string name="opt_edge_bottom">下</string>
+    <string name="opt_edge_left">左</string>
+
+    <string name="opt_face_detector">人臉偵測</string>
+    <string name="opt_detector_summary">信心度 %1$s   關鍵點 %2$s   %3$s</string>
+    <string name="opt_find_faces">偵測人臉</string>
+    <string name="opt_find_faces_hint">調高：只替換清晰、明顯的人臉。調低：會更努力處理小臉或側臉</string>
+    <string name="opt_face_alignment">人臉對齊</string>
+    <string name="opt_face_alignment_hint">應用程式需要多確定人臉的準確輪廓才會使用它。若換臉結果被拉伸或歪斜，可以調高</string>
+    <string name="opt_faces">人臉範圍</string>
+    <string name="opt_faces_every">所有人臉</string>
+    <string name="opt_faces_largest">僅最大的一張</string>
+    <string name="opt_faces_every_short">所有人臉</string>
+    <string name="opt_faces_largest_short">最大的人臉</string>
+    <string name="opt_faces_hint">替換畫面中的所有人臉，或只替換最大的一張</string>
+    <string name="opt_detector_note">偵測尺寸固定為 640，換臉尺寸固定為 256 —— 兩者都已編譯進 NPU 二進位檔</string>
+
+    <string name="opt_face_enhancer">人臉增強</string>
+    <string name="opt_enhancer_summary">gpen_bfr_256   混合 %1$s</string>
+    <string name="opt_enhancer_off_summary">關閉</string>
+    <string name="opt_enhancer">增強</string>
+    <string name="opt_on">開啟</string>
+    <string name="opt_off">關閉</string>
+    <string name="opt_enhancer_hint">還原換臉過程中失去的細節 —— 每張臉約增加 4 ms</string>
+    <string name="opt_blend">混合</string>
+    <string name="opt_blend_hint_full">只使用增強後的結果</string>
+    <string name="opt_blend_hint_none">沒有效果 —— 換臉結果維持不變</string>
+    <string name="opt_blend_hint_mixed">與未增強的換臉結果混合（上游預設 0.80）</string>
+    <string name="opt_enhancer_note">在貼回原圖之前，以 %1$s 處理換好的人臉</string>
+
+    <string name="set_models">模型</string>
+    <string name="set_models_summary">已安裝 %1$d / %2$d 個，佔用 %3$s</string>
+    <string name="set_models_updates">，%1$d 個可更新</string>
+    <string name="set_update_available">有可用更新</string>
+    <string name="set_not_installed">未安裝</string>
+    <string name="set_required_suffix">（必要）</string>
+    <string name="set_update">更新</string>
+    <string name="set_updating">更新中</string>
+    <string name="set_delete">刪除</string>
+    <string name="set_download">下載</string>
+    <string name="set_downloading">下載中</string>
+    <string name="set_delete_title">刪除%1$s？</string>
+    <string name="set_delete_body">%1$s 佔用 %2$s。刪除可釋放這些空間；下次換臉時應用程式會重新下載。</string>
+    <string name="set_delete_required_warning">\n\n在它回來之前將無法換臉。</string>
+    <string name="set_cancel">取消</string>
+
+    <string name="model_detector">人臉偵測器</string>
+    <string name="model_landmarker">人臉關鍵點</string>
+    <string name="model_recogniser">人臉辨識</string>
+    <string name="model_swapper">人臉替換</string>
+    <string name="model_swapper_alt">人臉替換（備選）</string>
+    <string name="model_content_checker">內容檢查</string>
+    <string name="model_content_checker_quantised">內容檢查（量化版）</string>
+    <string name="model_enhancer">人臉增強</string>
+    <string name="model_landmark_refiner">關鍵點細化</string>
+
+    <string name="set_this_device">本機</string>
+    <string name="set_runtime">執行方式</string>
+    <string name="set_runtime_npu">Hexagon NPU</string>
+    <string name="set_runtime_gpu_cpu">GPU (Vulkan) + CPU</string>
+    <string name="set_runtime_cpu">CPU</string>
+    <string name="set_runtime_none">未啟動</string>
+    <string name="set_unknown_dash">-</string>
+    <string name="set_ncnn_note">此裝置沒有高通 NPU，因此換臉在 GPU 與 CPU 上執行：每格耗時約為原本的 13 倍。人臉增強與內容檢查在這裡一律使用 CPU —— 在 GPU 上它們的結果是錯的，而不只是比較慢。</string>
+    <string name="set_htp_unmeasured">無法測量 HTP。應用程式會退回相容性最好的版本，因此這不一定表示無法執行。</string>
+    <string name="set_hexagon_arch">Hexagon 架構</string>
+    <string name="set_vtcm">VTCM</string>
+    <string name="set_soc_model">SoC 型號</string>
+    <string name="set_fp16">fp16 執行</string>
+    <string name="set_fp16_yes">支援</string>
+    <string name="set_fp16_no">不支援</string>
+    <string name="set_fp16_unknown">無法測量</string>
+    <string name="set_context_binaries">內容二進位檔</string>
+    <string name="set_supported_devices">支援的裝置</string>
+    <string name="set_in_use">使用中</string>
+
+    <string name="set_runtime_override_note">本機有 Hexagon NPU 並正在使用它。強制走 GPU/CPU 路徑可以看到沒有高通 NPU 的裝置是什麼表現 —— 它需要另一套模型，而且慢得多。</string>
+    <string name="set_runtime_auto">自動</string>
+    <string name="set_runtime_force_npu">NPU</string>
+    <string name="set_runtime_force_gpu">GPU + CPU</string>
+    <string name="set_runtime_forced">已強制為 %1$s。這是測試用的開關：它會重新啟動處理流程，另一套執行方式的模型需要另外下載。</string>
+
+    <string name="set_remote_api">遠端 API</string>
+    <string name="set_api_title">在電腦上使用</string>
+    <string name="set_api_body">開啟這個開關，然後在電腦的瀏覽器中開啟下面的位址。所有處理仍然在這支手機上進行。</string>
+    <string name="set_api_lan_title">允許其他裝置連線</string>
+    <string name="set_api_lan_on">已開啟。同一網路中能連到這支手機的任何人都可以開啟該頁面並用它換臉。</string>
+    <string name="set_api_lan_off">已關閉。僅限本機，或透過 USB 連接的電腦。</string>
+    <string name="set_api_open_this">開啟這個位址</string>
+    <string name="set_api_over_usb">或透過 USB</string>
+    <string name="set_api_failed">無法啟動：%1$s</string>
+
+    <string name="set_about">關於</string>
+    <string name="set_about_body">本應用程式是 FaceFusion 預設換臉流程在高通 Hexagon NPU 上的離線移植版。處理流程、模型，以及各選項的名稱、預設值與範圍都來自 FaceFusion。</string>
+    <string name="set_about_author">由 Henry Ruhs 建立。</string>
+    <string name="set_link_project">本專案的 GitHub 頁面</string>
+    <string name="set_link_upstream">FaceFusion（原專案）的 GitHub 頁面</string>
+    <string name="set_link_licence">上游授權條款（OpenRAIL-AS）</string>
+    <string name="set_licence_note">各模型的授權條款並不相同，也不全是寬鬆授權：yoloface_8n 為 GPL-3.0，arcface_w600k_r50 與 inswapper_128 為非商業用途，hyperswap_1a_256 為 ResearchRAIL。</string>
+
+    <string name="tier_v68">Snapdragon 888 及更早 (v68)、8 Gen 1 (v69)，或 VTCM 小於 8 MB 的晶片</string>
+    <string name="tier_v73">8 Gen 2 (v73)、8 Gen 3 (v75)，以及 SM8750 以外的 v79 晶片</string>
+    <string name="tier_v79">Snapdragon 8 Elite (SM8750)</string>
+    <string name="tier_v81">Snapdragon 8 Elite Gen 5 (v81) 及更新</string>
+
+    <string name="set_bug_report">錯誤報告</string>
+    <string name="set_bug_report_body">會傳送應用程式版本、你的裝置資訊、已安裝的模型與執行紀錄。不包含任何相片或影片，而且在你選擇傳送方式之前不會送到任何地方。</string>
+    <string name="set_bug_report_button">分享錯誤報告</string>
+
+    <string name="status_share_failed">無法分享報告：%1$s</string>
+    <string name="status_source_set">來源人臉已設定</string>
+    <string name="status_cancelling">正在取消…</string>
+    <string name="status_cancelled">已取消</string>
+    <string name="status_loading_models">正在載入模型…</string>
+    <string name="status_reading_source">正在讀取來源人臉…</string>
+    <string name="status_content_check">內容檢查…</string>
+    <string name="status_swapping">正在換臉…</string>
+    <string name="status_done">完成 - %1$d KB</string>
+    <string name="status_failed">失敗：%1$s</string>
+    <string name="status_failed_prefix">失敗</string>
+    <string name="status_target_ready_video">目標已就緒：%1$d x %2$d，%3$s</string>
+    <string name="status_target_ready_image">目標已就緒：%1$d x %2$d</string>
+    <string name="status_cannot_read_video">無法讀取影片：%1$s</string>
+    <string name="status_cannot_read_image">無法讀取圖片</string>
+    <string name="status_saved_movies">已儲存至 Movies/FaceFusion</string>
+    <string name="status_saved_pictures">已儲存至 Pictures/FaceFusion</string>
+    <string name="status_frame_saved">該格已儲存至 Pictures/FaceFusion</string>
+    <string name="status_save_failed">儲存失敗：%1$s</string>
+    <string name="status_save_frame_failed">儲存該格失敗：%1$s</string>
+    <string name="status_save_first">請先儲存至相簿，然後再分享</string>
+    <string name="status_api_busy">遠端 API 正在佔用 NPU</string>
+    <string name="status_no_face">這一格中沒有偵測到人臉</string>
+    <string name="status_cannot_read_frame">無法讀取該格</string>
+    <string name="status_cannot_read_source">無法讀取來源圖片</string>
+    <string name="share_swapped_image">分享換臉圖片</string>
+    <string name="share_swapped_video">分享換臉影片</string>
+
+    <string name="gate_subject_source_image">來源圖片</string>
+    <string name="gate_subject_target_image">目標圖片</string>
+    <string name="gate_subject_target_video">目標影片</string>
+    <string name="gate_subject_this_frame">這一格</string>
+    <!-- 拒絕。必須讀起來就是拒絕。 -->
+    <string name="gate_blocked">%1$s中含有不允許的成人內容</string>
+    <!-- 故障，不是拒絕：檢查沒能執行，因此它既沒有允許也沒有拒絕任何內容。 -->
+    <string name="gate_error">無法對%1$s執行內容檢查，因此無法處理</string>
+    <string name="gate_error_detail">%1$s（%2$s）</string>
+    <string name="gate_blocked_generic">不允許處理成人內容</string>
+
+</resources>

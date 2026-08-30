@@ -1,0 +1,244 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  简体中文 (Simplified Chinese).
+
+  Deliberately left in English, matching values/strings.xml:
+   * 模型名与档位名 — hyperswap, arcface, yoloface_8n, v68/v73/v79/v81. They are identifiers
+     that appear in FaceFusion's own documentation, in the manifest and in every bug report;
+     translating them leaves the reader with nothing to search for.
+   * Units and technical tokens — MB, fps, ms, VTCM, SoC, fp16, GPU, CPU, NPU, Vulkan.
+   * 文件名 — never translated anywhere.
+
+  ⚠ gate_blocked and gate_error MUST stay distinguishable. The first is a refusal; the
+  second is a fault in our own code, and wording it like a refusal blames the user for it.
+-->
+<resources>
+
+    <string name="nav_swap">换脸</string>
+    <string name="nav_settings">设置</string>
+
+    <string name="swap_source_face">源人脸</string>
+    <string name="swap_source_selected">已选择源人脸</string>
+    <string name="swap_source_pick">选择源人脸</string>
+    <string name="swap_pane_original">原图</string>
+    <string name="swap_pane_original_at">原图  %1$s</string>
+    <string name="swap_pane_swapped">换脸结果</string>
+    <string name="swap_reading_video">正在读取视频…</string>
+    <string name="swap_seeking">正在定位…</string>
+    <string name="swap_add_target">添加目标</string>
+    <string name="swap_choose_another_target">更换目标</string>
+    <string name="swap_remove_target">移除目标</string>
+    <string name="swap_loading_models">正在加载模型，需要几秒钟…</string>
+    <string name="swap_swapping_frame">正在处理这一帧…</string>
+    <string name="swap_pick_a_source">请选择源人脸</string>
+    <string name="swap_preparing_preview">正在准备预览…</string>
+
+    <string name="swap_clip">片段</string>
+    <string name="swap_clip_summary">%1$d 帧，共 %2$s   %3$d fps</string>
+    <string name="swap_frame_rate">帧率</string>
+    <string name="swap_rate_same">与原片相同 (%1$d)</string>
+    <string name="swap_rate_hint_every">处理源视频的每一帧</string>
+    <string name="swap_rate_hint_drop">换脸前先丢帧，因此速度也更快</string>
+
+    <string name="swap_action">开始换脸</string>
+    <string name="swap_cancel">取消</string>
+    <string name="swap_progress">第 %1$d / %2$d 帧   %3$s fps   剩余 %4$d 秒</string>
+    <string name="swap_share_bug_report">分享错误报告</string>
+    <string name="swap_save_to_gallery">保存到相册</string>
+    <string name="swap_saved_to_gallery">已保存到相册</string>
+    <string name="swap_share">分享</string>
+
+    <string name="swap_advanced">高级</string>
+    <string name="swap_defaults">FaceFusion 默认值</string>
+    <string name="swap_advanced_summary">强度 %1$s   %2$s   模糊 %3$s</string>
+    <string name="swap_reset_defaults">恢复默认值</string>
+
+    <string name="out_output">输出</string>
+    <string name="out_output_partial">输出（未完成）</string>
+    <string name="out_save_frame">保存此帧</string>
+    <string name="out_play">播放</string>
+    <string name="out_pause">暂停</string>
+    <string name="out_log">日志</string>
+    <string name="out_expand">展开</string>
+    <string name="out_collapse">收起</string>
+
+    <string name="dl_models_required">需要下载模型</string>
+    <string name="dl_not_on_device">此设备上还没有人脸模型。</string>
+    <string name="dl_download">下载模型</string>
+    <string name="dl_retry">重新下载</string>
+    <string name="dl_progress">%1$d / %2$d MB   第 %3$d / %4$d 个文件</string>
+    <string name="dl_metered_title">使用移动数据下载？</string>
+    <string name="dl_metered_body">模型约 275 MB。当前似乎是计费网络，这可能会消耗你的流量。</string>
+    <string name="dl_metered_confirm">仍然下载</string>
+    <string name="dl_metered_wait">等待 Wi‑Fi</string>
+
+    <string name="opt_face_swapper">人脸替换</string>
+    <string name="opt_swapper_summary">强度 %1$s   %2$s   %3$s</string>
+    <string name="opt_weight">强度</string>
+    <string name="opt_weight_hint_high">增强源人脸特征，削弱目标人脸的身份</string>
+    <string name="opt_weight_hint_low">保留一部分目标人脸自身的身份</string>
+    <string name="opt_weight_hint_default">直接使用源人脸特征，不作修改（默认）</string>
+    <string name="opt_pixel_boost">像素增强</string>
+    <string name="opt_pixel_boost_native">模型的原生尺寸</string>
+    <string name="opt_pixel_boost_cost">每张脸的换脸开销变为 %1$d 倍 —— 处理照片没问题，处理视频会很慢</string>
+    <string name="opt_model">模型</string>
+    <string name="opt_model_hint">hyperswap 为 256²，inswapper 为 128² 且更慢</string>
+
+    <string name="opt_face_masker">遮罩</string>
+    <string name="opt_masker_summary">模糊 %1$s   边距 %2$s</string>
+    <string name="opt_blur">模糊</string>
+    <string name="opt_blur_hint">换脸区域边缘的柔和程度</string>
+    <string name="opt_padding">边距</string>
+    <string name="opt_padding_hint">缩小换脸区域，让更多原图显露出来</string>
+    <string name="opt_padding_per_edge">分别设置各边</string>
+    <string name="opt_edge_top">上</string>
+    <string name="opt_edge_right">右</string>
+    <string name="opt_edge_bottom">下</string>
+    <string name="opt_edge_left">左</string>
+
+    <string name="opt_face_detector">人脸检测</string>
+    <string name="opt_detector_summary">置信度 %1$s   关键点 %2$s   %3$s</string>
+    <string name="opt_find_faces">检测人脸</string>
+    <string name="opt_find_faces_hint">调高：只替换清晰、明显的人脸。调低：会更努力地处理小脸或侧脸</string>
+    <string name="opt_face_alignment">人脸对齐</string>
+    <string name="opt_face_alignment_hint">应用需要多确定人脸的准确轮廓才会使用它。如果换脸结果被拉伸或歪斜，可以调高</string>
+    <string name="opt_faces">人脸范围</string>
+    <string name="opt_faces_every">所有人脸</string>
+    <string name="opt_faces_largest">仅最大的一张</string>
+    <string name="opt_faces_every_short">所有人脸</string>
+    <string name="opt_faces_largest_short">最大的人脸</string>
+    <string name="opt_faces_hint">替换画面中的所有人脸，或只替换最大的一张</string>
+    <string name="opt_detector_note">检测尺寸固定为 640，换脸尺寸固定为 256 —— 两者都已编译进 NPU 二进制文件</string>
+
+    <string name="opt_face_enhancer">人脸增强</string>
+    <string name="opt_enhancer_summary">gpen_bfr_256   混合 %1$s</string>
+    <string name="opt_enhancer_off_summary">关闭</string>
+    <string name="opt_enhancer">增强</string>
+    <string name="opt_on">开启</string>
+    <string name="opt_off">关闭</string>
+    <string name="opt_enhancer_hint">恢复换脸过程中损失的细节 —— 每张脸约增加 4 ms</string>
+    <string name="opt_blend">混合</string>
+    <string name="opt_blend_hint_full">只使用增强后的结果</string>
+    <string name="opt_blend_hint_none">无效果 —— 换脸结果保持不变</string>
+    <string name="opt_blend_hint_mixed">与未增强的换脸结果混合（上游默认 0.80）</string>
+    <string name="opt_enhancer_note">在贴回原图之前，以 %1$s 处理换好的人脸</string>
+
+    <string name="set_models">模型</string>
+    <string name="set_models_summary">已安装 %1$d / %2$d 个，占用 %3$s</string>
+    <string name="set_models_updates">，%1$d 个可更新</string>
+    <string name="set_update_available">有可用更新</string>
+    <string name="set_not_installed">未安装</string>
+    <string name="set_required_suffix">（必需）</string>
+    <string name="set_update">更新</string>
+    <string name="set_updating">更新中</string>
+    <string name="set_delete">删除</string>
+    <string name="set_download">下载</string>
+    <string name="set_downloading">下载中</string>
+    <string name="set_delete_title">删除%1$s？</string>
+    <string name="set_delete_body">%1$s 占用 %2$s。删除可释放这些空间；下次换脸时应用会重新下载。</string>
+    <string name="set_delete_required_warning">\n\n在它恢复之前将无法换脸。</string>
+    <string name="set_cancel">取消</string>
+
+    <string name="model_detector">人脸检测器</string>
+    <string name="model_landmarker">人脸关键点</string>
+    <string name="model_recogniser">人脸识别</string>
+    <string name="model_swapper">人脸替换</string>
+    <string name="model_swapper_alt">人脸替换（备选）</string>
+    <string name="model_content_checker">内容检查</string>
+    <string name="model_content_checker_quantised">内容检查（量化版）</string>
+    <string name="model_enhancer">人脸增强</string>
+    <string name="model_landmark_refiner">关键点细化</string>
+
+    <string name="set_this_device">本机</string>
+    <string name="set_runtime">运行方式</string>
+    <string name="set_runtime_npu">Hexagon NPU</string>
+    <string name="set_runtime_gpu_cpu">GPU (Vulkan) + CPU</string>
+    <string name="set_runtime_cpu">CPU</string>
+    <string name="set_runtime_none">未启动</string>
+    <string name="set_unknown_dash">-</string>
+    <string name="set_ncnn_note">此设备没有高通 NPU，因此换脸在 GPU 和 CPU 上运行：每帧耗时约为原来的 13 倍。人脸增强和内容检查在这里始终使用 CPU —— 在 GPU 上它们的结果是错误的，而不只是更慢。</string>
+    <string name="set_htp_unmeasured">无法测量 HTP。应用会回退到兼容性最好的版本，因此这不一定意味着无法运行。</string>
+    <string name="set_hexagon_arch">Hexagon 架构</string>
+    <string name="set_vtcm">VTCM</string>
+    <string name="set_soc_model">SoC 型号</string>
+    <string name="set_fp16">fp16 执行</string>
+    <string name="set_fp16_yes">支持</string>
+    <string name="set_fp16_no">不支持</string>
+    <string name="set_fp16_unknown">无法测量</string>
+    <string name="set_context_binaries">上下文二进制</string>
+    <string name="set_supported_devices">支持的设备</string>
+    <string name="set_in_use">使用中</string>
+
+    <string name="set_runtime_override_note">本机有 Hexagon NPU 并正在使用它。强制走 GPU/CPU 路径可以看到没有高通 NPU 的设备是什么表现 —— 它需要另一套模型，而且慢得多。</string>
+    <string name="set_runtime_auto">自动</string>
+    <string name="set_runtime_force_npu">NPU</string>
+    <string name="set_runtime_force_gpu">GPU + CPU</string>
+    <string name="set_runtime_forced">已强制为 %1$s。这是测试用的开关：它会重启处理流程，另一套运行方式的模型需要单独下载。</string>
+
+    <string name="set_remote_api">远程 API</string>
+    <string name="set_api_title">在电脑上使用</string>
+    <string name="set_api_body">打开此开关，然后在电脑的浏览器中访问下面的地址。所有处理仍然在这台手机上进行。</string>
+    <string name="set_api_lan_title">允许其他设备连接</string>
+    <string name="set_api_lan_on">已开启。同一网络中能访问到这台手机的任何人都可以打开该页面并用它换脸。</string>
+    <string name="set_api_lan_off">已关闭。仅限本机，或通过 USB 连接的电脑。</string>
+    <string name="set_api_open_this">访问地址</string>
+    <string name="set_api_over_usb">或通过 USB</string>
+    <string name="set_api_failed">无法启动：%1$s</string>
+
+    <string name="set_about">关于</string>
+    <string name="set_about_body">本应用是 FaceFusion 默认换脸流程在高通 Hexagon NPU 上的离线移植版。处理流程、模型，以及各选项的名称、默认值和取值范围都来自 FaceFusion。</string>
+    <string name="set_about_author">由 Henry Ruhs 创建。</string>
+    <string name="set_link_project">本项目的 GitHub 页面</string>
+    <string name="set_link_upstream">FaceFusion（原项目）的 GitHub 页面</string>
+    <string name="set_link_licence">上游许可证（OpenRAIL-AS）</string>
+    <string name="set_licence_note">各模型的许可证并不相同，也并非都是宽松许可：yoloface_8n 为 GPL-3.0，arcface_w600k_r50 和 inswapper_128 为非商业用途，hyperswap_1a_256 为 ResearchRAIL。</string>
+
+    <string name="tier_v68">骁龙 888 及更早 (v68)、8 Gen 1 (v69)，或 VTCM 小于 8 MB 的芯片</string>
+    <string name="tier_v73">8 Gen 2 (v73)、8 Gen 3 (v75)，以及 SM8750 以外的 v79 芯片</string>
+    <string name="tier_v79">骁龙 8 至尊版 (SM8750)</string>
+    <string name="tier_v81">骁龙 8 至尊版 Gen 5 (v81) 及更新</string>
+
+    <string name="set_bug_report">错误报告</string>
+    <string name="set_bug_report_body">会发送应用版本、你的设备信息、已安装的模型和运行日志。不包含任何照片或视频，并且在你选择发送方式之前不会发往任何地方。</string>
+    <string name="set_bug_report_button">分享错误报告</string>
+
+    <string name="status_share_failed">无法分享报告：%1$s</string>
+    <string name="status_source_set">源人脸已设置</string>
+    <string name="status_cancelling">正在取消…</string>
+    <string name="status_cancelled">已取消</string>
+    <string name="status_loading_models">正在加载模型…</string>
+    <string name="status_reading_source">正在读取源人脸…</string>
+    <string name="status_content_check">内容检查…</string>
+    <string name="status_swapping">正在换脸…</string>
+    <string name="status_done">完成 - %1$d KB</string>
+    <string name="status_failed">失败：%1$s</string>
+    <string name="status_failed_prefix">失败</string>
+    <string name="status_target_ready_video">目标已就绪：%1$d x %2$d，%3$s</string>
+    <string name="status_target_ready_image">目标已就绪：%1$d x %2$d</string>
+    <string name="status_cannot_read_video">无法读取视频：%1$s</string>
+    <string name="status_cannot_read_image">无法读取图片</string>
+    <string name="status_saved_movies">已保存到 Movies/FaceFusion</string>
+    <string name="status_saved_pictures">已保存到 Pictures/FaceFusion</string>
+    <string name="status_frame_saved">该帧已保存到 Pictures/FaceFusion</string>
+    <string name="status_save_failed">保存失败：%1$s</string>
+    <string name="status_save_frame_failed">保存该帧失败：%1$s</string>
+    <string name="status_save_first">请先保存到相册，然后再分享</string>
+    <string name="status_api_busy">远程 API 正在占用 NPU</string>
+    <string name="status_no_face">这一帧中没有检测到人脸</string>
+    <string name="status_cannot_read_frame">无法读取该帧</string>
+    <string name="status_cannot_read_source">无法读取源图片</string>
+    <string name="share_swapped_image">分享换脸图片</string>
+    <string name="share_swapped_video">分享换脸视频</string>
+
+    <string name="gate_subject_source_image">源图片</string>
+    <string name="gate_subject_target_image">目标图片</string>
+    <string name="gate_subject_target_video">目标视频</string>
+    <string name="gate_subject_this_frame">这一帧</string>
+    <!-- 拒绝。必须读起来就是拒绝。 -->
+    <string name="gate_blocked">%1$s中含有不允许的成人内容</string>
+    <!-- 故障，不是拒绝：检查没能运行，因此它既没有允许也没有拒绝任何内容。 -->
+    <string name="gate_error">无法对%1$s执行内容检查，因此无法处理</string>
+    <string name="gate_error_detail">%1$s（%2$s）</string>
+    <string name="gate_blocked_generic">不允许处理成人内容</string>
+
+</resources>

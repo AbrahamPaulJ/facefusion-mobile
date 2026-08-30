@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The languages this app ships, so Android 13+ can offer a PER-APP language picker
+  (Settings > Apps > FaceFusion > Language).
+
+  Worth declaring rather than relying on the system locale alone: someone who runs their
+  phone in English may still want this app in Chinese, or the reverse, and without this file
+  the only way to get either is to change the language of the whole device.
+
+  Also what makes the switch testable over adb without root, with `cmd locale
+  set-app-locales`. (The flag cannot be written here: a double hyphen is illegal inside an
+  XML comment, and aapt rejects the whole file for it.)
+-->
+<locale-config xmlns:android="http://schemas.android.com/apk/res/android">
+    <locale android:name="en" />
+    <locale android:name="zh-CN" />
+    <locale android:name="zh-TW" />
+</locale-config>

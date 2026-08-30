@@ -12,6 +12,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.facefusion.mobile.ui.Accordion
 import kotlin.math.roundToInt
+import androidx.compose.ui.res.stringResource
 
 /**
  * FaceFusion's option groups, laid out for a phone.
@@ -111,33 +112,36 @@ fun FaceSwapperCard(
     inswapperAvailable: Boolean,
 ) {
     // The value the user is actually here for goes in the summary.
-    val summary = "weight %.2f   %s   %s"
-        .format(opts.weight, opts.pixelBoostLabel, opts.swapper)
-    OptionCard("Face Swapper", summary, expanded, onToggle) {
+    // The model name and the boost are identifiers; only the word "weight" is a word.
+    val summary = stringResource(R.string.opt_swapper_summary,
+                                 "%.2f".format(opts.weight), opts.pixelBoostLabel, opts.swapper)
+    OptionCard(stringResource(R.string.opt_face_swapper), summary, expanded, onToggle) {
         OptionSlider(
-            "Weight", opts.weight, { onChange(opts.copy(weight = it)) },
+            stringResource(R.string.opt_weight), opts.weight,
+            { onChange(opts.copy(weight = it)) },
             hint = when {
-                opts.weight > 0.55f -> "source amplified, target identity subtracted"
-                opts.weight < 0.45f -> "some of the target's own identity kept"
-                else -> "the source embedding, unmodified (default)"
+                opts.weight > 0.55f -> stringResource(R.string.opt_weight_hint_high)
+                opts.weight < 0.45f -> stringResource(R.string.opt_weight_hint_low)
+                else -> stringResource(R.string.opt_weight_hint_default)
             },
         )
         OptionSegments(
-            "Pixel boost",
+            stringResource(R.string.opt_pixel_boost),
             listOf(1 to "256", 2 to "512", 3 to "768", 4 to "1024"),
             opts.pixelBoost,
             { onChange(opts.copy(pixelBoost = it)) },
-            hint = if (opts.pixelBoost == 1) "the model's native size"
-                   else "${opts.invocationsPerFace}x the swapper cost per face — " +
-                        "fine for stills, slow for video",
+            hint = if (opts.pixelBoost == 1)
+                       stringResource(R.string.opt_pixel_boost_native)
+                   else stringResource(R.string.opt_pixel_boost_cost,
+                                       opts.invocationsPerFace),
         )
         if (inswapperAvailable) {
             OptionSegments(
-                "Model",
+                stringResource(R.string.opt_model),
                 listOf("hyperswap" to "hyperswap", "inswapper" to "inswapper"),
                 opts.swapper,
                 { onChange(opts.copy(swapper = it)) },
-                hint = "hyperswap is 256², inswapper 128² and slower",
+                hint = stringResource(R.string.opt_model_hint),
             )
         }
     }
@@ -153,20 +157,25 @@ fun FaceMaskerCard(
     var perEdge by rememberSaveable { mutableStateOf(opts.maskPadding.distinct().size > 1) }
     val pad = opts.maskPadding
     val padLabel = if (pad.distinct().size == 1) "${pad[0]}" else pad.joinToString("/")
-    OptionCard("Face Masker", "blur %.2f   padding %s".format(opts.maskBlur, padLabel),
+    OptionCard(stringResource(R.string.opt_face_masker),
+               stringResource(R.string.opt_masker_summary,
+                              "%.2f".format(opts.maskBlur), padLabel),
                expanded, onToggle) {
-        OptionSlider("Blur", opts.maskBlur, { onChange(opts.copy(maskBlur = it)) },
-                     hint = "how soft the edge of the swapped region is")
+        OptionSlider(stringResource(R.string.opt_blur), opts.maskBlur,
+                     { onChange(opts.copy(maskBlur = it)) },
+                     hint = stringResource(R.string.opt_blur_hint))
 
         if (!perEdge) {
             OptionSlider(
-                "Padding", pad[0].toFloat(),
+                stringResource(R.string.opt_padding), pad[0].toFloat(),
                 { onChange(opts.copy(maskPadding = List(4) { _ -> it.roundToInt() })) },
                 range = 0f..100f, step = 1f, format = { "${it.roundToInt()}" },
-                hint = "shrinks the swapped region, letting more of the original show",
+                hint = stringResource(R.string.opt_padding_hint),
             )
         } else {
-            listOf("Top", "Right", "Bottom", "Left").forEachIndexed { i, name ->
+            listOf(R.string.opt_edge_top, R.string.opt_edge_right,
+                   R.string.opt_edge_bottom, R.string.opt_edge_left)
+                .map { stringResource(it) }.forEachIndexed { i, name ->
                 OptionSlider(
                     name, pad[i].toFloat(),
                     { v ->
@@ -179,7 +188,8 @@ fun FaceMaskerCard(
         }
         Row(Modifier.fillMaxWidth().padding(top = 4.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            Text("Per-edge padding", style = MaterialTheme.typography.bodyMedium,
+            Text(stringResource(R.string.opt_padding_per_edge),
+                 style = MaterialTheme.typography.bodyMedium,
                  modifier = Modifier.weight(1f))
             Switch(checked = perEdge, onCheckedChange = { on ->
                 perEdge = on
@@ -199,35 +209,35 @@ fun FaceDetectorCard(
     onToggle: () -> Unit,
 ) {
     OptionCard(
-        "Face Detector",
-        "score %.2f   landmarker %.2f   %s"
-            .format(opts.detectorScore, opts.landmarkerScore,
-                    if (opts.largestOnly) "largest face" else "every face"),
+        stringResource(R.string.opt_face_detector),
+        stringResource(R.string.opt_detector_summary,
+                       "%.2f".format(opts.detectorScore),
+                       "%.2f".format(opts.landmarkerScore),
+                       if (opts.largestOnly) stringResource(R.string.opt_faces_largest_short)
+                       else stringResource(R.string.opt_faces_every_short)),
         expanded, onToggle,
     ) {
-        OptionSlider("Find faces", opts.detectorScore,
+        OptionSlider(stringResource(R.string.opt_find_faces), opts.detectorScore,
                      { onChange(opts.copy(detectorScore = it)) },
-                     hint = "higher: only clear, obvious faces are swapped. " +
-                            "lower: it tries harder on small or turned ones")
+                     hint = stringResource(R.string.opt_find_faces_hint))
         // Was "below it, the detector's 5 points are used unrefined", which describes the
         // implementation to someone who already knows it and nothing to anyone else. What
         // the user can actually decide is how well the swap should line up with the face
         // underneath, so that is what the words are about.
-        OptionSlider("Face alignment", opts.landmarkerScore,
+        OptionSlider(stringResource(R.string.opt_face_alignment), opts.landmarkerScore,
                      { onChange(opts.copy(landmarkerScore = it)) },
-                     hint = "how sure the app must be of the face's exact shape before " +
-                            "using it. raise it if a swap looks stretched or crooked")
+                     hint = stringResource(R.string.opt_face_alignment_hint))
         OptionSegments(
-            "Faces",
-            listOf(false to "Every face", true to "Largest only"),
+            stringResource(R.string.opt_faces),
+            listOf(false to stringResource(R.string.opt_faces_every),
+                   true to stringResource(R.string.opt_faces_largest)),
             opts.largestOnly,
             { onChange(opts.copy(largestOnly = it)) },
-            hint = "swap every face in the frame, or only the largest one",
+            hint = stringResource(R.string.opt_faces_hint),
         )
         // detector size (640) and the swapper's 256² input are absent on purpose: both are
         // baked into the context binary at conversion, so they are a rebuild, not a knob.
-        Text("detector size is fixed at 640 and the swapper at 256 — both are compiled " +
-             "into the NPU binaries",
+        Text(stringResource(R.string.opt_detector_note),
              style = MaterialTheme.typography.bodySmall, fontSize = 11.sp,
              modifier = Modifier.padding(top = 8.dp))
     }
@@ -251,29 +261,33 @@ fun FaceEnhancerCard(
     onToggle: () -> Unit,
 ) {
     OptionCard(
-        "Face Enhancer",
-        if (opts.faceEnhance) "gpen_bfr_256   blend %.2f".format(opts.enhanceBlend) else "off",
+        stringResource(R.string.opt_face_enhancer),
+        if (opts.faceEnhance)
+            stringResource(R.string.opt_enhancer_summary, "%.2f".format(opts.enhanceBlend))
+        else stringResource(R.string.opt_enhancer_off_summary),
         expanded, onToggle,
     ) {
         OptionSegments(
-            "Enhancer",
-            listOf(false to "Off", true to "On"),
+            stringResource(R.string.opt_enhancer),
+            listOf(false to stringResource(R.string.opt_off),
+                   true to stringResource(R.string.opt_on)),
             opts.faceEnhance,
             { onChange(opts.copy(faceEnhance = it)) },
-            hint = "restores detail the swapper loses — about +4 ms per face",
+            hint = stringResource(R.string.opt_enhancer_hint),
         )
         if (opts.faceEnhance) {
             OptionSlider(
-                "Blend", opts.enhanceBlend, { onChange(opts.copy(enhanceBlend = it)) },
+                stringResource(R.string.opt_blend), opts.enhanceBlend,
+                { onChange(opts.copy(enhanceBlend = it)) },
                 hint = when {
-                    opts.enhanceBlend >= 0.95f -> "the enhancer's output alone"
-                    opts.enhanceBlend <= 0.05f -> "no effect — the swap is left untouched"
-                    else -> "mixed with the unenhanced swap (upstream default 0.80)"
+                    opts.enhanceBlend >= 0.95f -> stringResource(R.string.opt_blend_hint_full)
+                    opts.enhanceBlend <= 0.05f -> stringResource(R.string.opt_blend_hint_none)
+                    else -> stringResource(R.string.opt_blend_hint_mixed)
                 },
             )
             // It runs on the swapper's own crop: gpen_bfr_256 and hyperswap_1a_256 declare
             // the same template and size, so no second alignment is involved.
-            Text("runs on the swapped face at ${opts.pixelBoostLabel}, before it is pasted back",
+            Text(stringResource(R.string.opt_enhancer_note, opts.pixelBoostLabel),
                  style = MaterialTheme.typography.bodySmall, fontSize = 11.sp,
                  modifier = Modifier.padding(top = 8.dp))
         }

@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.sp
 import com.facefusion.mobile.R
 import kotlinx.coroutines.delay
 import java.io.File
+import androidx.compose.ui.res.stringResource
 
 /**
  * FaceFusion's mark, on a light plate.
@@ -311,12 +312,13 @@ fun OutputPane(
             Modifier.fillMaxWidth().padding(bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Caption(if (partial) "Output  (partial)" else "Output", Modifier.weight(1f))
+            Caption(stringResource(if (partial) R.string.out_output_partial
+                                  else R.string.out_output), Modifier.weight(1f))
             Box(Modifier.height(40.dp), contentAlignment = Alignment.Center) {
                 TextButton(
                     onClick = { onSaveFrame(positionMs) },
                     enabled = enabled,
-                ) { Text("Save frame") }
+                ) { Text(stringResource(R.string.out_save_frame)) }
             }
         }
         Box(
@@ -355,7 +357,7 @@ fun OutputPane(
                     playing = !playing
                 },
                 enabled = enabled,
-            ) { Text(if (playing) "Pause" else "Play") }
+            ) { Text(stringResource(if (playing) R.string.out_pause else R.string.out_play)) }
 
             Slider(
                 value = positionMs.toFloat().coerceIn(0f, durationMs.toFloat()),
@@ -414,7 +416,7 @@ fun Accordion(
                 }
                 Icon(
                     Icons.Default.KeyboardArrowDown,
-                    if (expanded) "Collapse" else "Expand",
+                    stringResource(if (expanded) R.string.out_collapse else R.string.out_expand),
                     Modifier.rotate(angle),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -441,7 +443,7 @@ fun LogBox(text: String, modifier: Modifier = Modifier) {
     // Follow the tail, which is the only part anyone reads while a run is going.
     LaunchedEffect(text) { scroll.animateScrollTo(scroll.maxValue) }
     Column(modifier.fillMaxWidth()) {
-        Caption("Log", Modifier.padding(bottom = 4.dp))
+        Caption(stringResource(R.string.out_log), Modifier.padding(bottom = 4.dp))
         Surface(
             Modifier.fillMaxWidth().height(170.dp),
             shape = RoundedCornerShape(12.dp),

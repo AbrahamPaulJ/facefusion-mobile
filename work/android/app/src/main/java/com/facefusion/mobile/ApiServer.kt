@@ -355,7 +355,7 @@ class ApiServer(
             log("api source score %+.3f".format(gate.score))
             if (!gate.ok) {
                 respond(out, 403, "application/json",
-                        json("error" to ContentGate.message("the source image", gate),
+                        json("error" to ContentGate.messageEnglish(ctx, R.string.gate_subject_source_image, gate),
                              "verdict" to gate.verdict.name,
                              "score" to gate.score,
                              // The native reason when the check could not RUN. A refusal
@@ -390,7 +390,7 @@ class ApiServer(
             val gate = ContentGate.checkImage(bmp)
             if (!gate.ok) {
                 respond(out, 403, "application/json",
-                        json("error" to ContentGate.message("the target image", gate),
+                        json("error" to ContentGate.messageEnglish(ctx, R.string.gate_subject_target_image, gate),
                              "verdict" to gate.verdict.name,
                              "score" to gate.score,
                              "detail" to gate.detail))
@@ -443,7 +443,7 @@ class ApiServer(
             log("api target content: %s, worst %+.3f".format(gate.detail, gate.score))
             if (!gate.ok) {
                 respond(out, 403, "application/json",
-                        json("error" to ContentGate.message("the target video", gate),
+                        json("error" to ContentGate.messageEnglish(ctx, R.string.gate_subject_target_video, gate),
                              "verdict" to gate.verdict.name,
                              "score" to gate.score,
                              "detail" to gate.detail))

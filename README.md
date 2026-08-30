@@ -14,6 +14,9 @@ FaceFusion's.
 - **Runs without a Qualcomm NPU too, as of 0.4.0.** Phones with no Hexagon fall back to the
   GPU (Vulkan) with the CPU underneath — the same result, about four times the time per
   frame. A preview: see the roadmap.
+- **English, 简体中文 and 繁體中文.** Follows your phone, or pick a language just for this
+  app in Android's own app settings. Model names and chip tiers stay in English on purpose —
+  they are what FaceFusion's documentation and every bug report use.
 - **Fully offline.** Nothing you select ever leaves the phone. The only network request the
   app makes is the one-time model download.
 - **Before / after preview.** Scrub the trim handle and see the frame the swap will start
@@ -91,14 +94,6 @@ Qualcomm one, with its NPU deliberately switched off — because that is the har
 available here. No Mali, Exynos or Tensor device has run it yet. The model set is a separate
 ~600 MB download. If you try it on a phone without a Snapdragon, **Settings → Share bug
 report** is the most useful thing you can send.
-
-**Chinese language support.** The app is English-only today, and every string in it is
-hardcoded rather than translatable, so this starts with plumbing before it starts with
-translation. Simplified and Traditional both, and the web UI behind the Remote API gets its
-own treatment — it is read on a different machine, by someone who may not be holding the
-phone. Model names, tier names and FaceFusion's own option names stay in English: they are
-the vocabulary of FaceFusion's documentation, and translating them makes the app harder to
-follow, not easier.
 
 **Lip sync.** Drive the mouth from an audio track, as FaceFusion's lip syncer does. The
 model itself is the cheapest thing this project has looked at — 4 GMAC against the 67 the
