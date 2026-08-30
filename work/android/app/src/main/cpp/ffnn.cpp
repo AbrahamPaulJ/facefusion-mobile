@@ -19,6 +19,19 @@ bool qnnVariantPresent(const std::string&);
 void qnnUseTier(const std::string&);
 const std::string& qnnTier();
 
+#ifdef FFNN_HAVE_NCNN
+// Implemented in ffnn_ncnn.cpp.
+bool ncnnInit(const InitSpec&);
+Handle ncnnOpen(const std::string&, Placement);
+void ncnnRelease(Handle);
+bool ncnnExecute(Handle, const std::vector<std::string>&, const std::vector<const float*>&,
+                 std::vector<std::vector<float>>&);
+std::vector<std::vector<int>> ncnnOutputShapes(Handle);
+const char* ncnnLastError();
+bool ncnnVariantPresent(const std::string&);
+DeviceInfo ncnnDeviceInfo();
+#endif
+
 namespace {
 Backend g_active = Backend::Qnn;
 bool g_ready = false;
@@ -41,12 +54,15 @@ bool init(Backend b, const InitSpec& spec) {
     case Backend::Auto:
       return false;   // handled above; here only to keep the switch exhaustive
     case Backend::Ncnn:
-      // ffnn_ncnn.cpp is not written yet. Answering "no" is the honest result and keeps the
-      // seam usable meanwhile; it must never silently fall through to QNN, because a caller
-      // that asked for a CPU backend on a part with no HTP would then get a working-looking
-      // pipeline that cannot run.
+#ifdef FFNN_HAVE_NCNN
+      g_ready = ncnnInit(spec);
+#else
+      // Built without ncnn. Answering "no" is honest and must never fall through to QNN: a
+      // caller asking for a CPU backend on a part with no HTP would otherwise be handed a
+      // working-looking pipeline that cannot run.
       g_ready = false;
-      return false;
+#endif
+      return g_ready;
   }
   return false;
 }
@@ -57,33 +73,52 @@ Handle open(const std::string& logicalName, Placement p) {
   // Placement is accepted and ignored on QNN rather than rejected: on this backend every
   // graph runs on the HTP, so "pin to CPU" is already satisfied in the only sense that
   // matters -- there is no less-safe unit to be pinned away from.
-  (void)p;
   if (!g_ready) return nullptr;
   switch (g_active) {
     case Backend::Qnn: return qnnOpen(logicalName);
-    case Backend::Auto:
+#ifdef FFNN_HAVE_NCNN
+    case Backend::Ncnn: return ncnnOpen(logicalName, p);
+#else
     case Backend::Ncnn: return nullptr;
+#endif
+    case Backend::Auto: return nullptr;
   }
   return nullptr;
 }
 
 void release(Handle h) {
-  if (h) ffqnn::release(h);
+  if (!h) return;
+#ifdef FFNN_HAVE_NCNN
+  if (g_active == Backend::Ncnn) { ncnnRelease(h); return; }
+#endif
+  ffqnn::release(h);
 }
 
 bool execute(Handle h, const std::vector<std::string>& names,
              const std::vector<const float*>& data,
              std::vector<std::vector<float>>& outs) {
+#ifdef FFNN_HAVE_NCNN
+  if (g_active == Backend::Ncnn) return ncnnExecute(h, names, data, outs);
+#endif
   return ffqnn::execute(h, names, data, outs);
 }
 
-std::vector<std::vector<int>> outputShapes(Handle h) { return ffqnn::outputShapes(h); }
+std::vector<std::vector<int>> outputShapes(Handle h) {
+#ifdef FFNN_HAVE_NCNN
+  if (g_active == Backend::Ncnn) return ncnnOutputShapes(h);
+#endif
+  return ffqnn::outputShapes(h);
+}
 
 const char* lastError() {
   switch (g_active) {
     case Backend::Qnn: return qnnLastError();
-    case Backend::Auto:
+#ifdef FFNN_HAVE_NCNN
+    case Backend::Ncnn: return ncnnLastError();
+#else
     case Backend::Ncnn: return "ncnn backend not built";
+#endif
+    case Backend::Auto: return "no backend started";
   }
   return "unknown backend";
 }
@@ -91,13 +126,17 @@ const char* lastError() {
 DeviceInfo deviceInfo(Backend b) {
   switch (b) {
     case Backend::Qnn: return qnnDeviceInfo();
-    case Backend::Auto:
+#ifdef FFNN_HAVE_NCNN
+    case Backend::Ncnn: return ncnnDeviceInfo();
+#else
     case Backend::Ncnn: {
       DeviceInfo d;
       d.backend = Backend::Ncnn;
       d.name = "ncnn backend not built";
       return d;
     }
+#endif
+    case Backend::Auto: return DeviceInfo();
   }
   return DeviceInfo();
 }
@@ -116,8 +155,12 @@ std::vector<std::string> variantChain(Backend b) {
 bool variantPresent(const std::string& v) {
   switch (g_active) {
     case Backend::Qnn: return qnnVariantPresent(v);
-    case Backend::Auto:
+#ifdef FFNN_HAVE_NCNN
+    case Backend::Ncnn: return ncnnVariantPresent(v);
+#else
     case Backend::Ncnn: return false;
+#endif
+    case Backend::Auto: return false;
   }
   return false;
 }
