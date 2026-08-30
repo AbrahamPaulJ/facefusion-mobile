@@ -63,7 +63,42 @@ if (-not $apk) {
 }
 Write-Output ("apk {0:N1} MB  {1}  -> {2}" -f ($apk.Length / 1MB), $apk.Name, $pkg)
 
-& $adb -s $serial install -r -g $apk.FullName 2>&1 | Out-String -Stream | Select-Object -Last 2
+# ⚠ NO `2>&1` HERE, and no pipeline. Windows PowerShell 5.1 wraps a native command's
+# stderr in ErrorRecords -- adb writes its progress there -- so the redirect turned a
+# successful install into a NativeCommandError, the pipeline swallowed the result, and the
+# script carried on to push models to a build it had never installed. That is how 0.4.2
+# came to be "installed" while the phone still ran 0.4.1: the screenshots were of the old
+# build and the only clue was one line of PowerShell noise.
+& $adb -s $serial install -r -g $apk.FullName
+
+# Verified, not assumed. `install` is the one step whose failure leaves everything after it
+# doing correct work on the wrong binary.
+$installed = ((& $adb -s $serial shell "dumpsys package $pkg | grep -m1 versionCode") -join "").Trim()
+Write-Output "installed   $installed"
+
+# A COPY IN THE PHONE'S DOWNLOADS, every time. Installing puts the build on this device;
+# the file in Downloads is what gets handed to somebody else -- a friend with an Exynos
+# phone, say -- without a PC in the loop.
+#
+# Verified by hash, never by size. This is the transfer CLAUDE.md warns about: Tailscale
+# drops above ~40 MB and has silently truncated an APK twice, and adb reports success
+# either way -- it took a retry on the very first run of this block.
+#
+# Older copies of OUR filename are swept, best effort: anything a different app wrote is
+# owned by that app's uid and `shell` cannot delete it, so `rm -f` fails silently there.
+# The guarantee is that the newest build is present and correct, not that it is alone.
+$dl = "/sdcard/Download"
+& $adb -s $serial shell "rm -f $dl/facefusion-mobile-*.apk" 2>&1 | Out-Null
+$want = (Get-FileHash $apk.FullName -Algorithm SHA256).Hash.ToLower()
+$ok = $false
+foreach ($try in 1..3) {
+    & $adb -s $serial push $apk.FullName "$dl/$($apk.Name)" 2>&1 | Out-Null
+    $got = ((& $adb -s $serial shell "sha256sum $dl/$($apk.Name) | cut -d' ' -f1") -join "").Trim()
+    if ($got -eq $want) { $ok = $true; break }
+    Write-Output "  Downloads copy truncated, retrying ($try)"
+}
+if ($ok) { Write-Output "Downloads   $dl/$($apk.Name)  sha256 ok" }
+else      { Write-Output "Downloads   FAILED after 3 tries -- do not hand this file to anyone" }
 
 if ($Tier -eq "auto") {
     $remote = "/data/local/tmp/ff"

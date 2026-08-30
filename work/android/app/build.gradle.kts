@@ -77,6 +77,12 @@ android {
         // The cost is two different APKs both calling themselves 0.2.0, so BugReport now
         // prints the code alongside the name -- that is what tells them apart in a report.
         //
+        // 10 = 0.4.2 (2026-08-30): the Settings inventory listing EVERY model set rather
+        // than only the one in use, rotation no longer destroying the screen, the enhancer
+        // promoted to a Processors row, the source picker becoming a pane, and the two
+        // switches that were one-way doors -- the runtime card that hid itself once used,
+        // and the API's LAN switch that was inert whenever the server was off.
+        //
         // 9 = 0.4.1 (2026-08-30): 简体中文 and 繁體中文, and the bug report button reaching
         // the place four releases of documentation said it already was. `Settings > Share
         // bug report` did not exist; the only control was on the Swap screen, and only when
@@ -122,8 +128,8 @@ android {
         // ambiguous for the 47 people who already took the second one, so v0.2.1 is a NEW
         // tag and a NEW asset name, and v0.2.0 keeps pointing at what it always did.
         // archivesBaseName follows versionName, so the filename moves with it.
-        versionCode = 9
-        versionName = "0.4.1$variantTag"    // "-dev" == NO content gate
+        versionCode = 10
+        versionName = "0.4.2$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }

@@ -152,30 +152,63 @@ fun SwapScreen(
             .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        // ---------------------------------------------------------------- processors
+        //
+        // Above Advanced, and named the way FaceFusion names them. The enhancer is a
+        // PROCESSOR -- a stage that either runs or does not -- and burying its on/off
+        // switch three taps deep inside "Advanced", next to blend weights and detector
+        // thresholds, filed a yes/no question with the dials. FaceFusion puts the same two
+        // side by side at the top; so does this now.
+        //
+        // face_swapper is drawn selected and is not clickable: this app IS the swapper, and
+        // a control that cannot be turned off should still be visible, because the row is
+        // there to say WHICH stages will run.
+        if (hasEnhancer) {
+            Caption(stringResource(R.string.swap_processors))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = true,
+                    onClick = {},
+                    enabled = false,
+                    label = { Text(stringResource(R.string.swap_proc_swapper)) },
+                    leadingIcon = { Icon(Icons.Default.Check, null, Modifier.size(18.dp)) },
+                )
+                FilterChip(
+                    selected = opts.faceEnhance,
+                    onClick = { onOptsChange(opts.copy(faceEnhance = !opts.faceEnhance)) },
+                    enabled = idle,
+                    label = { Text(stringResource(R.string.swap_proc_enhancer)) },
+                    leadingIcon = if (opts.faceEnhance) {
+                        { Icon(Icons.Default.Check, null, Modifier.size(18.dp)) }
+                    } else null,
+                )
+            }
+        }
+
         // ---------------------------------------------------------------- inputs
         //
         // The source is a PANE, the same size and shape as the target's. It used to be a
         // 52 dp thumbnail beside a full-width button, which made the two inputs look like
         // different kinds of thing -- one a picture, one a command -- when they are the
         // same kind of thing: an image you choose by tapping its own frame.
-        PreviewPane(
-            label = stringResource(R.string.swap_source_face),
-            height = paneHeight,
-            bitmap = sourceThumb,
-            placeholder = stringResource(R.string.swap_source_pick),
-            onClick = if (idle) onPickSource else null,
-            actionIcon = if (hasSource) null else Icons.Default.Add,
-            // NOT the shared zoom. The source is a different image from the target, so
-            // panning them together would be a gesture with no meaning.
-            zoom = null,
-        ) {
-            if (hasSource) {
-                IconButton(onPickSource, enabled = idle, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Default.Add, stringResource(R.string.swap_source_pick),
-                         Modifier.size(20.dp),
-                         tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
+        // EMPTY it is a full-width drop target, the same size and shape as the target's,
+        // because an empty pane is a call to action and has to be easy to hit. FILLED it
+        // collapses to a small square: the source is one face, it never changes during a
+        // run, and at full width it was spending a third of the screen restating a decision
+        // already made. The pane stays tappable, so re-picking costs the same tap it did.
+        val sourceBox = 104.dp
+        Box(if (hasSource) Modifier.width(sourceBox) else Modifier.fillMaxWidth()) {
+            PreviewPane(
+                label = stringResource(R.string.swap_source_face),
+                height = if (hasSource) sourceBox else paneHeight,
+                bitmap = sourceThumb,
+                placeholder = stringResource(R.string.swap_source_pick),
+                onClick = if (idle) onPickSource else null,
+                actionIcon = if (hasSource) null else Icons.Default.Add,
+                // NOT the shared zoom. The source is a different image from the target, so
+                // panning them together would be a gesture with no meaning.
+                zoom = null,
+            )
         }
         // ---------------------------------------------------------------- previews
         //
@@ -187,9 +220,16 @@ fun SwapScreen(
         val portrait = targetAspect < 1f
         val panes: @Composable (Modifier) -> Unit = { paneModifier ->
             PreviewPane(
-                label = if (preview.timeLabel.isEmpty())
-                            stringResource(R.string.swap_pane_original)
-                        else stringResource(R.string.swap_pane_original_at, preview.timeLabel),
+                // "ORIGINAL" is the BEFORE half of a before/after, and there is no
+                // before until a target exists -- an empty box labelled "original" names
+                // something that is not there. Empty, not hidden: the label row reserves
+                // its height either way, so the pane does not jump when a target lands.
+                label = when {
+                    !hasTarget -> ""
+                    preview.timeLabel.isEmpty() ->
+                        stringResource(R.string.swap_pane_original)
+                    else -> stringResource(R.string.swap_pane_original_at, preview.timeLabel)
+                },
                 height = paneHeight,
                 bitmap = preview.original,
                 placeholder = stringResource(when {
@@ -414,39 +454,6 @@ fun SwapScreen(
         // One accordion around the three option groups. They used to sit between the trim
         // slider and the Swap button, i.e. across the primary path, for settings almost
         // every run leaves alone.
-        // ---------------------------------------------------------------- processors
-        //
-        // Above Advanced, and named the way FaceFusion names them. The enhancer is a
-        // PROCESSOR -- a stage that either runs or does not -- and burying its on/off
-        // switch three taps deep inside "Advanced", next to blend weights and detector
-        // thresholds, filed a yes/no question with the dials. FaceFusion puts the same two
-        // side by side at the top; so does this now.
-        //
-        // face_swapper is drawn selected and is not clickable: this app IS the swapper, and
-        // a control that cannot be turned off should still be visible, because the row is
-        // there to say WHICH stages will run.
-        if (hasEnhancer) {
-            Caption(stringResource(R.string.swap_processors))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = true,
-                    onClick = {},
-                    enabled = false,
-                    label = { Text(stringResource(R.string.swap_proc_swapper)) },
-                    leadingIcon = { Icon(Icons.Default.Check, null, Modifier.size(18.dp)) },
-                )
-                FilterChip(
-                    selected = opts.faceEnhance,
-                    onClick = { onOptsChange(opts.copy(faceEnhance = !opts.faceEnhance)) },
-                    enabled = idle,
-                    label = { Text(stringResource(R.string.swap_proc_enhancer)) },
-                    leadingIcon = if (opts.faceEnhance) {
-                        { Icon(Icons.Default.Check, null, Modifier.size(18.dp)) }
-                    } else null,
-                )
-            }
-        }
-
         Accordion(
             stringResource(R.string.swap_advanced),
             if (opts == SwapOptions()) stringResource(R.string.swap_defaults)
