@@ -201,6 +201,17 @@
     <string name="tier_v79">Snapdragon 8 Elite (SM8750)</string>
     <string name="tier_v81">Snapdragon 8 Elite Gen 5 (v81) 及更新</string>
 
+    <string name="notif_channel_name">模型下載</string>
+    <string name="notif_channel_desc">下載 NPU 模型時的進度</string>
+    <string name="notif_title_downloading">正在下載模型</string>
+    <string name="notif_title_ready">模型已就緒</string>
+    <string name="notif_title_failed">下載失敗</string>
+    <string name="notif_preparing">正在準備…</string>
+    <string name="notif_progress">%1$s  (%2$d / %3$d MB)</string>
+    <string name="notif_file_of">第 %1$d / %2$d 個檔案</string>
+    <string name="notif_cancel">取消</string>
+    <string name="notif_ready_text">人臉模型已在此裝置上。</string>
+
     <string name="set_bug_report">錯誤報告</string>
     <string name="set_bug_report_body">會傳送應用程式版本、你的裝置資訊、已安裝的模型與執行紀錄。不包含任何相片或影片，而且在你選擇傳送方式之前不會送到任何地方。</string>
     <string name="set_bug_report_button">分享錯誤報告</string>

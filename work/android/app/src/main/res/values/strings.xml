@@ -243,6 +243,20 @@
     <string name="tier_v79">Snapdragon 8 Elite (SM8750)</string>
     <string name="tier_v81">Snapdragon 8 Elite Gen 5 (v81) and newer</string>
 
+    <!-- ==================================================== download notification -->
+    <string name="notif_channel_name">Model download</string>
+    <string name="notif_channel_desc">Progress while the NPU models are downloading</string>
+    <string name="notif_title_downloading">Downloading models</string>
+    <string name="notif_title_ready">Models ready</string>
+    <string name="notif_title_failed">Download failed</string>
+    <string name="notif_preparing">Preparing…</string>
+    <!-- %1$s filename (never translated), %2$d MB done, %3$d MB total -->
+    <string name="notif_progress">%1$s  (%2$d / %3$d MB)</string>
+    <!-- %1$d file index, %2$d file count -->
+    <string name="notif_file_of">File %1$d of %2$d</string>
+    <string name="notif_cancel">Cancel</string>
+    <string name="notif_ready_text">The face models are on this device.</string>
+
     <!-- ==================================================== bug report -->
     <string name="set_bug_report">Bug report</string>
     <string name="set_bug_report_body">Sends the app version, your device, which models are installed and the run log. No photos or videos, and nothing is sent anywhere until you choose an app to send it with.</string>
