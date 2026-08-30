@@ -66,6 +66,12 @@ android {
         // The cost is two different APKs both calling themselves 0.2.0, so BugReport now
         // prints the code alongside the name -- that is what tells them apart in a report.
         //
+        // 7 = 0.3.0 (2026-08-30): the tier FALLBACK -- a tier that loads but will not run
+        // now falls back instead of leaving the app unusable -- the gate's failure reason
+        // surfaced instead of discarded, and the v81 tier restored, which the fallback is
+        // what makes safe. The ffnn runtime seam and the ncnn backend are in the tree but
+        // NOT linked (FF_NCNN=OFF): unexercised through the APK, so not in this release.
+        //
         // 6 = 0.2.2 (2026-08-30): the CONTENT GATE input range. facefusion feeds nsfw_2
         // [-1,1] and this port fed it [0,1] from the gate's first release, which moves the
         // decision statistic 4.6x its own threshold. The quantised gate is renamed
@@ -82,8 +88,8 @@ android {
         // ambiguous for the 47 people who already took the second one, so v0.2.1 is a NEW
         // tag and a NEW asset name, and v0.2.0 keeps pointing at what it always did.
         // archivesBaseName follows versionName, so the filename moves with it.
-        versionCode = 6
-        versionName = "0.2.2$variantTag"    // "-dev" == NO content gate
+        versionCode = 7
+        versionName = "0.3.0$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }
