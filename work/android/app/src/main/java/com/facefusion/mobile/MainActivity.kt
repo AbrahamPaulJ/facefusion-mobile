@@ -304,6 +304,7 @@ class MainActivity : ComponentActivity() {
         if (intent?.getStringExtra("api") == "start")
             toggleApi(on = true, lan = false, remember = false)
 
+        sweepOrphanedOutputs()
         probeDevice()
 
         refreshModelsMissing()
@@ -892,6 +893,10 @@ class MainActivity : ComponentActivity() {
                 }
             }
             ok.onSuccess { l ->
+                // The old result belongs to the old target. Dropping it here is also the
+                // fix for a stale-result bug: nothing cleared `outputFile` on a new pick, so
+                // the pane went on offering to save and share the PREVIOUS video.
+                discardOutput()
                 targetImage = null
                 targetFile = l.file; durationMs = l.durationMs
                 inputFps = l.fps
@@ -925,6 +930,7 @@ class MainActivity : ComponentActivity() {
                 preparing = false
                 return@launch
             }
+            discardOutput()
             previews.closeTarget()
             targetFile = null
             targetImage = bmp
@@ -940,7 +946,62 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Drop the target and everything derived from it. */
+    /**
+     * Where a finished video lands until the user saves it or moves on.
+     *
+     * `getExternalFilesDir`, not `cacheDir`: a result the user has not saved yet must not
+     * evaporate because the OS wanted space. The price is that NOTHING else ever cleans
+     * this directory -- "Clear cache" does not touch it, only "Clear data" does -- so every
+     * path that drops the reference has to delete the file too. See [discardOutput].
+     */
+    private fun outputDir(): File = getExternalFilesDir(null) ?: filesDir
+
+    /**
+     * Drop the finished video AND the file behind it.
+     *
+     * Setting `outputFile = null` on its own leaked one MP4 per run into
+     * `Android/data/<pkg>/files`, where the user cannot reach it and clearing the cache does
+     * not remove it -- reported from the field. A still target never had the bug: its result
+     * is a Bitmap that only ever reaches disk through Save.
+     *
+     * Safe after a gallery save. `GallerySaver` COPIES into MediaStore, so what the user
+     * kept is a different file and this does not touch it.
+     */
+    private fun discardOutput() {
+        outputFile?.delete()
+        outputFile = null; outputPartial = false; savedUri = null; savedPathLabel = null
+    }
+
+    /**
+     * Delete finished videos that nothing can reach any more.
+     *
+     * `outputFile` is Activity state with no saved-instance backing, so process death --
+     * and plain rotation, which recreates this Activity -- orphans whatever was on screen.
+     * `onCreate` is therefore the one moment at which no output is reachable BY DEFINITION,
+     * which is what makes it the only safe place to sweep.
+     *
+     * Scoped to `swapped_*.mp4` in this one directory. The API server writes its own
+     * `api_out.mp4` to `cacheDir`, which the OS already manages, and `selftest.mp4` is a
+     * debug artefact somebody may still want to pull over adb.
+     */
+    private fun sweepOrphanedOutputs() {
+        val swept = outputDir().listFiles { f: File ->
+            f.isFile && f.name.startsWith("swapped_") && f.name.endsWith(".mp4")
+        }?.count { it.delete() } ?: 0
+        if (swept > 0) android.util.Log.i("ffmain", "swept $swept orphaned output(s)")
+    }
+
+    /**
+     * Drop the target — and ONLY the target.
+     *
+     * A finished video deliberately survives this. The trash icon sits on the TARGET pane
+     * and says "Remove target"; taking an unsaved result with it means one mistap destroys
+     * minutes of NPU time with no undo. The output pane and its Save/Share row are gated on
+     * `outputFile`, not on the target, so they stay usable with nothing loaded.
+     *
+     * The file is still not leaked: it goes when a new target is picked, when the next run
+     * starts, or in [sweepOrphanedOutputs] on the next launch. At most one can be waiting.
+     */
     private fun clearTarget() {
         previews.closeTarget()
         targetFile = null
@@ -950,7 +1011,6 @@ class MainActivity : ComponentActivity() {
         trimStartMs = 0f; trimEndMs = 0f
         targetAspect = 16f / 9f
         originalFrame = null
-        outputFile = null; outputPartial = false; savedUri = null; savedPathLabel = null
         invalidatePreview()
         status = ""
     }
@@ -972,8 +1032,9 @@ class MainActivity : ComponentActivity() {
         // cannot start until it lets go.
         invalidatePreview()
         cancelRequested = false
-        busy = true; progress = 0f; log = ""; outputFile = null; savedUri = null
-        savedPathLabel = null; outputPartial = false
+        busy = true; progress = 0f; log = ""
+        // Deletes the PREVIOUS run's file, not merely the reference to it.
+        discardOutput()
         preview = null; framesDone = 0; framesTotal = 0; elapsedS = 0.0
 
         lifecycleScope.launch {
@@ -1045,7 +1106,7 @@ class MainActivity : ComponentActivity() {
 
                     val t0 = System.currentTimeMillis()
 
-                    val out = File(getExternalFilesDir(null),
+                    val out = File(outputDir(),
                         "swapped_${System.currentTimeMillis()}.mp4")
                     status = "Swapping..."
                     var lastPreview = 0L
