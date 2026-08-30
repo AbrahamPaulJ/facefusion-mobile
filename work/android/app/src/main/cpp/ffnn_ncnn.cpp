@@ -7,6 +7,8 @@
 
 #ifdef FFNN_HAVE_NCNN
 
+#include <cstdlib>
+#include <cstring>
 #include <map>
 #include <memory>
 #include <string>
@@ -95,7 +97,35 @@ Handle ncnnOpen(const std::string& logicalName, Placement p) {
 
   // Placement, honoured rather than noted. Cpu is not a hint: the content gate and the
   // enhancer are pinned there because the GPU gets them WRONG, not because it is slower.
-  m->gpu = (p == Placement::Gpu) && g_vulkan;
+  //
+  // ⚠ Default means CPU. That is deliberate but it is also easy to misread: the first
+  // end-to-end ncnn run measured 354 ms/frame and was reported as "the ncnn path", when
+  // every model in it was on the CPU because none had asked for Gpu. Nothing was wrong;
+  // the number simply did not mean what it looked like.
+  //
+  // FFNCNN_PLACE=cpu|gpu overrides Default for MEASUREMENT, so one run gives a whole
+  // stage table for each unit. It never overrides an explicit Cpu: those two are
+  // correctness decisions and must not be movable by an environment variable.
+  // Default PREFERS the GPU, measured per stage over 6 frames (ms/frame):
+  //
+  //     detector    CPU 38.4   GPU 20.6   1.9x
+  //     landmarker  CPU 167.3  GPU 74.2   2.3x
+  //     recogniser  CPU 22.7   GPU 19.7   1.2x
+  //     swapper     CPU 285.4  GPU 182.2  1.6x
+  //
+  // The GPU wins every one, so Default meaning CPU would have shipped the slow half of a
+  // path that is already 19x off the NPU. The gap also GROWS with clip length: the same
+  // CPU run over 3 frames measured 354 ms/frame and over 6 measured 539, which is the
+  // sustained-load throttling roadmap 6 already found (+40% avg, +142% worst). The GPU
+  // stays flat, so on a real 300-frame clip this is worth more than the table shows.
+  bool wantGpu = (p != Placement::Cpu);
+  if (p == Placement::Default) {
+    // Measurement escape hatch. It never overrides an explicit Cpu -- those two are
+    // correctness decisions and must not be movable by an environment variable.
+    const char* force = getenv("FFNCNN_PLACE");
+    if (force) wantGpu = strcmp(force, "gpu") == 0;
+  }
+  m->gpu = wantGpu && g_vulkan;
 #if NCNN_VULKAN
   m->net.opt.use_vulkan_compute = m->gpu;
 #endif
