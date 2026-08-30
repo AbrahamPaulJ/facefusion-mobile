@@ -106,7 +106,14 @@ esac
 # quantising it buys 7.3 MB and 10 ms and costs false refusals (docs/roadmap.md 2).
 NAME_SUFFIX=""
 if [ "$NAME" = "nsfw" ]; then
-  [ "$MODE" != "--float" ] && [ "$MODE" != "--layout" ] && NAME_SUFFIX="q"
+  # "q2", not "q": the quantised gate's encodings are calibrated for the INPUT RANGE the
+  # app feeds it, and that range changed on 2026-08-30 from [0,1] to [-1,1] (the range
+  # facefusion actually uses). An app on the new range with a `nsfwq_` built for the old
+  # one is silently wrong -- the input lands outside the calibrated interval and clamps.
+  # A new FILENAME makes that incompatibility impossible to hit by accident: an app that
+  # wants `nsfwq2_` simply does not find `nsfwq_`, reports the gate missing, and offers
+  # the download. Renaming is the cheapest way to turn a silent mismatch into a prompt.
+  [ "$MODE" != "--float" ] && [ "$MODE" != "--layout" ] && NAME_SUFFIX="q2"
 else
   [ "$MODE" = "--float" ] && NAME_SUFFIX="f"
 fi

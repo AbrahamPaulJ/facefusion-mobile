@@ -649,10 +649,10 @@ class MainActivity : ComponentActivity() {
         // fact, not a floor -- which is exactly why this row tests the PAIR and never the
         // arch (docs/traps.md #10).
         val gateOk = File(modelDir(), "nsfw_$t.bin").canRead() ||
-                     File(modelDir(), "nsfwq_$t.bin").canRead()
+                     File(modelDir(), "nsfwq2_$t.bin").canRead()
         val gate = listOf(
             "nsfw" to "Content checker",
-            "nsfwq" to "Content checker (quantised)",
+            "nsfwq2" to "Content checker (quantised)",
         )
         val optional = listOf(
             alt to "Face swapper (alternative)",
@@ -1076,7 +1076,7 @@ class MainActivity : ComponentActivity() {
                     // fp32 (`nsfw_`) is the shipping one and only finalizes on v79, so the
                     // lower tiers carry the quantised `nsfwq_` instead.
                     if (!File(models, "nsfw_$tier.bin").canRead() &&
-                        !File(models, "nsfwq_$tier.bin").canRead())
+                        !File(models, "nsfwq2_$tier.bin").canRead())
                         missing += File(models, "nsfw_$tier.bin")
                     if (missing.isNotEmpty())
                         error("cannot read ${missing.joinToString { it.name }} in " +

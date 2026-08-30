@@ -127,11 +127,13 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
   // float and the quantised build is the only one that exists (docs/roadmap.md 2).
   p_->n.nsfw = open("nsfw");
   if (!p_->n.nsfw) {
-    p_->n.nsfw = open("nsfwq");
+    // nsfwq2, not nsfwq: the quantised gate is calibrated for the input range this
+  // file feeds it, and that range changed. See work/qnn/convert.sh.
+  p_->n.nsfw = open("nsfwq2");
     nsfwQuantised_ = p_->n.nsfw != nullptr;
   }
   if (!p_->n.nsfw) {
-    err_ = "no content gate: neither nsfw_" + tier_ + ".bin nor nsfwq_" + tier_ +
+    err_ = "no content gate: neither nsfw_" + tier_ + ".bin nor nsfwq2_" + tier_ +
            ".bin is in " + modelDir + " -- the gate blocks, so it cannot be skipped";
     return false;
   }

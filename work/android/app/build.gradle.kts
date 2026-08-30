@@ -66,6 +66,12 @@ android {
         // The cost is two different APKs both calling themselves 0.2.0, so BugReport now
         // prints the code alongside the name -- that is what tells them apart in a report.
         //
+        // 6 = 0.2.2 (2026-08-30): the CONTENT GATE input range. facefusion feeds nsfw_2
+        // [-1,1] and this port fed it [0,1] from the gate's first release, which moves the
+        // decision statistic 4.6x its own threshold. The quantised gate is renamed
+        // `nsfwq2_` so an app on the new range cannot silently load encodings calibrated
+        // for the old one -- it reports the gate missing and offers the download instead.
+        //
         // 5 = 0.2.1 (2026-08-30): the v81 tier, the 9.5x face enhancer, the output-file
         // leak, and "update available" in the model inventory.
         //
@@ -76,8 +82,8 @@ android {
         // ambiguous for the 47 people who already took the second one, so v0.2.1 is a NEW
         // tag and a NEW asset name, and v0.2.0 keeps pointing at what it always did.
         // archivesBaseName follows versionName, so the filename moves with it.
-        versionCode = 5
-        versionName = "0.2.1$variantTag"    // "-dev" == NO content gate
+        versionCode = 6
+        versionName = "0.2.2$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }

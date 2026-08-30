@@ -81,7 +81,9 @@ object ModelPaths {
      *
      * The gate counts as required because it BLOCKS: without it there is nothing to refuse
      * with, and a run that cannot check is a run that must not happen. Either build
-     * satisfies it, fp32 (`nsfw_`) or the quantised `nsfwq_` the lower tiers carry.
+     * satisfies it, fp32 (`nsfw_`) or the quantised `nsfwq2_` the lower tiers carry.
+     * (`nsfwq2_`, not `nsfwq_`: the old name is calibrated for an input range this
+     * app no longer produces -- see work/qnn/convert.sh.)
      */
     fun missing(ctx: Context, tier: String, swapper: String): List<String> {
         val d = dir(ctx)
@@ -89,7 +91,7 @@ object ModelPaths {
             .filter { !File(d, it + "_" + tier + ".bin").canRead() }
             .toMutableList()
         if (!File(d, "nsfw_" + tier + ".bin").canRead() &&
-            !File(d, "nsfwq_" + tier + ".bin").canRead())
+            !File(d, "nsfwq2_" + tier + ".bin").canRead())
             absent += "nsfw"
         return absent
     }

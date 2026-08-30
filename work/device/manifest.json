@@ -29,12 +29,17 @@
           "sha256": "27884c9d1835ac45a596650dcdcabf4027475c931f4f9f22037ea5c761f0c629"
         },
         {
+          "name": "nsfwq2_v68.bin",
+          "bytes": 6629336,
+          "sha256": "37b58374e66ceb2b8c84621f9ae52d4d9d03a42848e0bcbe91fd10dc3729b3b1"
+        },
+        {
           "name": "gpen_v68.bin",
           "bytes": 24962264,
           "sha256": "00e487d96d8148bb05ba83448069321cfd60994ee3dd4fa71415fe211faabe5a"
         }
       ],
-      "bytes": 309801736
+      "bytes": 316431072
     },
     "v73": {
       "files": [
@@ -64,12 +69,17 @@
           "sha256": "f85590597217088875a39fffd43ddb2b61594528656c1f976e380d56d7b1e930"
         },
         {
+          "name": "nsfwq2_v73.bin",
+          "bytes": 6703064,
+          "sha256": "197a25ad82ce6db89fa583cbe130686acbe7a45478e31d363412c9846102ac93"
+        },
+        {
           "name": "gpen_v73.bin",
           "bytes": 24618200,
           "sha256": "58b6f1843976ec994406a8232e8420e99c320cae058e103b076ff62515ea5a33"
         }
       ],
-      "bytes": 310153992
+      "bytes": 316857056
     },
     "v79": {
       "files": [
@@ -197,16 +207,16 @@
         "sha256": "ea6aacddb3e4d3d2919eb0829c54f5dce17280b753d7474140b148332ac06239"
       },
       {
-        "name": "nsfwq_v81.bin",
-        "bytes": 6666200,
-        "sha256": "3f4ec9844b761fecc2749d6060ae340dbce0a5c9d477915b1ffd07ababb6849d"
-      },
-      {
         "name": "gpen_v81.bin",
         "bytes": 24913112,
         "sha256": "454751314d5f9010d9708bdacbb4cb8676ef599796122b00c7cdc404cec4139e"
+      },
+      {
+        "name": "nsfwq2_v81.bin",
+        "bytes": 6662104,
+        "sha256": "16ee9369d8fd62b8c7dce0b7d4f5cf2e57e6885effd6c25bc100aeac606e58e1"
       }
     ],
-    "bytes": 311612168
+    "bytes": 311608072
   }
 }
