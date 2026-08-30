@@ -190,7 +190,15 @@ object ContentGate {
         // Kept distinct on purpose. A gate that could not run has not refused anything and
         // has not permitted anything either, and saying "not allowed" here would blame the
         // user for our own failure.
-        Verdict.ERROR -> "The content check could not run on $what, so it cannot be processed"
+        //
+        // ⚠ The REASON is included, unlike the BLOCK case above. `detail` already carried
+        // the native error -- "content gate: <qnn error>" -- and nothing ever showed it, so
+        // a field report of this failure said only that it happened. That cost a day of
+        // guessing at a bug the app could name itself. A refusal must not leak a threshold;
+        // a FAULT should say what broke.
+        Verdict.ERROR ->
+            "The content check could not run on $what, so it cannot be processed" +
+                (if (res.detail.isNotBlank()) " (${res.detail})" else "")
         Verdict.ALLOW -> ""
     }
 

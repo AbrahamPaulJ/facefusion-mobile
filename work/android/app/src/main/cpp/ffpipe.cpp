@@ -84,60 +84,103 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
   // The detector is the probe because it is mandatory and the smallest -- 3.8 MB. A tier
   // is never half-present: the downloader writes a `.part` and renames only after the
   // SHA256 matches, so yoloface existing means the rest of that tier does too.
+  // Which arch tier this chip needs, measured rather than assumed, resolved against WHAT
+  // IS ACTUALLY ON DISK. The best tier for a chip is not always one we have published: a
+  // v81 part asks for v81 the moment the app knows the arch exists, which is necessarily
+  // before the binaries are hosted.
+  //
+  // The detector is the probe because it is mandatory and the smallest -- 3.8 MB. A tier is
+  // never half-present: the downloader writes a `.part` and renames only after the SHA256
+  // matches, so yoloface existing means the rest of that tier does too.
   const std::vector<std::string> chain = ffqnn::tierChain(ffqnn::deviceInfo());
-  tier_ = chain.front();
+  std::vector<std::string> candidates;
   for (const std::string& t : chain) {
     std::string probe = modelDir + "/yoloface_" + t + ".bin";
-    if (FILE* f = std::fopen(probe.c_str(), "rb")) {
-      std::fclose(f);
-      tier_ = t;
-      break;
+    if (FILE* f = std::fopen(probe.c_str(), "rb")) { std::fclose(f); candidates.push_back(t); }
+  }
+  if (candidates.empty() && !chain.empty()) candidates.push_back(chain.front());
+  if (candidates.empty()) { err_ = "no tier: the HTP probe returned nothing"; return false; }
+
+  auto dropNets = [&]() {
+    for (ffqnn::Handle* h : {&p_->n.det, &p_->n.fan, &p_->n.fan685, &p_->n.arc,
+                             &p_->n.swap, &p_->n.nsfw, &p_->n.enh}) {
+      if (*h) ffqnn::release(*h);
+      *h = nullptr;
     }
-  }
-  // No logging channel exists this early -- init() predates the app's log box. It is still
-  // visible in a bug report, which prints pickTier's answer next to the files on disk: a
-  // fallback reads as `tier v81` beside `yoloface_v73.bin`, which is the whole story.
-  if (ffdebug() && tier_ != chain.front())
-    fprintf(stderr, "[dbg] tier %s not present, using %s\n",
-            chain.front().c_str(), tier_.c_str());
-
-  auto open = [&](const char* name) -> ffqnn::Handle {
-    std::string path = modelDir + "/" + name + "_" + tier_ + ".bin";
-    ffqnn::Handle h = ffqnn::load(path);
-    if (!h) err_ = std::string("load ") + path + ": " + ffqnn::lastError();
-    return h;
+    nsfwQuantised_ = false;
   };
-  p_->n.det = open("yoloface");     if (!p_->n.det) return false;
-  p_->n.fan = open("fan2d");        if (!p_->n.fan) return false;
-  p_->n.arc = open("arcface");      if (!p_->n.arc) return false;
-  p_->n.swap = open(swapperName.c_str()); if (!p_->n.swap) return false;
-  p_->n.fan685 = open("fan685");    // optional; absent -> geometric fallback below
 
-  // The face enhancer.  Optional in the strongest sense: it is a separate download,
-  // most installs will not have it, and a missing file must never be an init failure --
-  // the UI asks hasEnhancer() and simply does not offer the switch.
-  p_->n.enh = open("gpen");
+  // One tier's worth of loading, plus the proof that it actually RUNS.
+  auto tryTier = [&](const std::string& t) -> bool {
+    tier_ = t;
+    auto open = [&](const char* name) -> ffqnn::Handle {
+      std::string path = modelDir + "/" + name + "_" + tier_ + ".bin";
+      ffqnn::Handle h = ffqnn::load(path);
+      if (!h) err_ = std::string("load ") + path + ": " + ffqnn::lastError();
+      return h;
+    };
+    p_->n.det = open("yoloface");             if (!p_->n.det) return false;
+    p_->n.fan = open("fan2d");                if (!p_->n.fan) return false;
+    p_->n.arc = open("arcface");              if (!p_->n.arc) return false;
+    p_->n.swap = open(swapperName.c_str());   if (!p_->n.swap) return false;
+    p_->n.fan685 = open("fan685");   // optional; absent -> geometric fallback
 
-  // The content gate is MANDATORY, because it blocks.  A gate that silently does not run
-  // is worse than no gate: it reports "checked" to every caller above it.  So a missing
-  // context is an init failure, not a fallback.
-  //
-  // Two names, in preference order.  fp32 is the shipping build and the one that tracks
-  // the host, but it only finalizes on v79 -- below that the GELU cannot be created in
-  // float and the quantised build is the only one that exists (docs/roadmap.md 2).
-  p_->n.nsfw = open("nsfw");
-  if (!p_->n.nsfw) {
-    // nsfwq2, not nsfwq: the quantised gate is calibrated for the input range this
-  // file feeds it, and that range changed. See work/qnn/convert.sh.
-  p_->n.nsfw = open("nsfwq2");
-    nsfwQuantised_ = p_->n.nsfw != nullptr;
+    // The face enhancer. Optional in the strongest sense: a separate download, most
+    // installs will not have it, and a missing file must never be an init failure.
+    p_->n.enh = open("gpen");
+
+    // The content gate is MANDATORY, because it blocks. A gate that silently does not run
+    // is worse than no gate: it reports "checked" to every caller above it.
+    //
+    // fp32 is the build that tracks the host, but it only finalizes on v79 -- below that
+    // the GELU cannot be created in float, and v81 refuses it too (docs/traps.md #10), so
+    // every other tier carries the quantised one.
+    p_->n.nsfw = open("nsfw");
+    if (!p_->n.nsfw) {
+      // nsfwq2, not nsfwq: the quantised gate is calibrated for the input range this file
+      // feeds it, and that range changed. See work/qnn/convert.sh.
+      p_->n.nsfw = open("nsfwq2");
+      nsfwQuantised_ = p_->n.nsfw != nullptr;
+    }
+    if (!p_->n.nsfw) {
+      err_ = "no content gate: neither nsfw_" + tier_ + ".bin nor nsfwq2_" + tier_ +
+             ".bin is in " + modelDir + " -- the gate blocks, so it cannot be skipped";
+      return false;
+    }
+
+    // ⚠ LOADING IS NOT RUNNING. A context can load and then fail to execute -- reported
+    // from an 8 Elite Gen 5 on 0.2.1, where every model loaded and the first execution
+    // returned NaN, which surfaced to the user as "the content check could not run" with
+    // no way back. Tier selection was by file presence alone, so there was no fallback
+    // from a tier the chip would not run.
+    //
+    // So prove it: one gate inference on a synthetic frame, ~5 ms, before declaring the
+    // tier good. The gate is the right probe because it is mandatory anyway and it is the
+    // first thing every path executes.
+    ffcv::Image probe(64, 64, 3);
+    std::fill(probe.data.begin(), probe.data.end(), (uint8_t)128);
+    ContentVerdict v = checkContent(probe);
+    if (!v.ok || !std::isfinite(v.score)) {
+      err_ = "tier " + tier_ + " loaded but does not execute: " + err_;
+      return false;
+    }
+    return true;
+  };
+
+  std::string firstErr;
+  for (size_t i = 0; i < candidates.size(); ++i) {
+    dropNets();
+    if (tryTier(candidates[i])) {
+      if (ffdebug() && candidates[i] != chain.front())
+        fprintf(stderr, "[dbg] tier %s unusable, fell back to %s\n",
+                chain.front().c_str(), tier_.c_str());
+      return true;
+    }
+    if (i == 0) firstErr = err_;
   }
-  if (!p_->n.nsfw) {
-    err_ = "no content gate: neither nsfw_" + tier_ + ".bin nor nsfwq2_" + tier_ +
-           ".bin is in " + modelDir + " -- the gate blocks, so it cannot be skipped";
-    return false;
-  }
-  return true;
+  dropNets();
+  err_ = firstErr.empty() ? err_ : firstErr;
+  return false;
 }
 
 bool Pipeline::hasEnhancer() const { return p_ && p_->n.enh != nullptr; }

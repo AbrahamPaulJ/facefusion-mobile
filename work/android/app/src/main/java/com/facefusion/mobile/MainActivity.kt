@@ -826,7 +826,11 @@ class MainActivity : ComponentActivity() {
                             // complete second processing path with no gate on it, and the
                             // gate becomes avoidable by simply never pressing Swap.
                             val v = ContentGate.checkImage(bmp)
-                            appendLog("preview source score %+.3f".format(v.score))
+                            // The score alone reads "NaN" and stops there. When the gate
+                            // FAULTS, the reason is the whole story and it was being
+                            // dropped on the floor.
+                            appendLog("preview source score %+.3f".format(v.score) +
+                                      (if (v.detail.isNotBlank()) "  [" + v.detail + "]" else ""))
                             if (v.ok) null else ContentGate.message("the source image", v)
                         },
                     )
