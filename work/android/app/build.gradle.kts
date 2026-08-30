@@ -66,13 +66,18 @@ android {
         // The cost is two different APKs both calling themselves 0.2.0, so BugReport now
         // prints the code alongside the name -- that is what tells them apart in a report.
         //
-        // 5 = the output-file leak (2026-08-30). Every finished video was left in
-        // Android/data forever; see MainActivity.discardOutput/sweepOrphanedOutputs. The
-        // code goes up for the same reason it did for 4 -- a THIRD binary calling itself
-        // "0.2.0 (4)" would be indistinguishable from the published one in a bug report,
-        // which is the exact confusion the paragraph above exists to prevent.
+        // 5 = 0.2.1 (2026-08-30): the v81 tier, the 9.5x face enhancer, the output-file
+        // leak, and "update available" in the model inventory.
+        //
+        // ⚠ The NAME moves this time, unlike the hotfix. Reusing "0.2.0" was right for 4:
+        // it was the same release, refetched at the same link, by the same users. This is
+        // not that -- it publishes a new model tier and replaces a hosted model in every
+        // existing one. A third binary called 0.2.0 would have made the download link
+        // ambiguous for the 47 people who already took the second one, so v0.2.1 is a NEW
+        // tag and a NEW asset name, and v0.2.0 keeps pointing at what it always did.
+        // archivesBaseName follows versionName, so the filename moves with it.
         versionCode = 5
-        versionName = "0.2.0$variantTag"    // "-dev" == NO content gate
+        versionName = "0.2.1$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }
