@@ -31,13 +31,35 @@ import java.security.MessageDigest
 object ModelDownload {
 
     /**
-     * Versioned, following upstream's own scheme: a new repo per model revision means old
-     * builds keep resolving the files they were tested against.
+     * Unversioned since 0.4.0.  The name used to carry "-0.1.0" on the theory that a repo
+     * per model revision would let old builds keep resolving the files they were tested
+     * against -- but that is not how it was ever used: one repo carried v68/v73/v79/v81
+     * and a replaced `gpen` across four releases, so the version in the name only ever
+     * said something untrue.  `manifest.json` + SHA256 is what actually pins a build to
+     * its files.
+     *
+     * The old name still resolves and MUST keep doing so -- 0.1.1 through 0.3.0 have it
+     * compiled in.  HF redirects a renamed repo, and this downloader was already proven
+     * against exactly that hop: `resolve/main/<file>` has always been a 307 to a different
+     * host (`us.aws.cdn.hf.co`) and still returns 206 with the Range header intact.  After
+     * the rename it is two hops instead of one, measured 200/206 on both names.
+     * ⚠ Never create a new repo at the old name; the redirect is the compatibility story.
      */
-    const val REPO = "AbrahamPJ/facefusion-mobile-models-0.1.0"
+    const val REPO = "AbrahamPJ/facefusion-mobile-models"
     private const val BASE = "https://huggingface.co/$REPO/resolve/main/"
 
-    data class Entry(val name: String, val bytes: Long, val sha256: String)
+    /**
+     * One hosted file.
+     *
+     * [name] is the LOCAL filename and [remote] the repo-relative path it is fetched from.
+     * They are the same for every QNN tier, whose files sit at the repo root -- but the
+     * ncnn set lives in an `ncnn/` folder, and both the native loader
+     * (`ffnn_ncnn.cpp` resolves `<modelDir>/<stem>.ncnn.param`) and [ModelPaths] expect a
+     * FLAT models directory. Keeping the two apart is what lets the hosting layout change
+     * without the device layout following it.
+     */
+    data class Entry(val name: String, val bytes: Long, val sha256: String,
+                     val remote: String = name)
 
     /** What the UI draws. Compose observes this object directly. */
     var running by mutableStateOf(false); private set
@@ -83,16 +105,35 @@ object ModelDownload {
     fun manifestFor(chain: String): Pair<String, List<Entry>> {
         val want = chain.split(",").map { it.trim() }.filter { it.isNotEmpty() }
         if (want.isEmpty()) error("no tier requested")
-        val text = URL(BASE + "manifest.json").readText()
-        val tiers = JSONObject(text).getJSONObject("tiers")
-        val tier = want.firstOrNull { tiers.has(it) }
+        val root = JSONObject(URL(BASE + "manifest.json").readText())
+        val tiers = root.optJSONObject("tiers") ?: JSONObject()
+        val tier = want.firstOrNull { tiers.has(it) || root.has(legacyKey(it)) }
             ?: error("no models published for any of " + want.joinToString(", "))
-        val arr = tiers.getJSONObject(tier).getJSONArray("files")
+        val arr = (tiers.optJSONObject(tier) ?: root.getJSONObject(legacyKey(tier)))
+            .getJSONArray("files")
         return tier to (0 until arr.length()).map {
             val o = arr.getJSONObject(it)
-            Entry(o.getString("name"), o.getLong("bytes"), o.getString("sha256"))
+            val remote = o.getString("name")
+            // The LOCAL name is the basename. A hosted `ncnn/yoloface_8n_b1.ncnn.param`
+            // has to land as `yoloface_8n_b1.ncnn.param` in a flat models dir, because that
+            // is where ffnn_ncnn.cpp looks for it.
+            Entry(remote.substringAfterLast('/'), o.getLong("bytes"), o.getString("sha256"),
+                  remote)
         }
     }
+
+    /**
+     * Where a variant lives in the manifest when it is not under `tiers`.
+     *
+     * `ncnn` is published as a top-level `ncnn_preview` block, deliberately kept OUT of
+     * `tiers` so that no app shipped before 0.4.0 could select it -- those builds have no
+     * ncnn backend linked, and a tier they can download but not load is worse than one
+     * they cannot see. 0.4.0 is the build that can, so it looks in both places, `tiers`
+     * first: the day the block moves under `tiers` this keeps working and this function
+     * stops being reached.
+     */
+    private fun legacyKey(variant: String): String =
+        if (variant == ModelPaths.NCNN_TIER) "ncnn_preview" else variant
 
     /** Which of [entries] are not already present and correct in [dir]. */
     fun missing(dir: File, entries: List<Entry>): List<Entry> =
@@ -170,7 +211,7 @@ object ModelDownload {
                 return verifyAndCommit(part, dest, e)
             }
 
-            conn = (URL(BASE + e.name).openConnection() as HttpURLConnection).apply {
+            conn = (URL(BASE + e.remote).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 30_000
                 readTimeout = 60_000
                 if (from > 0) setRequestProperty("Range", "bytes=$from-")

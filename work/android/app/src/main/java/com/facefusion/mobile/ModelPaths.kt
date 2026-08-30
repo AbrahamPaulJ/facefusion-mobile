@@ -43,6 +43,49 @@ object ModelPaths {
     @Volatile private var chainCache: List<String>? = null
     @Volatile private var backendCache: String? = null
 
+    // ---------------------------------------------------------------- forced runtime
+
+    private const val PREFS = "ff_backend"
+    private const val KEY_FORCED = "forced"
+
+    /**
+     * Which runtime the user has pinned: "qnn", "ncnn", or "" for automatic.
+     *
+     * Persisted, because the point of it is to survive the app restart that a runtime
+     * change wants -- a switch that reset itself on launch could never be used to run a
+     * whole video through the other backend.
+     */
+    fun forcedBackend(ctx: Context): String =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_FORCED, "") ?: ""
+
+    /**
+     * Pin the runtime, or "" to go back to automatic.
+     *
+     * ⚠ ORDER MATTERS and the caller must have released the pipeline first. This drops both
+     * caches because they hold answers from the runtime being replaced: the cached backend
+     * IS the question being changed, and the tier chain is "v79,v73,v68" on one runtime and
+     * "ncnn" on the other. Leaving either in place makes the app download one runtime's
+     * models and load the other's.
+     */
+    fun setForcedBackend(ctx: Context, value: String) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(KEY_FORCED, value).apply()
+        apply(ctx)
+    }
+
+    /**
+     * Push the persisted choice into the native seam and invalidate what it invalidates.
+     *
+     * Called at startup BEFORE any probe -- `backend()` and `tierChain()` cache their first
+     * answer, so a setting applied after them would be ignored for the life of the process.
+     */
+    fun apply(ctx: Context) {
+        backendCache = null
+        chainCache = null
+        NativePipe.ensureLoaded()
+        NativePipe.setForcedBackend(forcedBackend(ctx))
+    }
+
     /**
      * "qnn" or "ncnn" -- which runtime, and therefore which MODEL SET this device needs.
      *

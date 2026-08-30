@@ -36,6 +36,12 @@ work/output/
 work/android/app/src/main/jniLibs/
 work/android/app/src/main/cpp/include/
 
+# The ncnn build STAGED for the Windows Gradle/CMake build (roadmap 6).  ~162 MB of arm64
+# static archives and headers copied out of WSL `~/ncnn/build-android-vulkan`, because
+# Gradle runs on Windows and the artefacts are built by the Linux NDK under WSL.  Derived,
+# large, and regenerable -- `work/android/stage_ncnn.sh` puts it back.
+work/android/ncnn/
+
 # Upstream FaceFusion clone; it has its own repository.
 # LEADING SLASH IS LOAD-BEARING: an unanchored `src/` matches a directory of that name at
 # ANY depth, which silently excluded the entire app source under work/android/app/src/.

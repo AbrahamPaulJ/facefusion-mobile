@@ -41,6 +41,16 @@ data class ModelRow(
      * republished 9.5x faster, every existing install kept the slow one and was never told.
      */
     val outdated: Boolean = false,
+    /**
+     * EVERY file behind this row, not just the one it is named after.
+     *
+     * A QNN model is one context binary and this is a single name; an ncnn model is a
+     * `.param`/`.bin` PAIR shown as one row, because a 30 KB param beside a 400 MB bin is
+     * not a row of its own. Delete then has to take both -- deleting only [fileName] left
+     * the 402 MB hyperswap weights on the device while the inventory reported the model
+     * gone, which is the worst of both.
+     */
+    val files: List<String> = listOf(fileName),
 )
 
 /** What the HTP said about itself, already parsed out of `NativePipe.probeDeviceInfo`. */
@@ -52,6 +62,17 @@ data class DeviceUi(
     val tier: String = "",
     /** "yes" | "no" | "unknown" -- and "unknown" must never be shown as "no". */
     val fp16: String = "unknown",
+    /**
+     * Which runtime actually came up: "qnn", "ncnn", or "none".
+     *
+     * Reported SEPARATELY from [ok], which describes the HTP probe. On a part with no
+     * Hexagon that probe is meant to fail, and a panel that could only say "the HTP could
+     * not be measured" would leave the one user who needs this screen unable to see what
+     * their phone is running.
+     */
+    val backend: String = "",
+    /** ncnn only: a usable Vulkan device is present, so the GPU path is available. */
+    val gpu: Boolean = false,
 )
 
 private fun mb(bytes: Long) = "%.1f MB".format(bytes / 1048576.0)
@@ -66,6 +87,13 @@ fun SettingsScreen(
     onDownloadModel: () -> Unit,
     /** Start or stop the HTTP server. [lan] binds every interface instead of loopback. */
     onApiToggle: (on: Boolean, lan: Boolean) -> Unit,
+    /** "" | "qnn" | "ncnn" -- which runtime the user has pinned, "" being automatic. */
+    forcedBackend: String = "",
+    /**
+     * Pin the runtime. **null when this build has no second backend**, which is what hides
+     * the control entirely rather than drawing one that cannot do anything.
+     */
+    onForceBackend: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var confirming by remember { mutableStateOf<ModelRow?>(null) }
@@ -149,7 +177,30 @@ fun SettingsScreen(
         Caption("This device")
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (!device.ok) {
+                // The RUNTIME first, because on a non-Qualcomm phone it is the only row on
+                // this card about the machine the user is actually holding. Everything
+                // below it describes a Hexagon NPU, which such a device does not have.
+                InfoRow(
+                    "Runtime", when (device.backend) {
+                        "qnn" -> "Hexagon NPU"
+                        "ncnn" -> if (device.gpu) "GPU (Vulkan) + CPU" else "CPU"
+                        "none" -> "none started"
+                        else -> "-"
+                    }
+                )
+                if (device.backend == "ncnn") {
+                    // Say the two things a preview user needs before they reach for a
+                    // stopwatch or file a report, and say them here rather than in a
+                    // release note nobody has open.
+                    Text(
+                        "This device has no Qualcomm NPU, so the swap runs on the GPU and " +
+                            "CPU: expect roughly 13x the time per frame. The face " +
+                            "enhancer and the content checker always run on the CPU here " +
+                            "-- on the GPU they are measurably wrong, not merely slower.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else if (!device.ok) {
                     Text(
                         "The HTP could not be measured. The app falls back to the most " +
                             "permissive build, so this is not necessarily a failure to run.",
@@ -161,16 +212,66 @@ fun SettingsScreen(
                     InfoRow("VTCM", "${device.vtcmMb} MB")
                     InfoRow("SoC model", "${device.soc}")
                 }
-                InfoRow(
-                    "fp16 execution", when (device.fp16) {
-                        "yes" -> "supported"
-                        "no" -> "not supported"
-                        // The control canary failed. Reporting this as "no" would push a
-                        // working device onto the slower compatibility build.
-                        else -> "could not be measured"
+                // Both rows below are QNN facts. On ncnn there is no context binary and no
+                // fp16 canary was ever run -- printing "could not be measured" there would
+                // report a failure where nothing was attempted.
+                if (device.backend != "ncnn") {
+                    InfoRow(
+                        "fp16 execution", when (device.fp16) {
+                            "yes" -> "supported"
+                            "no" -> "not supported"
+                            // The control canary failed. Reporting this as "no" would push
+                            // a working device onto the slower compatibility build.
+                            else -> "could not be measured"
+                        }
+                    )
+                    InfoRow("Context binaries",
+                            if (device.tier.isEmpty()) "-" else device.tier)
+                }
+            }
+        }
+
+        // -------------------------------------------------------------- runtime override
+        //
+        // Shown only when ncnn is actually LINKED and this part has an NPU -- that is, only
+        // where there is a real choice. On a non-Qualcomm phone there is nothing to choose
+        // between, and in a QNN-only build the control could not do anything.
+        //
+        // It exists because the non-Qualcomm path is otherwise untestable: Auto tries QNN
+        // first and QNN wins on every device this project owns, so without a switch the
+        // ncnn path could only ever be exercised on hardware that is not on the bench.
+        if (onForceBackend != null && device.backend == "qnn") {
+            Spacer(Modifier.height(6.dp))
+            Caption("Runtime")
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp),
+                       verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "This phone has a Hexagon NPU and uses it. Forcing the GPU/CPU " +
+                            "path shows what a non-Qualcomm device does -- it needs its " +
+                            "own model set and is far slower.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // "" is automatic, and it is what a fresh install has.
+                        listOf("" to "Automatic", "qnn" to "NPU", "ncnn" to "GPU + CPU")
+                            .forEach { (value, label) ->
+                                FilterChip(
+                                    selected = forcedBackend == value,
+                                    onClick = { onForceBackend(value) },
+                                    label = { Text(label) },
+                                )
+                            }
                     }
-                )
-                InfoRow("Context binaries", if (device.tier.isEmpty()) "-" else device.tier)
+                    if (forcedBackend.isNotEmpty()) Text(
+                        "Forced to " + forcedBackend + ". A testing control: it restarts " +
+                            "the pipeline, and the other runtime's models are a separate " +
+                            "download.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
             }
         }
 

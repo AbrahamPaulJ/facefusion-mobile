@@ -10,6 +10,7 @@
 #include <jni.h>
 
 #include <cmath>
+#include <cstdlib>   // setenv/unsetenv, for setForcedBackend
 #include <cstring>
 #include <memory>
 #include <string>
@@ -153,6 +154,27 @@ JNIEXPORT jstring JNICALL
 Java_com_facefusion_mobile_NativePipe_probeTierChain(JNIEnv* env, jclass, jstring jLib,
                                                      jstring jSkel) {
   std::string lib = jstr(env, jLib);
+  // Ask the SEAM first, because on a non-Qualcomm part the answer is not an arch tier at
+  // all -- it is "ncnn", one variant, and the downloader must fetch a completely different
+  // model set. Going straight to ffqnn here is what would hand a Mali phone a chain of
+  // Hexagon context binaries it can never load: ffqnn::init fails, `d` stays unmeasured,
+  // and tierChain's fallback confidently answers "v68".
+  ffnn::InitSpec spec;
+  spec.libDir = lib;
+  spec.skelDir = jstr(env, jSkel);
+  spec.modelDir = lib;   // unused by init
+  if (ffnn::init(ffnn::Backend::Auto, spec) && ffnn::active() == ffnn::Backend::Ncnn) {
+    std::string out;
+    for (const std::string& v : ffnn::variantChain(ffnn::Backend::Ncnn)) {
+      if (!out.empty()) out += ",";
+      out += v;
+    }
+    return env->NewStringUTF(out.c_str());
+  }
+  // QNN, including the case where the backend did not come up at all. Deliberately NOT
+  // routed through the seam: ffqnn::tierChain has its own fallback for an unmeasured
+  // device, and that fallback is the right answer here -- a transient QNN init failure on
+  // a Hexagon part must still produce a loadable chain, not an empty one.
   ffqnn::DeviceInfo d{};
   if (!ffqnn::init(lib + "/libQnnHtp.so", lib + "/libQnnSystem.so", jstr(env, jSkel)))
     g_err = ffqnn::lastError();   // leave d unmeasured; the chain's own fallback applies
@@ -196,16 +218,34 @@ JNIEXPORT jstring JNICALL
 Java_com_facefusion_mobile_NativePipe_probeDeviceInfo(JNIEnv* env, jclass, jstring jLib,
                                                        jstring jSkel) {
   std::string lib = jstr(env, jLib);
+  // The RUNTIME first, and OUTSIDE the ok=0 early returns below. `ok` describes the HTP
+  // probe, and on a part with no Hexagon that probe is *supposed* to fail -- reporting only
+  // "ok=0" there would leave the settings panel unable to say what the device is actually
+  // running, which is the one thing a non-Qualcomm user needs it to say.
+  std::string pre;
+  {
+    ffnn::InitSpec spec;
+    spec.libDir = lib;
+    spec.skelDir = jstr(env, jSkel);
+    spec.modelDir = lib;
+    if (ffnn::init(ffnn::Backend::Auto, spec)) {
+      const bool ncnn = ffnn::active() == ffnn::Backend::Ncnn;
+      pre = std::string(";backend=") + (ncnn ? "ncnn" : "qnn");
+      if (ncnn) pre += ffnn::deviceInfo(ffnn::Backend::Ncnn).gpu ? ";gpu=1" : ";gpu=0";
+    } else {
+      pre = ";backend=none";
+    }
+  }
   if (!ffqnn::init(lib + "/libQnnHtp.so", lib + "/libQnnSystem.so", jstr(env, jSkel))) {
     g_err = ffqnn::lastError();
-    return env->NewStringUTF("ok=0");
+    return env->NewStringUTF(("ok=0" + pre).c_str());
   }
   ffqnn::DeviceInfo d = ffqnn::deviceInfo();
   if (!d.ok) {
     g_err = ffqnn::lastError();
-    return env->NewStringUTF("ok=0");
+    return env->NewStringUTF(("ok=0" + pre).c_str());
   }
-  std::string s = "ok=1";
+  std::string s = "ok=1" + pre;
   s += ";arch=" + std::to_string(d.arch);
   s += ";vtcm=" + std::to_string((unsigned long long)d.vtcmMb);
   s += ";soc=" + std::to_string((unsigned long)d.socModel);
@@ -213,6 +253,39 @@ Java_com_facefusion_mobile_NativePipe_probeDeviceInfo(JNIEnv* env, jclass, jstri
   s += ";dlbc=" + std::to_string(d.dlbc ? 1 : 0);
   s += ";tier=" + ffqnn::pickTier(d);
   return env->NewStringUTF(s.c_str());
+}
+
+// Was the ncnn backend LINKED into this build?
+//
+// Not "is there a GPU" and not "which backend is active": whether the code exists at all.
+// FF_NCNN is off unless work/android/ncnn/ was staged, so a build can ship with no second
+// runtime -- and a settings control that offers to switch to a backend that is not in the
+// binary is a control that silently does nothing.
+JNIEXPORT jboolean JNICALL
+Java_com_facefusion_mobile_NativePipe_hasNcnnBackend(JNIEnv*, jclass) {
+#ifdef FFNN_HAVE_NCNN
+  return JNI_TRUE;
+#else
+  return JNI_FALSE;
+#endif
+}
+
+// Force a backend for the rest of the process, or "" to go back to Auto.
+//
+// The non-Qualcomm path is otherwise UNTESTABLE on any bench that has a Hexagon: Auto tries
+// QNN first and QNN wins, so ncnn could only ever be exercised on a phone this project does
+// not own. `ffnn::init(Auto)` already honours FFBACKEND for the headless CLI, where the
+// environment is the shell's; an Android app has no environment to set from outside, so it
+// sets its own. One mechanism, and the CLI's is the one already documented.
+//
+// ⚠ The CALLER must release the pipeline BEFORE calling this. Handles are tagged with the
+// backend that opened them (ffnn.cpp), so a stale handle is freed correctly either way --
+// but a pipeline half-built on the other runtime is still not a thing to keep.
+JNIEXPORT void JNICALL
+Java_com_facefusion_mobile_NativePipe_setForcedBackend(JNIEnv* env, jclass, jstring jName) {
+  std::string name = jstr(env, jName);
+  if (name.empty()) unsetenv("FFBACKEND");
+  else setenv("FFBACKEND", name.c_str(), 1);
 }
 
 // Which RUNTIME will this device use, asked before anything is downloaded.

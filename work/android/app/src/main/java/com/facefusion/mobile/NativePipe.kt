@@ -101,6 +101,30 @@ object NativePipe {
      */
     @JvmStatic external fun probeBackend(libDir: String, skelDir: String): String
 
+    /**
+     * Pin the runtime for the rest of this process: "qnn", "ncnn", or "" for automatic.
+     *
+     * Auto tries QNN first and QNN wins on any Qualcomm part, so without this the
+     * non-Qualcomm path could only be exercised on a phone with no Hexagon -- which is not
+     * the bench, and an untestable path is an unverified one. It is the same `FFBACKEND`
+     * the headless CLI reads; the app sets it on itself because an Android process has no
+     * environment anyone outside can set.
+     *
+     * ⚠ Call [release] FIRST, and clear [ModelPaths]'s caches after: the cached backend and
+     * tier chain are answers from the runtime this replaces.
+     */
+    @JvmStatic external fun setForcedBackend(name: String)
+
+    /**
+     * Whether the ncnn backend is compiled into THIS build.
+     *
+     * Not "is there a GPU", and not "which backend is running": whether the code is in the
+     * binary at all. `FF_NCNN` is off unless `work/android/ncnn/` was staged, so a QNN-only
+     * APK is a normal build -- and offering to switch to a runtime that is not linked is a
+     * control that silently does nothing.
+     */
+    @JvmStatic external fun hasNcnnBackend(): Boolean
+
     @JvmStatic external fun probeDeviceInfo(libDir: String, skelDir: String): String
 
     /**

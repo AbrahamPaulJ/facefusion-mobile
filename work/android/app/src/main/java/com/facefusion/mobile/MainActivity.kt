@@ -92,6 +92,9 @@ class MainActivity : ComponentActivity() {
     private var advancedOpen by mutableStateOf(false)
     private var modelsVersion by mutableStateOf(0)
     private var deviceUi by mutableStateOf(DeviceUi())
+
+    /** "" | "qnn" | "ncnn" -- the runtime pinned in Settings, mirrored for composition. */
+    private var forcedBackend by mutableStateOf("")
     private var confirmMetered by mutableStateOf(false)
 
     /**
@@ -295,6 +298,28 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         BugReport.install(this)
         NativePipe.ensureLoaded()
+        // BEFORE the first probe, and that ordering is the whole point: ModelPaths caches
+        // the backend and the tier chain on first ask, so a runtime pinned in Settings and
+        // applied any later would be ignored for the life of the process.
+        // adb: am start -n com.facefusion.mobile/.MainActivity --es backend ncnn|qnn|auto
+        //
+        // The runtime, settable from the shell, BEFORE ModelPaths.apply pushes it down.
+        // Settings has the same control, but a chip that has to be tapped cannot be part of
+        // a scripted device run -- and every other verification in this project is a script
+        // (install_app.ps1, run_cli.ps1, the selftest below). The non-Qualcomm path is the
+        // one that most needs that, because it is the path no device here selects on its
+        // own.
+        //
+        // Safe to leave in a shipping build for the reason the `api` extra is not: this
+        // picks between two runtimes that both run the same gated pipeline. It cannot open
+        // a port, and it cannot reach anything the Settings screen does not already offer.
+        intent?.getStringExtra("backend")?.let {
+            val want = if (it == "auto") "" else it
+            if (want == "" || want == "qnn" || want == "ncnn")
+                ModelPaths.setForcedBackend(this, want)
+        }
+        ModelPaths.apply(this)
+        forcedBackend = ModelPaths.forcedBackend(this)
         modelDir()
         opts = SwapOptions.load(this)
         ApiService.restore(this)
@@ -316,6 +341,20 @@ class MainActivity : ComponentActivity() {
 
         refreshModelsMissing()
         refreshHostedFiles()
+
+        // adb: am start -n com.facefusion.mobile/.MainActivity --es download 1
+        //
+        // The same call the Download button makes, so the DOWNLOADER can be verified on a
+        // device rather than read. It resolves the manifest for whichever runtime is
+        // active, which is the half that differs between them -- QNN tiers live under
+        // `tiers`, the ncnn set under its own key with an `ncnn/` prefix on every filename
+        // -- and that difference is invisible from the outside until a file lands in the
+        // wrong place or not at all.
+        //
+        // Nothing here is privileged: it fetches only what the manifest publishes for a
+        // runtime the app already chose, and every file is still SHA256-verified before it
+        // takes its real name.
+        if (intent?.getStringExtra("download") != null) onDownloadTapped()
 
         setContent {
             FaceFusionTheme {
@@ -433,13 +472,21 @@ class MainActivity : ComponentActivity() {
                                 device = deviceUi,
                                 onDownloadModel = { onDownloadTapped() },
                                 onDeleteModel = { m ->
-                                    File(modelDir(), m.fileName).delete()
+                                    // Every file of the row, not just the one it is named
+                                    // after: an ncnn model is a param/bin pair.
+                                    m.files.forEach { File(modelDir(), it).delete() }
                                     modelsVersion++
                                     // Hard: the file behind the loaded pipeline just went
                                     // away, and the redraw is what reports which one.
                                     previewOptionsChanged(hard = true)
                                 },
                                 onApiToggle = ::toggleApi,
+                                forcedBackend = forcedBackend,
+                                // null in a QNN-only build, which is what hides the
+                                // control rather than drawing a dead one.
+                                onForceBackend =
+                                    if (NativePipe.hasNcnnBackend()) ::onForceBackend
+                                    else null,
                             )
                         }
                     }
@@ -502,6 +549,34 @@ class MainActivity : ComponentActivity() {
             toggleApi(on = true, lan = false, remember = false)
     }
 
+    /**
+     * Pin the neural runtime, or "" for automatic.
+     *
+     * ⚠ The ORDER here is not arrangeable. `NativePipe.release()` must run FIRST, while the
+     * old backend is still the active one: the pipeline's handles are freed through the
+     * seam, and although they now carry the backend that opened them (ffnn.cpp), a pipeline
+     * half-owned by a runtime the process has moved off is not a thing to keep around.
+     * Then the setting, then the caches, then a fresh probe.
+     *
+     * Everything the previous runtime produced is discarded with it -- the loaded models,
+     * the swapped preview, and the answer to "which models are missing", which is a
+     * different question on each backend.
+     */
+    private fun onForceBackend(value: String) {
+        if (value == forcedBackend) return
+        NativePipe.release()
+        ModelPaths.setForcedBackend(this, value)
+        forcedBackend = value
+        deviceUi = DeviceUi()
+        probeDevice()
+        refreshModelsMissing()
+        refreshHostedFiles()
+        // Hard: the models behind the loaded pipeline are not merely stale, they are the
+        // other runtime's file format.
+        previewOptionsChanged(hard = true)
+        appendLog("runtime: " + (if (value.isEmpty()) "automatic" else value))
+    }
+
     // ------------------------------------------------------------------ device
 
     /** Measure the HTP once, off the main thread; the probe brings the backend up. */
@@ -522,6 +597,10 @@ class MainActivity : ComponentActivity() {
                 soc = kv["soc"]?.toIntOrNull() ?: 0,
                 tier = kv["tier"].orEmpty(),
                 fp16 = fp16,
+                // Reported even when ok=0: on a part with no Hexagon the HTP probe is
+                // MEANT to fail, and this is the row that says what is running instead.
+                backend = kv["backend"].orEmpty(),
+                gpu = kv["gpu"] == "1",
             )
         }
     }
@@ -685,6 +764,7 @@ class MainActivity : ComponentActivity() {
             val hostedLen = files.sumOf { hostedFiles[it.name] ?: 0L }
                 .takeIf { files.all { p -> p.name in hostedFiles } }
             return ModelRow(label, f.name, len, present, req,
+                            files = files.map { it.name },
                             downloadable = files.all { it.name in hostedFiles },
                             // Present, published, and a different file from the published
                             // one. Offline `hostedFiles` is empty and nothing is ever called
@@ -692,9 +772,15 @@ class MainActivity : ComponentActivity() {
                             // compare against -- never a scary row because the network is.
                             outdated = present && hostedLen != null && hostedLen != len)
         }
-        return required.map { (n, l) -> row(n, l, true) } +
+        return (required.map { (n, l) -> row(n, l, true) } +
             gate.map { (n, l) -> row(n, l, !gateOk) }.filter { it.present || it.downloadable } +
-            optional.map { (n, l) -> row(n, l, false) }.filter { it.present || it.downloadable }
+            optional.map { (n, l) -> row(n, l, false) }.filter { it.present || it.downloadable })
+            // One row per FILE SET, not per logical name. The two gate names resolve to two
+            // different context binaries on QNN and to the SAME `nsfw_2_sim` pair on ncnn --
+            // the quantised build exists because a QNN tier below v79 cannot finalize the
+            // fp32 gate, which is a QNN fact and means nothing here. Without this the ncnn
+            // inventory lists "Content checker" twice, both describing one file.
+            .distinctBy { it.fileName }
     }
 
     // ------------------------------------------------------------------ previews
@@ -1295,12 +1381,35 @@ class MainActivity : ComponentActivity() {
                 val models = modelDir()
                 models.listFiles()?.forEach { say("  ${it.name} ${it.length()} readable=${it.canRead()}") }
                 val libDir = applicationInfo.nativeLibraryDir
+                // Which RUNTIME, first and by name. The CLI printed a hardcoded "NPU" over
+                // an ncnn run once and the label cost an afternoon three weeks later
+                // (docs/backends.md); the same mistake was sitting in this function as a
+                // hardcoded "QNN init OK".
+                val backend = ModelPaths.backend(this@MainActivity)
+                say("backend: $backend" +
+                    (if (forcedBackend.isNotEmpty()) " (forced)" else " (auto)"))
+                // WHICH UNIT, not just which runtime. ncnn on the GPU and ncnn on the CPU
+                // differ by ~1.8x and by the thermal behaviour that decided the backend, so
+                // a run that does not say which one it took cannot be compared with one
+                // that does -- this is the CLI's hardcoded "NPU" label again, one level in.
+                if (backend == ModelPaths.NCNN_TIER) {
+                    // Asked directly, not read off `deviceUi`: this path returns from
+                    // onCreate before probeDevice() ever runs, so that field is still its
+                    // default and would report "no GPU" on every device.
+                    val gpu = NativePipe.probeDeviceInfo(libDir, libDir).contains("gpu=1")
+                    say("vulkan: " + (if (gpu) "yes, GPU preferred" else
+                                      "NO, everything on the CPU"))
+                }
                 say("tier: $tier")
-                say("fp16: ${NativePipe.probeFp16(libDir, libDir, canaryDir().absolutePath)}")
+                // The fp16 canary is a QNN measurement and brings QNN up to take it. On
+                // ncnn there is nothing to ask, and asking anyway would start the runtime
+                // this run is supposed to be avoiding.
+                if (backend != ModelPaths.NCNN_TIER)
+                    say("fp16: ${NativePipe.probeFp16(libDir, libDir, canaryDir().absolutePath)}")
                 if (!NativePipe.init(libDir, libDir, models.absolutePath, opts)) {
                     say("INIT FAILED: ${NativePipe.lastError()}"); return@launch
                 }
-                say("QNN init OK")
+                say("$backend init OK")
                 say("content gate: " +
                     (if (NativePipe.contentGateIsQuantised()) "W8A16 (biased)" else "fp32"))
                 // The app's OWN external files dir first. /sdcard/Download is owned by

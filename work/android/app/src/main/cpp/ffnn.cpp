@@ -38,6 +38,23 @@ DeviceInfo ncnnDeviceInfo();
 namespace {
 Backend g_active = Backend::Qnn;
 bool g_ready = false;
+
+// ---------------------------------------------------------------------------
+// A handle remembers WHICH BACKEND OPENED IT.
+// ---------------------------------------------------------------------------
+// `release`, `execute` and `outputShapes` used to dispatch on `g_active`, the backend
+// active RIGHT NOW. That is correct exactly as long as the backend never changes while a
+// handle is alive -- and 0.4.0 adds a developer switch that changes it, so it does not
+// hold any more. A QNN handle released while Ncnn is active would have been handed to
+// `delete static_cast<Model*>(h)`: a type-confused free of a QNN context, which is a crash
+// with no useful stack anywhere near the switch that caused it.
+//
+// One pointer of overhead per model -- there are seven of them for a whole pipeline -- to
+// make the wrong thing unrepresentable rather than merely documented.
+struct HandleRec {
+  Backend backend;
+  Handle inner;
+};
 }  // namespace
 
 bool init(Backend b, const InitSpec& spec) {
@@ -84,40 +101,50 @@ Handle open(const std::string& logicalName, Placement p) {
   // graph runs on the HTP, so "pin to CPU" is already satisfied in the only sense that
   // matters -- there is no less-safe unit to be pinned away from.
   if (!g_ready) return nullptr;
+  Handle inner = nullptr;
   switch (g_active) {
-    case Backend::Qnn: return qnnOpen(logicalName);
+    case Backend::Qnn: inner = qnnOpen(logicalName); break;
 #ifdef FFNN_HAVE_NCNN
-    case Backend::Ncnn: return ncnnOpen(logicalName, p);
+    case Backend::Ncnn: inner = ncnnOpen(logicalName, p); break;
 #else
     case Backend::Ncnn: return nullptr;
 #endif
     case Backend::Auto: return nullptr;
   }
-  return nullptr;
+  if (!inner) return nullptr;
+  return new HandleRec{g_active, inner};
 }
 
 void release(Handle h) {
   if (!h) return;
+  HandleRec* r = static_cast<HandleRec*>(h);
 #ifdef FFNN_HAVE_NCNN
-  if (g_active == Backend::Ncnn) { ncnnRelease(h); return; }
+  if (r->backend == Backend::Ncnn) ncnnRelease(r->inner);
+  else ffqnn::release(r->inner);
+#else
+  ffqnn::release(r->inner);
 #endif
-  ffqnn::release(h);
+  delete r;
 }
 
 bool execute(Handle h, const std::vector<std::string>& names,
              const std::vector<const float*>& data,
              std::vector<std::vector<float>>& outs) {
+  if (!h) return false;
+  HandleRec* r = static_cast<HandleRec*>(h);
 #ifdef FFNN_HAVE_NCNN
-  if (g_active == Backend::Ncnn) return ncnnExecute(h, names, data, outs);
+  if (r->backend == Backend::Ncnn) return ncnnExecute(r->inner, names, data, outs);
 #endif
-  return ffqnn::execute(h, names, data, outs);
+  return ffqnn::execute(r->inner, names, data, outs);
 }
 
 std::vector<std::vector<int>> outputShapes(Handle h) {
+  if (!h) return {};
+  HandleRec* r = static_cast<HandleRec*>(h);
 #ifdef FFNN_HAVE_NCNN
-  if (g_active == Backend::Ncnn) return ncnnOutputShapes(h);
+  if (r->backend == Backend::Ncnn) return ncnnOutputShapes(r->inner);
 #endif
-  return ffqnn::outputShapes(h);
+  return ffqnn::outputShapes(r->inner);
 }
 
 const char* lastError() {

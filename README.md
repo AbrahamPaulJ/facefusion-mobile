@@ -11,6 +11,9 @@ FaceFusion's.
 
 ## Features
 
+- **Runs without a Qualcomm NPU too, as of 0.4.0.** Phones with no Hexagon fall back to the
+  GPU (Vulkan) with the CPU underneath — the same result, about four times the time per
+  frame. A preview: see the roadmap.
 - **Fully offline.** Nothing you select ever leaves the phone. The only network request the
   app makes is the one-time model download.
 - **Before / after preview.** Scrub the trim handle and see the frame the swap will start
@@ -45,7 +48,9 @@ The app measures your chip at startup and downloads the matching build:
 | `v79` | Snapdragon 8 Elite (SM8750) |
 | `v81` | Snapdragon 8 Elite Gen 5 |
 
-Devices without a Qualcomm NPU are not supported — there is no CPU fallback.
+Devices without a Qualcomm NPU fall back to the **GPU + CPU** path added in 0.4.0. It is a
+preview: it produces the same result, at roughly four times the time per frame, and it has
+not yet been run on a non-Qualcomm phone. See the roadmap below.
 
 The NPU runtime for every Hexagon generation from v68 to v81 is bundled, so the app does
 not need to download anything to talk to your chip.
@@ -63,23 +68,29 @@ build, two generations old on that silicon, which is why owners reported around 
 The `v81` tier is now published. It has not been run on an 8 Elite Gen 5 yet; reports very
 welcome.
 
-**GPU and CPU support, for phones without a Qualcomm NPU.** Still the most requested thing
-that does not exist, and still not built — but it has now been measured rather than guessed
-at, on this device, with [ncnn](https://github.com/Tencent/ncnn):
+**GPU and CPU support, for phones without a Qualcomm NPU — now in the app, as a preview.**
+The most requested thing here for a year. It is built on
+[ncnn](https://github.com/Tencent/ncnn), running on the GPU through Vulkan with the CPU
+underneath, and 0.4.0 is the first release that carries it.
 
-| | Hexagon NPU | Vulkan (GPU) | CPU, 8 threads |
-|---|---:|---:|---:|
-| ms/frame | **18.5** | 240 | 232 |
+Measured on a Snapdragon 8 Elite, running the same clip through the same app twice:
 
-So a non-Qualcomm path would be roughly **13x slower** — seconds per frame, not a real-time
-preview. Two results decided the design anyway: the GPU is no faster than the CPU on raw
-throughput, but it costs **0.13 of a core against 6.6** and stays flat over a sustained run
-where the CPU degrades 40%. On a 300-frame clip that is the difference that matters, so the
-plan is Vulkan first with the CPU as a floor. Accuracy in fp16 survives comfortably.
+| | Hexagon NPU | GPU (Vulkan) + CPU |
+|---|---:|---:|
+| per frame, 720p | **~75 ms** | ~325 ms |
+| same output? | — | **yes, to 42.7 dB** |
 
-What remains is real work: the runtime is chosen but not written, the content checker is not
-converted for it, and the face enhancer does not convert cleanly yet. No promises about
-when.
+So expect **about four times longer** — a 10-second clip in a couple of minutes rather than
+twenty seconds — and the result is the same swap, not an approximation of it. Two things
+run on the CPU no matter what the phone has, because on the GPU they come out measurably
+wrong rather than merely slower: the content checker and the face enhancer. Loading the
+models takes about fifteen seconds the first time, against half a second on the NPU.
+
+⚠ **It is a preview and it is honest about that.** It has been exercised on one phone — a
+Qualcomm one, with its NPU deliberately switched off — because that is the hardware
+available here. No Mali, Exynos or Tensor device has run it yet. The model set is a separate
+~600 MB download. If you try it on a phone without a Snapdragon, **Settings → Share bug
+report** is the most useful thing you can send.
 
 **Chinese language support.** The app is English-only today, and every string in it is
 hardcoded rather than translatable, so this starts with plumbing before it starts with
@@ -107,11 +118,11 @@ will appear for stills first.
 
 ## Install
 
-1. Download the APK (~48 MB) from
+1. Download the APK (~66 MB) from
    [Releases](https://github.com/AbrahamPaulJ/facefusion-mobile/releases).
 2. Install it and open the app.
 3. Tap **Download models**. The app fetches the ~300 MB set for your chip from
-   [Hugging Face](https://huggingface.co/AbrahamPJ/facefusion-mobile-models-0.1.0).
+   [Hugging Face](https://huggingface.co/AbrahamPJ/facefusion-mobile-models).
 
 The download is resumable and every file is checksum-verified, so an interrupted transfer
 continues where it stopped rather than starting again. You will be warned before it starts
@@ -148,7 +159,7 @@ modifying or redistributing this.
 The neural models are converted from FaceFusion's and are **not uniformly permissive**:
 `yoloface_8n` is GPL-3.0, `arcface_w600k_r50` and `inswapper_128` are Non-Commercial, and
 `hyperswap_1a_256` is ResearchRAIL. See the
-[model repository](https://huggingface.co/AbrahamPJ/facefusion-mobile-models-0.1.0) for
+[model repository](https://huggingface.co/AbrahamPJ/facefusion-mobile-models) for
 details.
 
 The app icon is FaceFusion's, used with permission.

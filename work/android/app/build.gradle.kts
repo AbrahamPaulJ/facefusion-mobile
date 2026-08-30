@@ -42,6 +42,17 @@ val variantTag = if (hasContentGate) "" else "-dev"
 val idSuffix = if (hasContentGate) "" else ".dev"
 val appLabel = if (hasContentGate) "FaceFusion" else "FaceFusion Dev"
 
+// The ncnn backend (roadmap 6), on when its staged build is present.
+//
+// Derived from the tree rather than set by hand, for the reason `hasContentGate` is: a flag
+// that has to be remembered is a flag that is wrong in one of the two builds.  ncnn is
+// compiled in WSL by the Linux NDK and COPIED here by work/android/stage_ncnn.sh, because
+// Gradle and this CMake run on Windows and cannot reliably read a WSL UNC path.
+//
+// Delete work/android/ncnn/ and this builds exactly the QNN-only app 0.3.0 shipped.
+val ncnnDir = file("../ncnn")
+val hasNcnn = File(ncnnDir, "lib/libncnn.a").exists()
+
 android {
     namespace = "com.facefusion.mobile"
     compileSdk = 35
@@ -66,11 +77,23 @@ android {
         // The cost is two different APKs both calling themselves 0.2.0, so BugReport now
         // prints the code alongside the name -- that is what tells them apart in a report.
         //
+        // 8 = 0.4.0 (2026-08-30): the NON-QUALCOMM path, linked and shipped. FF_NCNN is on
+        // whenever work/android/ncnn/ is staged, the ncnn model set is selectable from the
+        // downloader, and Settings can pin the runtime so the path is testable on a phone
+        // that has a Hexagon -- which is the only kind of phone this project owns, and
+        // therefore the difference between "written" and "verified".
+        //
+        // ⚠ The APK grows from 48.0 MB to 65.7 MB (+17.7). The static libraries are ~168 MB
+        // and libffnative.so is 78.3 MB unpacked, so the INSTALLED footprint grows far more
+        // than the download does -- jniLibs are stored compressed and extracted at install.
+        // Measured, not estimated; the ~98 MB the handoff feared was the archive, not the
+        // cost.
+        //
         // 7 = 0.3.0 (2026-08-30): the tier FALLBACK -- a tier that loads but will not run
         // now falls back instead of leaving the app unusable -- the gate's failure reason
         // surfaced instead of discarded, and the v81 tier restored, which the fallback is
-        // what makes safe. The ffnn runtime seam and the ncnn backend are in the tree but
-        // NOT linked (FF_NCNN=OFF): unexercised through the APK, so not in this release.
+        // what makes safe. The ffnn runtime seam and the ncnn backend were in the tree but
+        // NOT linked (FF_NCNN=OFF): unexercised through the APK, so not in that release.
         //
         // 6 = 0.2.2 (2026-08-30): the CONTENT GATE input range. facefusion feeds nsfw_2
         // [-1,1] and this port fed it [0,1] from the gate's first release, which moves the
@@ -88,12 +111,25 @@ android {
         // ambiguous for the 47 people who already took the second one, so v0.2.1 is a NEW
         // tag and a NEW asset name, and v0.2.0 keeps pointing at what it always did.
         // archivesBaseName follows versionName, so the filename moves with it.
-        versionCode = 7
-        versionName = "0.3.0$variantTag"    // "-dev" == NO content gate
+        versionCode = 8
+        versionName = "0.4.0$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }
-        externalNativeBuild { cmake { arguments += listOf("-DANDROID_STL=c++_shared") } }
+        externalNativeBuild {
+            cmake {
+                arguments += listOf("-DANDROID_STL=c++_shared")
+                if (hasNcnn) {
+                    // invariantSeparatorsPath, not absolutePath: CMake reads a Windows
+                    // backslash as an escape, so the path arrives mangled and then simply
+                    // does not exist -- which surfaces as a missing header, not a bad path.
+                    arguments += listOf(
+                        "-DFF_NCNN=ON",
+                        "-DNCNN_DIR=" + ncnnDir.invariantSeparatorsPath,
+                    )
+                }
+            }
+        }
     }
 
     externalNativeBuild {
