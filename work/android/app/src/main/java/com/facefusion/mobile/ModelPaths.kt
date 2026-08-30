@@ -134,6 +134,26 @@ object ModelPaths {
         "nsfwq2" to "nsfw_2_sim",
     )
 
+    /** Every QNN arch tier the app knows how to name. Not what this chip can LOAD. */
+    val QNN_TIERS = listOf("v81", "v79", "v73", "v68")
+
+    /**
+     * Which model sets have files on this device, best-known first.
+     *
+     * Asked of the FILESYSTEM, not of the chip and not of the network. The Settings
+     * inventory needs it because the app can hold a set it is not currently using: a phone
+     * that ran the GPU path once has ~600 MB of ncnn weights that the NPU build never
+     * looks at, and before this there was no screen on which they existed. A user could
+     * neither see them nor delete them without switching the runtime back.
+     *
+     * The detector is the probe, as everywhere else: the downloader renames a file only
+     * after its hash matches, so a set is never half-present.
+     */
+    fun variantsOnDisk(ctx: Context): List<String> {
+        val d = dir(ctx)
+        return (QNN_TIERS + NCNN_TIER).filter { present(d, it, "yoloface") }
+    }
+
     fun tierChain(ctx: Context): List<String> {
         chainCache?.let { return it }
         val lib = ctx.applicationInfo.nativeLibraryDir

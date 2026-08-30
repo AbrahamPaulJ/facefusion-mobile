@@ -21,7 +21,6 @@
     <string name="nav_settings">設定</string>
 
     <string name="swap_source_face">來源人臉</string>
-    <string name="swap_source_selected">已選擇來源人臉</string>
     <string name="swap_source_pick">選擇來源人臉</string>
     <string name="swap_pane_original">原圖</string>
     <string name="swap_pane_original_at">原圖  %1$s</string>
@@ -35,6 +34,10 @@
     <string name="swap_swapping_frame">正在處理這一格…</string>
     <string name="swap_pick_a_source">請選擇來源人臉</string>
     <string name="swap_preparing_preview">正在準備預覽…</string>
+
+    <string name="swap_processors">處理器</string>
+    <string name="swap_proc_swapper">face_swapper</string>
+    <string name="swap_proc_enhancer">face_enhancer</string>
 
     <string name="swap_clip">片段</string>
     <string name="swap_clip_summary">%1$d 影格，共 %2$s   %3$d fps</string>
@@ -116,10 +119,6 @@
     <string name="opt_face_enhancer">人臉增強</string>
     <string name="opt_enhancer_summary">gpen_bfr_256   混合 %1$s</string>
     <string name="opt_enhancer_off_summary">關閉</string>
-    <string name="opt_enhancer">增強</string>
-    <string name="opt_on">開啟</string>
-    <string name="opt_off">關閉</string>
-    <string name="opt_enhancer_hint">還原換臉過程中失去的細節 —— 每張臉約增加 4 ms</string>
     <string name="opt_blend">混合</string>
     <string name="opt_blend_hint_full">只使用增強後的結果</string>
     <string name="opt_blend_hint_none">沒有效果 —— 換臉結果維持不變</string>
@@ -151,6 +150,11 @@
     <string name="model_content_checker_quantised">內容檢查（量化版）</string>
     <string name="model_enhancer">人臉增強</string>
     <string name="model_landmark_refiner">關鍵點細化</string>
+
+    <string name="set_models_npu">NPU 模型 (%1$s)</string>
+    <string name="set_models_gpu">GPU + CPU 模型</string>
+    <string name="set_models_inactive_note">這支手機目前沒有使用它們。保留在此以便刪除，或在切換執行方式後重新使用。</string>
+    <string name="set_models_none">未安裝</string>
 
     <string name="set_this_device">本機</string>
     <string name="set_runtime">執行方式</string>

@@ -18,6 +18,7 @@ import com.facefusion.mobile.ApiService
 import com.facefusion.mobile.ModelDownload
 import androidx.compose.ui.res.stringResource
 import com.facefusion.mobile.R
+import androidx.compose.runtime.saveable.rememberSaveable
 
 /** One context binary on disk, or one that should be and is not. */
 data class ModelRow(
@@ -55,6 +56,26 @@ data class ModelRow(
     val files: List<String> = listOf(fileName),
 )
 
+/**
+ * One model SET, as the inventory shows it.
+ *
+ * There is more than one on a device that has run both runtimes -- a QNN tier is context
+ * binaries named after the arch, the ncnn set is param/bin pairs named after the ONNX graph
+ * -- and only one of them is in use at a time. The other used to be invisible: ~600 MB of
+ * weights the active build never looks at, with no screen on which they existed and no way
+ * to delete them short of switching the runtime back.
+ *
+ * @param active the set this phone is actually running. Shown open and offering downloads;
+ *   the others collapse and only offer deletion, because fetching a set you are not using
+ *   is not something to invite.
+ */
+data class ModelSection(
+    val title: String,
+    val summary: String,
+    val rows: List<ModelRow>,
+    val active: Boolean,
+)
+
 /** What the HTP said about itself, already parsed out of `NativePipe.probeDeviceInfo`. */
 data class DeviceUi(
     val ok: Boolean = false,
@@ -81,7 +102,7 @@ private fun mb(bytes: Long) = "%.1f MB".format(bytes / 1048576.0)
 
 @Composable
 fun SettingsScreen(
-    models: List<ModelRow>,
+    sections: List<ModelSection>,
     modelDirPath: String,
     device: DeviceUi,
     onDeleteModel: (ModelRow) -> Unit,
@@ -115,83 +136,114 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         // ---------------------------------------------------------------- models
-        Caption(stringResource(R.string.set_models))
-        val onDisk = models.filter { it.present }.sumOf { it.bytes }
-        Text(
-            stringResource(R.string.set_models_summary,
-                           models.count { it.present }, models.size, mb(onDisk)) +
-                (models.count { it.outdated }
-                    .let { if (it > 0) stringResource(R.string.set_models_updates, it) else "" }),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(vertical = 4.dp)) {
-                models.forEachIndexed { i, m ->
-                    if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(m.label, style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                // ONE phrase for one state.  "missing" for required and
-                                // "not installed" for optional read as two different
-                                // STATES when they are the same state at two severities --
-                                // and the severity was already carried by the colour
-                                // below.  The suffix says it in words instead, because
-                                // colour alone is not something every reader gets.
-                                // The FILENAME is never translated -- it is the name
-                                // on disk and in the manifest.
-                                if (m.outdated)
-                                    m.fileName + "   " + mb(m.bytes) + "   " +
-                                        stringResource(R.string.set_update_available)
-                                else if (m.present) m.fileName + "   " + mb(m.bytes)
-                                else m.fileName + "   " +
-                                     stringResource(R.string.set_not_installed) +
-                                     (if (m.required)
-                                          " " + stringResource(R.string.set_required_suffix)
-                                      else ""),
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 10.sp,
-                                color = if (m.outdated) MaterialTheme.colorScheme.primary
-                                else if (m.present || !m.required)
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                else MaterialTheme.colorScheme.error,
-                            )
-                        }
-                        // ONE kind of control for both directions. A trash icon on one
-                        // row and a "Download" link on the next made two halves of the
-                        // same decision look like different kinds of thing, and the icon
-                        // was the destructive one -- the half that should read loudest.
-                        if (m.outdated) {
-                            // Still ONE control, still pointing the way the row needs to
-                            // go. Delete is not offered here: the file works, it is merely
-                            // superseded, and the useful action is to replace it. Deleting
-                            // it first would reach the same place through a broken app.
-                            TextButton(onDownloadModel, enabled = !ModelDownload.running) {
-                                Text(stringResource(if (ModelDownload.running)
-                                                       R.string.set_updating
-                                                   else R.string.set_update))
+        //
+        // One block per model SET, not one list. A device that has run both runtimes
+        // holds two, only one of which is in use -- and the other used to be invisible:
+        // ~600 MB of ncnn weights that the NPU build never looks at, with no screen on
+        // which they existed and no way to remove them short of switching runtime back.
+        //
+        // The active set is open and offers downloads. The rest are collapsed and offer
+        // only deletion, which is the action they are there for.
+        val modelCard: @Composable (List<ModelRow>, Boolean) -> Unit = { rows, active ->
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(vertical = 4.dp)) {
+                    rows.forEachIndexed { i, m ->
+                        if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(m.label, style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    // ONE phrase for one state.  "missing" for required and
+                                    // "not installed" for optional read as two different
+                                    // STATES when they are the same state at two severities --
+                                    // and the severity was already carried by the colour
+                                    // below.  The suffix says it in words instead, because
+                                    // colour alone is not something every reader gets.
+                                    // The FILENAME is never translated -- it is the name
+                                    // on disk and in the manifest.
+                                    if (m.outdated)
+                                        m.fileName + "   " + mb(m.bytes) + "   " +
+                                            stringResource(R.string.set_update_available)
+                                    else if (m.present) m.fileName + "   " + mb(m.bytes)
+                                    else m.fileName + "   " +
+                                         stringResource(R.string.set_not_installed) +
+                                         (if (m.required)
+                                              " " + stringResource(R.string.set_required_suffix)
+                                          else ""),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 10.sp,
+                                    color = if (m.outdated) MaterialTheme.colorScheme.primary
+                                    else if (m.present || !m.required)
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    else MaterialTheme.colorScheme.error,
+                                )
                             }
-                        } else if (m.present) {
-                            TextButton({ confirming = m }, enabled = !ModelDownload.running) {
-                                Text(stringResource(R.string.set_delete),
-                                     color = MaterialTheme.colorScheme.error)
-                            }
-                        } else if (m.downloadable) {
-                            TextButton(onDownloadModel, enabled = !ModelDownload.running) {
-                                Text(stringResource(if (ModelDownload.running)
-                                                       R.string.set_downloading
-                                                   else R.string.set_download))
+                            // ONE kind of control for both directions. A trash icon on one
+                            // row and a "Download" link on the next made two halves of the
+                            // same decision look like different kinds of thing, and the icon
+                            // was the destructive one -- the half that should read loudest.
+                            if (m.outdated) {
+                                // Still ONE control, still pointing the way the row needs to
+                                // go. Delete is not offered here: the file works, it is merely
+                                // superseded, and the useful action is to replace it. Deleting
+                                // it first would reach the same place through a broken app.
+                                TextButton(onDownloadModel, enabled = !ModelDownload.running) {
+                                    Text(stringResource(if (ModelDownload.running)
+                                                           R.string.set_updating
+                                                       else R.string.set_update))
+                                }
+                            } else if (m.present) {
+                                TextButton({ confirming = m }, enabled = !ModelDownload.running) {
+                                    Text(stringResource(R.string.set_delete),
+                                         color = MaterialTheme.colorScheme.error)
+                                }
+                            } else if (m.downloadable && active) {
+                                TextButton(onDownloadModel, enabled = !ModelDownload.running) {
+                                    Text(stringResource(if (ModelDownload.running)
+                                                           R.string.set_downloading
+                                                       else R.string.set_download))
+                                }
                             }
                         }
                     }
                 }
             }
+        }
+
+        sections.forEach { section ->
+            val onDisk = section.rows.filter { it.present }.sumOf { it.bytes }
+            val summary = stringResource(R.string.set_models_summary,
+                                         section.rows.count { it.present },
+                                         section.rows.size, mb(onDisk)) +
+                (section.rows.count { it.outdated }
+                    .let { if (it > 0) stringResource(R.string.set_models_updates, it) else "" })
+            if (section.active) {
+                Caption(section.title)
+                Text(
+                    summary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                modelCard(section.rows, true)
+            } else {
+                // Collapsed by default. It is storage the user is not using, so it
+                // should be findable rather than prominent.
+                var open by rememberSaveable(section.title) { mutableStateOf(false) }
+                Accordion(section.title, summary, open, { open = !open }) {
+                    Text(
+                        stringResource(R.string.set_models_inactive_note),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    modelCard(section.rows, false)
+                }
+            }
+            Spacer(Modifier.height(6.dp))
         }
 
         Spacer(Modifier.height(6.dp))

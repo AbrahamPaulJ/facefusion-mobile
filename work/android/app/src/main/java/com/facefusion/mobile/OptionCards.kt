@@ -267,14 +267,8 @@ fun FaceEnhancerCard(
         else stringResource(R.string.opt_enhancer_off_summary),
         expanded, onToggle,
     ) {
-        OptionSegments(
-            stringResource(R.string.opt_enhancer),
-            listOf(false to stringResource(R.string.opt_off),
-                   true to stringResource(R.string.opt_on)),
-            opts.faceEnhance,
-            { onChange(opts.copy(faceEnhance = it)) },
-            hint = stringResource(R.string.opt_enhancer_hint),
-        )
+        // The on/off lives in the Processors row on the Swap screen now. Two controls for
+        // one boolean is two places to look and one of them to be surprised by.
         if (opts.faceEnhance) {
             OptionSlider(
                 stringResource(R.string.opt_blend), opts.enhanceBlend,

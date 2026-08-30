@@ -18,7 +18,6 @@
     <string name="nav_settings">设置</string>
 
     <string name="swap_source_face">源人脸</string>
-    <string name="swap_source_selected">已选择源人脸</string>
     <string name="swap_source_pick">选择源人脸</string>
     <string name="swap_pane_original">原图</string>
     <string name="swap_pane_original_at">原图  %1$s</string>
@@ -32,6 +31,10 @@
     <string name="swap_swapping_frame">正在处理这一帧…</string>
     <string name="swap_pick_a_source">请选择源人脸</string>
     <string name="swap_preparing_preview">正在准备预览…</string>
+
+    <string name="swap_processors">处理器</string>
+    <string name="swap_proc_swapper">face_swapper</string>
+    <string name="swap_proc_enhancer">face_enhancer</string>
 
     <string name="swap_clip">片段</string>
     <string name="swap_clip_summary">%1$d 帧，共 %2$s   %3$d fps</string>
@@ -113,10 +116,6 @@
     <string name="opt_face_enhancer">人脸增强</string>
     <string name="opt_enhancer_summary">gpen_bfr_256   混合 %1$s</string>
     <string name="opt_enhancer_off_summary">关闭</string>
-    <string name="opt_enhancer">增强</string>
-    <string name="opt_on">开启</string>
-    <string name="opt_off">关闭</string>
-    <string name="opt_enhancer_hint">恢复换脸过程中损失的细节 —— 每张脸约增加 4 ms</string>
     <string name="opt_blend">混合</string>
     <string name="opt_blend_hint_full">只使用增强后的结果</string>
     <string name="opt_blend_hint_none">无效果 —— 换脸结果保持不变</string>
@@ -148,6 +147,11 @@
     <string name="model_content_checker_quantised">内容检查（量化版）</string>
     <string name="model_enhancer">人脸增强</string>
     <string name="model_landmark_refiner">关键点细化</string>
+
+    <string name="set_models_npu">NPU 模型 (%1$s)</string>
+    <string name="set_models_gpu">GPU + CPU 模型</string>
+    <string name="set_models_inactive_note">这台手机当前没有使用它们。保留在此以便删除，或在切换运行方式后重新使用。</string>
+    <string name="set_models_none">未安装</string>
 
     <string name="set_this_device">本机</string>
     <string name="set_runtime">运行方式</string>

@@ -510,7 +510,7 @@ class MainActivity : ComponentActivity() {
                             )
 
                             Screen.Settings -> SettingsScreen(
-                                models = modelRows(),
+                                sections = modelSections(),
                                 modelDirPath = modelDir().absolutePath,
                                 device = deviceUi,
                                 onDownloadModel = { onDownloadTapped() },
@@ -769,10 +769,30 @@ class MainActivity : ComponentActivity() {
      * Called during composition, so reading [modelsVersion] here is what makes a delete
      * redraw the list -- the files themselves are not observable state.
      */
-    private fun modelRows(): List<ModelRow> {
+    /**
+     * Every model SET on this device: the one in use, then any other that has files.
+     *
+     * A phone that has run both runtimes holds two, and before this only the active one
+     * appeared anywhere -- so the ~600 MB of ncnn weights an NPU build never touches had no
+     * screen on which they existed, and no way to be deleted short of switching runtime
+     * back and forth.
+     *
+     * The inactive sets are read from DISK rather than from the chip or the manifest: what
+     * matters about them is only that they are taking up space.
+     */
+    private fun modelSections(): List<ModelSection> {
+        val active = tier
+        val others = ModelPaths.variantsOnDisk(this).filter { it != active }
+        fun title(v: String) =
+            if (v == ModelPaths.NCNN_TIER) getString(R.string.set_models_gpu)
+            else getString(R.string.set_models_npu, v)
+        return listOf(ModelSection(title(active), "", modelRows(active), active = true)) +
+            others.map { ModelSection(title(it), "", modelRows(it), active = false) }
+    }
+
+    private fun modelRows(t: String): List<ModelRow> {
         val ignored = modelsVersion
         check(ignored >= 0)
-        val t = tier
         // "Required" has to mean what ModelPaths.missing() ENFORCES, or this screen tells
         // a user everything is fine about a device that then refuses to swap.
         //

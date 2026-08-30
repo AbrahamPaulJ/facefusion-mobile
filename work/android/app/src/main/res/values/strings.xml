@@ -34,7 +34,6 @@
 
     <!-- ==================================================== swap screen -->
     <string name="swap_source_face">Source face</string>
-    <string name="swap_source_selected">Source face selected</string>
     <string name="swap_source_pick">Pick source face</string>
     <string name="swap_pane_original">Original</string>
     <!-- %1$s is a timestamp like "0.42s" -->
@@ -49,6 +48,10 @@
     <string name="swap_swapping_frame">Swapping this frame…</string>
     <string name="swap_pick_a_source">Pick a source face</string>
     <string name="swap_preparing_preview">Preparing preview…</string>
+
+    <string name="swap_processors">Processors</string>
+    <string name="swap_proc_swapper">face_swapper</string>
+    <string name="swap_proc_enhancer">face_enhancer</string>
 
     <string name="swap_clip">Clip</string>
     <!-- %1$d frames, %2$s duration, %3$d frames per second -->
@@ -143,10 +146,6 @@
     <!-- %1$s is the blend amount -->
     <string name="opt_enhancer_summary">gpen_bfr_256   blend %1$s</string>
     <string name="opt_enhancer_off_summary">off</string>
-    <string name="opt_enhancer">Enhancer</string>
-    <string name="opt_on">On</string>
-    <string name="opt_off">Off</string>
-    <string name="opt_enhancer_hint">restores detail the swapper loses — about +4 ms per face</string>
     <string name="opt_blend">Blend</string>
     <string name="opt_blend_hint_full">the enhancer\'s output alone</string>
     <string name="opt_blend_hint_none">no effect — the swap is left untouched</string>
@@ -187,6 +186,12 @@
     <string name="model_landmark_refiner">Landmark refiner</string>
 
     <!-- ==================================================== settings: device -->
+    <!-- Model set headings. %1$s is the tier or runtime name, never translated. -->
+    <string name="set_models_npu">NPU models (%1$s)</string>
+    <string name="set_models_gpu">GPU + CPU models</string>
+    <string name="set_models_inactive_note">Not in use on this phone right now. Kept so it can be deleted, or used again if you switch the runtime.</string>
+    <string name="set_models_none">nothing installed</string>
+
     <string name="set_this_device">This device</string>
     <string name="set_runtime">Runtime</string>
     <string name="set_runtime_npu">Hexagon NPU</string>
