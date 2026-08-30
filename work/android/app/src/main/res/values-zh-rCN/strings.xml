@@ -212,7 +212,6 @@
     <string name="status_swapping">正在换脸…</string>
     <string name="status_done">完成 - %1$d KB</string>
     <string name="status_failed">失败：%1$s</string>
-    <string name="status_failed_prefix">失败</string>
     <string name="status_target_ready_video">目标已就绪：%1$d x %2$d，%3$s</string>
     <string name="status_target_ready_image">目标已就绪：%1$d x %2$d</string>
     <string name="status_cannot_read_video">无法读取视频：%1$s</string>

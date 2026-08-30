@@ -262,7 +262,6 @@
     <string name="status_done">Done - %1$d KB</string>
     <!-- %1$s is an underlying error message, which is not translated -->
     <string name="status_failed">Failed: %1$s</string>
-    <string name="status_failed_prefix">Failed</string>
     <!-- %1$d width, %2$d height, %3$s duration -->
     <string name="status_target_ready_video">Target ready: %1$d x %2$d, %3$s</string>
     <!-- %1$d width, %2$d height -->
