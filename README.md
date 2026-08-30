@@ -21,8 +21,9 @@ FaceFusion's.
   photo's own resolution — there is nothing to run, so there is no button to press.
 - **Higher-resolution output.** Pixel boost renders the swapped face at 512, 768 or 1024
   instead of 256, at a proportional cost in time.
-- **Optional face enhancer.** `gpen_bfr_256` restores detail in the swapped face. It is a
-  separate 28 MB download from **Settings → Models**, and the app works without it.
+- **Optional face enhancer.** `gpen_bfr_256` restores detail in the swapped face, for about
+  2.5 ms more per face. It is a ~25 MB download from **Settings → Models**, and the app
+  works without it.
 - **Use it from a computer.** Turn on **Settings → Remote API** and open the address it
   shows in a browser on your PC: drop in a face and a target, and the phone does the work.
   There is an HTTP API behind that page for scripting.
@@ -42,38 +43,47 @@ The app measures your chip at startup and downloads the matching build:
 | `v68` | Snapdragon 888 and older, 8 Gen 1 (v69), or parts with under 8 MB VTCM |
 | `v73` | 8 Gen 2 (v73), 8 Gen 3 (v75), and v79 parts other than the SM8750 |
 | `v79` | Snapdragon 8 Elite (SM8750) |
-
-Snapdragon 8 Elite Gen 5 (v81) parts run the `v73` build for now — see the roadmap below.
+| `v81` | Snapdragon 8 Elite Gen 5 |
 
 Devices without a Qualcomm NPU are not supported — there is no CPU fallback.
 
 The NPU runtime for every Hexagon generation from v68 to v81 is bundled, so the app does
 not need to download anything to talk to your chip.
 
-> **Tested on:** Snapdragon 8 Elite (Galaxy S25 Ultra). The `v68` and `v73` builds run on
-> the same code path but have not yet been exercised on real hardware of those
-> generations. If you try one, **Settings → Share bug report** is the fastest way to tell
-> me what happened.
+> **Tested on:** Snapdragon 8 Elite (Galaxy S25 Ultra). The `v68`, `v73` and `v81` builds
+> run the same code path and are verified against the `v79` build for accuracy, but none of
+> them has been exercised on real hardware of its own generation. The `v81` tier in
+> particular is new in 0.2.1 and no 8 Elite Gen 5 has yet run it. If you try one,
+> **Settings → Share bug report** is the fastest way to tell me what happened.
 
 ## Roadmap
 
-**A native v81 build, for Snapdragon 8 Elite Gen 5.** v81 phones (S26 Ultra) currently run
-the `v73` build, which is two generations old on that silicon and is why owners have
-reported around 9 fps. The app already prefers a `v81` build and falls back cleanly when
-one is not published, so this is conversion work rather than app work: every graph has to
-be rebuilt against the v81 config and checked for accuracy the same way the others were.
-The face enhancer is already converted for v81; the rest are not.
+**~~A native v81 build~~ — shipped in 0.2.1.** v81 phones used to fall back to the `v73`
+build, two generations old on that silicon, which is why owners reported around 9 fps.
+The `v81` tier is now published. It has not been run on an 8 Elite Gen 5 yet; reports very
+welcome.
 
-**CPU support, for phones without a Qualcomm NPU.** Today the answer is simply no — every
-graph is a QNN context binary compiled for a specific Hexagon architecture, and there is no
-second path through the pipeline. Adding one means a whole separate runtime (ONNX Runtime or
-a hand-written path) alongside the geometry that already exists in C++, and it would be far
-slower than 18 ms a frame. It is the most requested thing that does not exist; it is also
-the largest single piece of work on this list, so no promises about when.
+**GPU and CPU support, for phones without a Qualcomm NPU.** Still the most requested thing
+that does not exist, and still not built — but it has now been measured rather than guessed
+at, on this device, with [ncnn](https://github.com/Tencent/ncnn):
+
+| | Hexagon NPU | Vulkan (GPU) | CPU, 8 threads |
+|---|---:|---:|---:|
+| ms/frame | **18.5** | 240 | 232 |
+
+So a non-Qualcomm path would be roughly **13x slower** — seconds per frame, not a real-time
+preview. Two results decided the design anyway: the GPU is no faster than the CPU on raw
+throughput, but it costs **0.13 of a core against 6.6** and stays flat over a sustained run
+where the CPU degrades 40%. On a 300-frame clip that is the difference that matters, so the
+plan is Vulkan first with the CPU as a floor. Accuracy in fp16 survives comfortably.
+
+What remains is real work: the runtime is chosen but not written, the content checker is not
+converted for it, and the face enhancer does not convert cleanly yet. No promises about
+when.
 
 ## Install
 
-1. Download the APK (~46 MB) from
+1. Download the APK (~48 MB) from
    [Releases](https://github.com/AbrahamPaulJ/facefusion-mobile/releases).
 2. Install it and open the app.
 3. Tap **Download models**. The app fetches the ~300 MB set for your chip from
