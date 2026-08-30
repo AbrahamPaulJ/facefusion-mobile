@@ -13,6 +13,9 @@ work/calib/
 # makes necessary -- was NOT ignored, in a public repo, for licensed weights.
 work/device/**/*.bin
 work/device/**/*_net.json
+# ncnn model files are derived from the same weights the .bin rule protects: the
+# .bin was already ignored, the .param -- the graph topology -- was not.
+work/device/**/*.ncnn.param
 # The backup of what is HOSTED -- convert.sh overwrites work/device/<name>_v79.bin in
 # place, so without this the shipped build is one rebuild away from being unrecoverable.
 work/device/shipped_v79/

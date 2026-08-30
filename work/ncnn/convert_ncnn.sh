@@ -54,14 +54,24 @@ convert () {
     echo "  layer types: $(awk 'NR>2{print $1}' "$name.ncnn.param" | sort -u | tr '\n' ' ')"
 }
 
-convert 2dfan4_heatmaps        "[1,3,256,256]"
-convert arcface_w600k_r50_b1   "[1,3,112,112]"
-convert gpen_bfr_256_sim       "[1,3,256,256]"
-convert hyperswap_1a_256_fp32  "[1,512],[1,3,256,256]"
-convert yoloface_8n_b1         "[1,3,640,640]"
+# Convert everything, or just the graphs named on the command line:
+#   convert_ncnn.sh                     # all of them
+#   FORCE=1 convert_ncnn.sh gpen_bfr_256_sim
+# Reconverting hyperswap costs an 805 MB copy across the 9p mount, so a subset matters.
+WANTED="$*"
+want () { [ -z "$WANTED" ] && return 0; case " $WANTED " in *" $1 "*) return 0;; *) return 1;; esac; }
+
+want 2dfan4_heatmaps       && convert 2dfan4_heatmaps        "[1,3,256,256]"
+want arcface_w600k_r50_b1  && convert arcface_w600k_r50_b1   "[1,3,112,112]"
+# The enhancer goes through pnnx_prep.py first -- pnnx will not fold a transB=0 Gemm
+# into InnerProduct, and GPEN's style mapping network is nine of them:
+#   py -3.10 work/ncnn/pnnx_prep.py work/onnx/gpen_bfr_256_sim.onnx work/onnx/gpen_ncnn.onnx
+want gpen_ncnn             && convert gpen_ncnn              "[1,3,256,256]"
+want hyperswap_1a_256_fp32 && convert hyperswap_1a_256_fp32  "[1,512],[1,3,256,256]"
+want yoloface_8n_b1        && convert yoloface_8n_b1         "[1,3,640,640]"
 # The content gate. It is MANDATORY on both branch lines -- ffpipe treats a missing gate as
 # an init failure, not a fallback -- so no non-Qualcomm build can ship until this converts.
-convert nsfw_2_sim             "[1,3,384,384]"
+want nsfw_2_sim            && convert nsfw_2_sim             "[1,3,384,384]"
 
 echo "=== ALL DONE ==="
 ls -la "$DST"/*.ncnn.param
