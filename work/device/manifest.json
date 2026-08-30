@@ -105,41 +105,6 @@
         }
       ],
       "bytes": 317385664
-    },
-    "v81": {
-      "files": [
-        {
-          "name": "yoloface_v81.bin",
-          "bytes": 4097168,
-          "sha256": "39ac701503ca6ea1e96a01c01ed783d5c008370276b4109f56545b4bc51ea374"
-        },
-        {
-          "name": "fan2d_v81.bin",
-          "bytes": 25120192,
-          "sha256": "10e97d7e0d97b19ddc36eb892edcc74cadcb888cc873b12a55ebb2581fec2e73"
-        },
-        {
-          "name": "arcface_v81.bin",
-          "bytes": 44155536,
-          "sha256": "1ae1d14e3bc61f1008a590dea02e09dcbfea952d50986205511cebecb0dbce5e"
-        },
-        {
-          "name": "hyperswap_v81.bin",
-          "bytes": 206659960,
-          "sha256": "ea6aacddb3e4d3d2919eb0829c54f5dce17280b753d7474140b148332ac06239"
-        },
-        {
-          "name": "nsfwq_v81.bin",
-          "bytes": 6666200,
-          "sha256": "3f4ec9844b761fecc2749d6060ae340dbce0a5c9d477915b1ffd07ababb6849d"
-        },
-        {
-          "name": "gpen_v81.bin",
-          "bytes": 24913112,
-          "sha256": "454751314d5f9010d9708bdacbb4cb8676ef599796122b00c7cdc404cec4139e"
-        }
-      ],
-      "bytes": 311612168
     }
   },
   "ncnn_preview": {
@@ -207,5 +172,41 @@
       }
     ],
     "bytes": 604114036
+  },
+  "v81_withheld": {
+    "reason": "Withheld 2026-08-30 after an 8 Elite Gen 5 report: Pipeline::init fails, so contentScore returns NaN (\"pipeline not initialised\") and the UI shows \"content check could not run\". These binaries have never been executed on v81 silicon. Files remain hosted so the tier can be restored in one commit once the cause is known.",
+    "files": [
+      {
+        "name": "yoloface_v81.bin",
+        "bytes": 4097168,
+        "sha256": "39ac701503ca6ea1e96a01c01ed783d5c008370276b4109f56545b4bc51ea374"
+      },
+      {
+        "name": "fan2d_v81.bin",
+        "bytes": 25120192,
+        "sha256": "10e97d7e0d97b19ddc36eb892edcc74cadcb888cc873b12a55ebb2581fec2e73"
+      },
+      {
+        "name": "arcface_v81.bin",
+        "bytes": 44155536,
+        "sha256": "1ae1d14e3bc61f1008a590dea02e09dcbfea952d50986205511cebecb0dbce5e"
+      },
+      {
+        "name": "hyperswap_v81.bin",
+        "bytes": 206659960,
+        "sha256": "ea6aacddb3e4d3d2919eb0829c54f5dce17280b753d7474140b148332ac06239"
+      },
+      {
+        "name": "nsfwq_v81.bin",
+        "bytes": 6666200,
+        "sha256": "3f4ec9844b761fecc2749d6060ae340dbce0a5c9d477915b1ffd07ababb6849d"
+      },
+      {
+        "name": "gpen_v81.bin",
+        "bytes": 24913112,
+        "sha256": "454751314d5f9010d9708bdacbb4cb8676ef599796122b00c7cdc404cec4139e"
+      }
+    ],
+    "bytes": 311612168
   }
 }
