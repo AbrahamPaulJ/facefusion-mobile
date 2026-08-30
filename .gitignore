@@ -24,6 +24,8 @@ work/device/out/
 work/device/prof/
 work/device/raw/
 work/device/ffswap
+# the ncnn bench runner, built from work/device/ncnn_run.cpp against ~/ncnn (Android+Vulkan)
+work/device/ncnn_run
 work/output/
 
 # Qualcomm QAIRT SDK runtime -- proprietary, redistributed only with the SDK licence.
