@@ -43,6 +43,10 @@ import com.facefusion.mobile.R
 import kotlinx.coroutines.delay
 import java.io.File
 import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 
 /**
  * FaceFusion's mark, on a light plate.
@@ -210,9 +214,36 @@ fun PreviewPane(
                     if (zoom != null && bitmap != null) {
                         Modifier
                             .pointerInput(zoom) {
-                                detectTransformGestures { _, pan, z, _ ->
-                                    zoom.transform(z, pan, size.width.toFloat(),
-                                                   size.height.toFloat())
+                                // ⚠ NOT detectTransformGestures, which is what this was.
+                                // That helper treats a ONE-FINGER drag as a pan and
+                                // consumes it, so the parent verticalScroll never saw the
+                                // gesture: a finger that happened to land on a pane could
+                                // not scroll the page, and two of the four things on the
+                                // Swap screen are panes.
+                                //
+                                // Consume only when the gesture is really ours:
+                                //   * two or more pointers -- a pinch, which is the only
+                                //     way to zoom;
+                                //   * or one pointer while ALREADY zoomed, which is a pan
+                                //     of an image bigger than its box. Double-tap resets,
+                                //     so there is always a way back to scrolling.
+                                // One finger at scale 1 is left entirely alone and falls
+                                // through to the scroll.
+                                awaitEachGesture {
+                                    awaitFirstDown(requireUnconsumed = false)
+                                    do {
+                                        val ev = awaitPointerEvent()
+                                        val mine = ev.changes.size > 1 || zoom.zoomed
+                                        if (mine) {
+                                            val z = ev.calculateZoom()
+                                            val pan = ev.calculatePan()
+                                            if (z != 1f || pan != Offset.Zero) {
+                                                zoom.transform(z, pan, size.width.toFloat(),
+                                                               size.height.toFloat())
+                                                ev.changes.forEach { it.consume() }
+                                            }
+                                        }
+                                    } while (ev.changes.any { it.pressed })
                                 }
                             }
                             .pointerInput(zoom, onClick) {

@@ -77,6 +77,10 @@ android {
         // The cost is two different APKs both calling themselves 0.2.0, so BugReport now
         // prints the code alongside the name -- that is what tells them apart in a report.
         //
+        // 11 = 0.4.3 (2026-08-30): the swapped pane redrawing when you seek AFTER a run,
+        // preview panes no longer eating the page scroll, and the Remote API's notification
+        // stopping looking like an upload.
+        //
         // 10 = 0.4.2 (2026-08-30): the Settings inventory listing EVERY model set rather
         // than only the one in use, rotation no longer destroying the screen, the enhancer
         // promoted to a Processors row, the source picker becoming a pane, and the two
@@ -128,8 +132,8 @@ android {
         // ambiguous for the 47 people who already took the second one, so v0.2.1 is a NEW
         // tag and a NEW asset name, and v0.2.0 keeps pointing at what it always did.
         // archivesBaseName follows versionName, so the filename moves with it.
-        versionCode = 10
-        versionName = "0.4.2$variantTag"    // "-dev" == NO content gate
+        versionCode = 11
+        versionName = "0.4.3$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }

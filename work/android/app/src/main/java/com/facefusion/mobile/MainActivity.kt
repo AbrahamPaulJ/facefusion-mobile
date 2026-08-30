@@ -1369,6 +1369,18 @@ class MainActivity : ComponentActivity() {
                 // The run kept whatever it had when Cancel was pressed, so say which it is.
                 outputPartial = cancelRequested
                 status = getString(R.string.status_done, it.length() / 1024)
+                // ⚠ RE-WARM THE PREVIEW. `runSwap` opens with invalidatePreview(), which
+                // clears previewWarm -- and `onTrimChanged` only redraws the swapped pane
+                // `if (previewWarm)`, on the reasoning that the first model load costs
+                // seconds and has to be asked for. True before the first run; false after
+                // one, where the models are demonstrably loaded and the user has already
+                // paid. The effect was a swapped pane frozen on its last frame while
+                // seeking moved the original beside it, which reads as the swap being
+                // wrong rather than the pane being stale.
+                //
+                // A forced refresh here rebuilds the engine once and puts previewWarm back,
+                // so every later seek takes the normal warm path.
+                refreshSwapped(force = true)
             }.onFailure {
                 // A refusal is already a finished sentence aimed at the user, and it is not
                 // a fault: prefixing it with "Failed:" and dumping a stack trace would

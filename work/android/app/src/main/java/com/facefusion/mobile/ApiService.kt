@@ -88,7 +88,11 @@ class ApiService : Service() {
             this, 1, Intent(this, ApiService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         return Notification.Builder(this, CHANNEL)
-            .setSmallIcon(android.R.drawable.stat_sys_upload)
+            // NOT stat_sys_upload: that is an upload ARROW, and it made a phone that is
+            // merely listening look like a phone that is sending something off it -- the
+            // one impression this app should never give. A server is a connection, so the
+            // icon is one.
+            .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
             .setContentTitle("FaceFusion API is running")
             .setContentText(text)
             .setOngoing(true)
