@@ -154,7 +154,14 @@ class MainActivity : ComponentActivity() {
      * Empty until the fetch lands, and empty forever when offline -- both mean "no row
      * offers a download", which is the honest state rather than a button that cannot work.
      */
-    private var hostedFiles by mutableStateOf<Set<String>>(emptySet())
+    /**
+     * What the manifest publishes for this tier: file name -> its LENGTH.
+     *
+     * The length is why this is a map and not a set. It is the same field
+     * `ModelDownload.missing` re-fetches on, so a row that says "update available"
+     * and the downloader that would act on it cannot disagree.
+     */
+    private var hostedFiles by mutableStateOf<Map<String, Long>>(emptyMap())
 
     /**
      * Where the pipeline was, last time this screen had it.
@@ -526,10 +533,11 @@ class MainActivity : ComponentActivity() {
      * downloads at all rather than offering one that cannot succeed.
      */
     private fun refreshHostedFiles() = lifecycleScope.launch(Dispatchers.IO) {
-        val names = runCatching {
-            ModelDownload.manifestFor(tierChain.joinToString(",")).second.map { it.name }.toSet()
-        }.getOrDefault(emptySet())
-        withContext(Dispatchers.Main) { hostedFiles = names }
+        val hosted = runCatching {
+            ModelDownload.manifestFor(tierChain.joinToString(","))
+                .second.associate { it.name to it.bytes }
+        }.getOrDefault(emptyMap())
+        withContext(Dispatchers.Main) { hostedFiles = hosted }
     }
 
     // ------------------------------------------------------------------ remote API
@@ -663,8 +671,15 @@ class MainActivity : ComponentActivity() {
         // correct -- there is nothing to download from.
         fun row(name: String, label: String, req: Boolean): ModelRow {
             val f = File(modelDir(), "${name}_$t.bin")
-            return ModelRow(label, f.name, if (f.exists()) f.length() else 0L, f.canRead(), req,
-                            downloadable = f.name in hostedFiles)
+            val len = if (f.exists()) f.length() else 0L
+            val hostedLen = hostedFiles[f.name]
+            return ModelRow(label, f.name, len, f.canRead(), req,
+                            downloadable = f.name in hostedFiles,
+                            // Present, published, and a different file from the published
+                            // one. Offline `hostedFiles` is empty and nothing is ever called
+                            // outdated, which is the right answer when there is nothing to
+                            // compare against -- never a scary row because the network is.
+                            outdated = f.canRead() && hostedLen != null && hostedLen != len)
         }
         return required.map { (n, l) -> row(n, l, true) } +
             gate.map { (n, l) -> row(n, l, !gateOk) }.filter { it.present || it.downloadable } +

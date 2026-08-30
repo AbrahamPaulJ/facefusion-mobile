@@ -31,6 +31,16 @@ data class ModelRow(
      * button for a file nobody serves is a promise the app cannot keep.
      */
     val downloadable: Boolean = false,
+    /**
+     * On disk, but not the file the manifest now publishes.
+     *
+     * Compared by LENGTH, which is exactly what `ModelDownload.missing` re-fetches on, so a
+     * row can never say "update available" for something the downloader would then decline
+     * to fetch. Without this the app had no notion that a model it already holds could be
+     * superseded -- `ModelPaths.missing` is a `canRead` test -- so when the enhancer was
+     * republished 9.5x faster, every existing install kept the slow one and was never told.
+     */
+    val outdated: Boolean = false,
 )
 
 /** What the HTP said about itself, already parsed out of `NativePipe.probeDeviceInfo`. */
@@ -71,7 +81,8 @@ fun SettingsScreen(
         Caption("Models")
         val onDisk = models.filter { it.present }.sumOf { it.bytes }
         Text(
-            "${models.count { it.present }} of ${models.size} present, ${mb(onDisk)} on disk",
+            "${models.count { it.present }} of ${models.size} present, ${mb(onDisk)} on disk" +
+                (models.count { it.outdated }.let { if (it > 0) ", $it update available" else "" }),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -93,13 +104,15 @@ fun SettingsScreen(
                                 // and the severity was already carried by the colour
                                 // below.  The suffix says it in words instead, because
                                 // colour alone is not something every reader gets.
-                                if (m.present) "${m.fileName}   ${mb(m.bytes)}"
+                                if (m.outdated) "${m.fileName}   ${mb(m.bytes)}   update available"
+                                else if (m.present) "${m.fileName}   ${mb(m.bytes)}"
                                 else m.fileName + "   not installed" +
                                      (if (m.required) " (required)" else ""),
                                 style = MaterialTheme.typography.bodySmall,
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 10.sp,
-                                color = if (m.present || !m.required)
+                                color = if (m.outdated) MaterialTheme.colorScheme.primary
+                                else if (m.present || !m.required)
                                     MaterialTheme.colorScheme.onSurfaceVariant
                                 else MaterialTheme.colorScheme.error,
                             )
@@ -108,7 +121,15 @@ fun SettingsScreen(
                         // row and a "Download" link on the next made two halves of the
                         // same decision look like different kinds of thing, and the icon
                         // was the destructive one -- the half that should read loudest.
-                        if (m.present) {
+                        if (m.outdated) {
+                            // Still ONE control, still pointing the way the row needs to
+                            // go. Delete is not offered here: the file works, it is merely
+                            // superseded, and the useful action is to replace it. Deleting
+                            // it first would reach the same place through a broken app.
+                            TextButton(onDownloadModel, enabled = !ModelDownload.running) {
+                                Text(if (ModelDownload.running) "Updating" else "Update")
+                            }
+                        } else if (m.present) {
                             TextButton({ confirming = m }, enabled = !ModelDownload.running) {
                                 Text("Delete", color = MaterialTheme.colorScheme.error)
                             }
