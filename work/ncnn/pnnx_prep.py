@@ -171,10 +171,103 @@ def gemm_to_conv(m):
     return made
 
 
+def derange_pixelnorm(m, k=1.0 / 256.0):
+    """Keep StyleGAN's PixelNorm inside fp16 range, exactly.
+
+    `y = x / sqrt(mean(x^2) + eps)`. On a real crop |x| reaches ~13900, so x^2 reaches
+    **193,616,896** against fp16's ceiling of 65504 -- it becomes inf, the mean and the
+    sqrt follow, and the normalised style vector poisons the whole generator. Measured: it
+    is the ONLY thing in gpen that leaves fp16 range, and it is why the enhancer scores
+    15.8 dB in fp16 against 56.9 in fp32.
+
+    PixelNorm is scale-invariant, so squaring a scaled copy and compensating is exact:
+
+        t = k*x ;  s = sqrt(mean(t^2) + k^2*eps) = k*sqrt(mean(x^2) + eps)
+        y = x * (k / s)      == x / sqrt(mean(x^2) + eps)
+
+    With k = 1/256 -- a power of two, so the scaling itself is exact in binary floating
+    point -- x^2 peaks near 2954 and every intermediate fits.
+
+    This is a PRECISION fix, not an accuracy one: in fp32 the graph is unchanged.
+    """
+    g = m.graph
+    inits = {t.name: t for t in g.initializer}
+    prod = {o: n for n in g.node for o in n.output}
+    cons = {}
+    alive = list(g.node)
+    for n in alive:
+        for i in n.input:
+            cons.setdefault(i, []).append(n)
+
+    fixed, new_nodes, new_inits = 0, {}, []
+    for pw in alive:
+        if pw.op_type != 'Pow' or pw.input[1] not in inits:
+            continue
+        if float(numpy_helper.to_array(inits[pw.input[1]]).ravel()[0]) != 2.0:
+            continue
+        rm = cons.get(pw.output[0], [])
+        if len(rm) != 1 or rm[0].op_type != 'ReduceMean':
+            continue
+        rm = rm[0]
+        ad = cons.get(rm.output[0], [])
+        if len(ad) != 1 or ad[0].op_type != 'Add':
+            continue
+        ad = ad[0]
+        epsn = next((i for i in ad.input if i in inits), None)
+        if epsn is None:
+            continue
+        sq = cons.get(ad.output[0], [])
+        if len(sq) != 1 or sq[0].op_type != 'Sqrt':
+            continue
+        sq = sq[0]
+        dv = cons.get(sq.output[0], [])
+        if len(dv) != 1 or dv[0].op_type != 'Div' or dv[0].input[1] != sq.output[0]:
+            continue
+        dv = dv[0]
+        num = dv.input[0]
+        if num not in inits:
+            continue
+
+        x = pw.input[0]
+        b = (pw.name or 'pixelnorm%d' % fixed)
+        kn, tn = b + '/ff_k', b + '/ff_scaled'
+        new_inits.append(numpy_helper.from_array(numpy.array(k, numpy.float32), kn))
+        new_nodes[id(pw)] = [helper.make_node('Mul', [x, kn], [tn], name=b + '/ff_prescale')]
+        pw.input[0] = tn
+        # eps travels with the square, and the reciprocal's numerator carries k back out.
+        #
+        # ⚠ NEW initialisers, never a mutation of the ones already there: onnxsim
+        # deduplicates constants, so the `1.0` this Div reads and the `1e-8` this Add reads
+        # are single tensors shared with unrelated nodes all over the graph. Scaling them in
+        # place silently rescaled those too -- it cost 55 dB of equivalence and looked like
+        # the algebra was wrong.
+        e2, n2 = b + '/ff_eps', b + '/ff_num'
+        new_inits.append(numpy_helper.from_array(
+            (numpy_helper.to_array(inits[epsn]) * numpy.float32(k * k)).astype(numpy.float32), e2))
+        new_inits.append(numpy_helper.from_array(
+            (numpy_helper.to_array(inits[num]) * numpy.float32(k)).astype(numpy.float32), n2))
+        ad.input[list(ad.input).index(epsn)] = e2
+        dv.input[list(dv.input).index(num)] = n2
+        fixed += 1
+
+    if fixed:
+        kept = []
+        for n in alive:
+            if id(n) in new_nodes:
+                kept.extend(new_nodes[id(n)])
+            kept.append(n)
+        del g.node[:]
+        g.node.extend(kept)
+        g.initializer.extend(new_inits)
+    return fixed
+
+
 def main():
     src, dst = sys.argv[1], sys.argv[2]
     m = onnx.load(src)
     fixed, skipped = normalise_gemms(m)
+    ranged = derange_pixelnorm(m)
+    print('  rescaled %d PixelNorm(s) into fp16 range' % ranged)
     detiled = detile_style(m)
     conved = gemm_to_conv(m)
     print('  removed %d nodes of identity Unsqueeze/Tile/Gather fan-out' % detiled)
