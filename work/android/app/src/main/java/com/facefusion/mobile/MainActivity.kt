@@ -524,6 +524,7 @@ class MainActivity : ComponentActivity() {
                                     previewOptionsChanged(hard = true)
                                 },
                                 onApiToggle = ::toggleApi,
+                                onApiLan = ::setApiLan,
                                 onShareBugReport = { shareBugReport() },
                                 forcedBackend = forcedBackend,
                                 // null in a QNN-only build, which is what hides the
@@ -672,6 +673,27 @@ class MainActivity : ComponentActivity() {
      * created, so a switch that changed [lan] on a live server would report an address it
      * is not listening on.
      */
+    /**
+     * The LAN preference, which is NOT the same question as "is the server running".
+     *
+     * Separated from [toggleApi] because routing it through there made it a no-op whenever
+     * the server was off: `toggleApi` stops and returns when `on` is false, so the
+     * preference was never written and the switch snapped back. The two switches were never
+     * meant to depend on each other -- one opens a port, the other says which address it
+     * binds when it does.
+     *
+     * A running server is REBOUND, because the address is fixed when the socket opens: a
+     * live flag change would leave it reporting an address it is not listening on.
+     */
+    private fun setApiLan(lan: Boolean) {
+        if (lan == ApiService.allowLan) return
+        ApiService.setLan(this, lan)
+        if (ApiService.running) {
+            ApiService.stop(this)
+            ApiService.start(this, lan)
+        }
+    }
+
     private fun toggleApi(on: Boolean, lan: Boolean, remember: Boolean = true) {
         if (!on) { ApiService.stop(this); return }
         if (android.os.Build.VERSION.SDK_INT >= 33)

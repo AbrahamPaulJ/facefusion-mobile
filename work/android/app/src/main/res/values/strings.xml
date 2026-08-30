@@ -209,6 +209,9 @@
 
     <!-- ==================================================== settings: runtime override -->
     <string name="set_runtime_override_note">This phone has a Hexagon NPU and uses it. Forcing the GPU/CPU path shows what a non-Qualcomm device does — it needs its own model set and is far slower.</string>
+    <!-- Shown when a runtime is pinned, in place of set_runtime_override_note. It has to
+         name the way back, because this card is the only way back. -->
+    <string name="set_runtime_pinned_note">The runtime is pinned by hand rather than chosen for this phone. Automatic puts it back: the NPU where there is one, GPU and CPU where there is not.</string>
     <string name="set_runtime_auto">Automatic</string>
     <string name="set_runtime_force_npu">NPU</string>
     <string name="set_runtime_force_gpu">GPU + CPU</string>
@@ -221,6 +224,9 @@
     <string name="set_api_body">Turn this on and open the address below in a browser on your computer. Everything still runs on this phone.</string>
     <string name="set_api_lan_title">Let other devices connect</string>
     <string name="set_api_lan_on">On. Anyone who can reach this phone on your network can open the page and swap faces with it.</string>
+    <!-- LAN is on but nothing is listening yet. The alarming version of this sentence
+         belongs to an OPEN PORT, not to a preference. -->
+    <string name="set_api_lan_on_pending">On. Nothing is listening yet — it takes effect when you turn the server on above.</string>
     <string name="set_api_lan_off">Off. Only this phone, or a computer connected by USB.</string>
     <string name="set_api_open_this">Open this</string>
     <string name="set_api_over_usb">Or over USB</string>

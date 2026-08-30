@@ -170,6 +170,7 @@
     <string name="set_in_use">使用中</string>
 
     <string name="set_runtime_override_note">本机有 Hexagon NPU 并正在使用它。强制走 GPU/CPU 路径可以看到没有高通 NPU 的设备是什么表现 —— 它需要另一套模型，而且慢得多。</string>
+    <string name="set_runtime_pinned_note">运行方式是手动固定的，而不是根据本机自动选择的。选择“自动”即可恢复：有 NPU 时使用 NPU，没有时使用 GPU 和 CPU。</string>
     <string name="set_runtime_auto">自动</string>
     <string name="set_runtime_force_npu">NPU</string>
     <string name="set_runtime_force_gpu">GPU + CPU</string>
@@ -180,6 +181,7 @@
     <string name="set_api_body">打开此开关，然后在电脑的浏览器中访问下面的地址。所有处理仍然在这台手机上进行。</string>
     <string name="set_api_lan_title">允许其他设备连接</string>
     <string name="set_api_lan_on">已开启。同一网络中能访问到这台手机的任何人都可以打开该页面并用它换脸。</string>
+    <string name="set_api_lan_on_pending">已开启。目前还没有开始监听 —— 在上面启动服务后才会生效。</string>
     <string name="set_api_lan_off">已关闭。仅限本机，或通过 USB 连接的电脑。</string>
     <string name="set_api_open_this">访问地址</string>
     <string name="set_api_over_usb">或通过 USB</string>

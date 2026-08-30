@@ -137,6 +137,26 @@ class ApiService : Service() {
         }
 
         /**
+         * Set the LAN preference WITHOUT starting anything.
+         *
+         * ⚠ This is the half that was missing, and its absence is what made the two
+         * switches look like they depended on each other. The only way to change `allowLan`
+         * used to be a successful `start`, so flipping "let other devices connect" while
+         * the server was off went through `toggleApi(on = false, ...)`, which stops and
+         * returns -- the preference was never written, the state never changed, and the
+         * switch sprang back. Inert in exactly one state, which reads as broken rather than
+         * as disabled.
+         *
+         * The server still does not start by itself. Which way the switch is thrown and
+         * whether a port is open are two different questions, and this is the first one.
+         */
+        fun setLan(ctx: Context, lan: Boolean) {
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putBoolean("lan", lan).apply()
+            allowLan = lan
+        }
+
+        /**
          * @param remember whether this choice is the USER's. The `--es api start` intent
          *   always asks for loopback, and it must not write that down: doing so turned a
          *   convenience command into something that silently switched off a setting the

@@ -89,6 +89,11 @@ fun SettingsScreen(
     onDownloadModel: () -> Unit,
     /** Start or stop the HTTP server. [lan] binds every interface instead of loopback. */
     onApiToggle: (on: Boolean, lan: Boolean) -> Unit,
+    /**
+     * Set the LAN preference. Independent of whether the server is running -- routing this
+     * through [onApiToggle] is what used to make the switch inert while it was stopped.
+     */
+    onApiLan: (Boolean) -> Unit,
     /** Assemble the report and hand it to a share target. */
     onShareBugReport: () -> Unit,
     /** "" | "qnn" | "ncnn" -- which runtime the user has pinned, "" being automatic. */
@@ -251,21 +256,36 @@ fun SettingsScreen(
 
         // -------------------------------------------------------------- runtime override
         //
-        // Shown only when ncnn is actually LINKED and this part has an NPU -- that is, only
-        // where there is a real choice. On a non-Qualcomm phone there is nothing to choose
-        // between, and in a QNN-only build the control could not do anything.
+        // Shown when ncnn is LINKED and either there is a choice to make or one has already
+        // been made. In a QNN-only build the control could do nothing, and on a genuine
+        // non-Qualcomm phone running automatically there is nothing to choose between.
         //
         // It exists because the non-Qualcomm path is otherwise untestable: Auto tries QNN
         // first and QNN wins on every device this project owns, so without a switch the
         // ncnn path could only ever be exercised on hardware that is not on the bench.
-        if (onForceBackend != null && device.backend == "qnn") {
+        //
+        // ⚠ `|| forcedBackend.isNotEmpty()` is the whole fix, and the bug it closes was a
+        // ONE-WAY DOOR. The test used to be `device.backend == "qnn"` alone -- which is the
+        // ACTIVE runtime, not the available one -- so the moment you pinned GPU + CPU the
+        // card that did the pinning disappeared, and nothing in the app could undo it. The
+        // second case is worse: pinning NPU on a phone that has none leaves `backend` at
+        // "none", the pipeline unable to start, AND no control to recover with. Clearing
+        // app storage was the only way out, and that takes the ~600 MB of models with it.
+        //
+        // So: if a runtime is pinned, the control that unpins it is always reachable.
+        if (onForceBackend != null && (device.backend == "qnn" || forcedBackend.isNotEmpty())) {
             Spacer(Modifier.height(6.dp))
             Caption(stringResource(R.string.set_runtime))
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(14.dp),
                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        stringResource(R.string.set_runtime_override_note),
+                        // The override note assumes the phone is running on its NPU, which
+                        // is untrue the moment anything is pinned -- and that is exactly
+                        // when the reader needs to be told how to get back.
+                        stringResource(if (forcedBackend.isEmpty())
+                                           R.string.set_runtime_override_note
+                                       else R.string.set_runtime_pinned_note),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -321,18 +341,26 @@ fun SettingsScreen(
                     Column(Modifier.weight(1f)) {
                         Text(stringResource(R.string.set_api_lan_title),
                              style = MaterialTheme.typography.bodyMedium)
+                        // The red warning belongs to an OPEN PORT, not to a preference.
+                        // It used to appear whenever `allowLan` was true -- including on a
+                        // fresh launch, where `restore` sets it from prefs and nothing is
+                        // listening at all. A network-exposure warning about a server that
+                        // is not running is alarming and untrue.
+                        val exposed = ApiService.allowLan && ApiService.running
                         Text(
-                            if (ApiService.allowLan)
-                                stringResource(R.string.set_api_lan_on)
-                            else stringResource(R.string.set_api_lan_off),
+                            stringResource(when {
+                                exposed -> R.string.set_api_lan_on
+                                ApiService.allowLan -> R.string.set_api_lan_on_pending
+                                else -> R.string.set_api_lan_off
+                            }),
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (ApiService.allowLan) MaterialTheme.colorScheme.error
+                            color = if (exposed) MaterialTheme.colorScheme.error
                                     else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     Switch(
                         checked = ApiService.allowLan,
-                        onCheckedChange = { onApiToggle(ApiService.running, it) },
+                        onCheckedChange = onApiLan,
                     )
                 }
 
