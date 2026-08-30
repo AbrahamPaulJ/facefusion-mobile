@@ -274,7 +274,7 @@ class MainActivity : ComponentActivity() {
      * turn a missing file into a failed run, so the choice appears only when it is real.
      */
     private val hasInswapper: Boolean by lazy {
-        File(modelDir(), "inswapper_$tier.bin").canRead()
+        ModelPaths.present(modelDir(), tier, "inswapper")
     }
 
     /**
@@ -289,7 +289,7 @@ class MainActivity : ComponentActivity() {
      * would keep saying no for the life of the process.
      */
     private val hasEnhancer: Boolean
-        get() = File(modelDir(), "gpen_$tier.bin").canRead()
+        get() = ModelPaths.present(modelDir(), tier, "gpen")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -648,8 +648,8 @@ class MainActivity : ComponentActivity() {
         // q::QNN_Gelu", so v81 ships `nsfwq_` like the tiers BELOW v79 do. fp32 is a v79
         // fact, not a floor -- which is exactly why this row tests the PAIR and never the
         // arch (docs/traps.md #10).
-        val gateOk = File(modelDir(), "nsfw_$t.bin").canRead() ||
-                     File(modelDir(), "nsfwq2_$t.bin").canRead()
+        val gateOk = ModelPaths.present(modelDir(), t, "nsfw") ||
+                     ModelPaths.present(modelDir(), t, "nsfwq2")
         val gate = listOf(
             "nsfw" to "Content checker",
             "nsfwq2" to "Content checker (quantised)",
@@ -670,16 +670,27 @@ class MainActivity : ComponentActivity() {
         // while absent. Offline the set is empty and no row offers a download, which is
         // correct -- there is nothing to download from.
         fun row(name: String, label: String, req: Boolean): ModelRow {
-            val f = File(modelDir(), "${name}_$t.bin")
-            val len = if (f.exists()) f.length() else 0L
-            val hostedLen = hostedFiles[f.name]
-            return ModelRow(label, f.name, len, f.canRead(), req,
-                            downloadable = f.name in hostedFiles,
+            // Filenames come from ModelPaths, never from a pattern here: ncnn needs a
+            // param/bin PAIR named after the ONNX graph, QNN one context binary with the
+            // tier in the name, and a row that spelled either out would be wrong on the
+            // other backend.
+            val files = ModelPaths.filesFor(t, name).map { File(modelDir(), it) }
+            if (files.isEmpty()) return ModelRow(label, name, 0L, false, req)
+            val present = files.all { it.canRead() }
+            val len = files.sumOf { if (it.exists()) it.length() else 0L }
+            // A pair is shown as ONE row under the name the user thinks in. The .param is
+            // 30 KB beside a 400 MB .bin, so listing both would be noise, and half a pair
+            // is not a state worth a row of its own -- it is simply "not installed".
+            val f = files.first()
+            val hostedLen = files.sumOf { hostedFiles[it.name] ?: 0L }
+                .takeIf { files.all { p -> p.name in hostedFiles } }
+            return ModelRow(label, f.name, len, present, req,
+                            downloadable = files.all { it.name in hostedFiles },
                             // Present, published, and a different file from the published
                             // one. Offline `hostedFiles` is empty and nothing is ever called
                             // outdated, which is the right answer when there is nothing to
                             // compare against -- never a scary row because the network is.
-                            outdated = f.canRead() && hostedLen != null && hostedLen != len)
+                            outdated = present && hostedLen != null && hostedLen != len)
         }
         return required.map { (n, l) -> row(n, l, true) } +
             gate.map { (n, l) -> row(n, l, !gateOk) }.filter { it.present || it.downloadable } +
@@ -811,9 +822,9 @@ class MainActivity : ComponentActivity() {
                     val models = modelDir()
                     val t = tier
                     val missing = listOf("yoloface", "fan2d", "arcface", opts.swapper)
-                        .map { File(models, "${it}_$t.bin") }.filterNot { it.canRead() }
+                        .filterNot { ModelPaths.present(models, t, it) }
                     if (missing.isNotEmpty()) {
-                        previewNote = "Missing ${missing.joinToString { it.name }}"
+                        previewNote = "Missing ${missing.joinToString()}"
                         return@launch
                     }
 
@@ -1074,16 +1085,16 @@ class MainActivity : ComponentActivity() {
                 runCatching {
                     val models = modelDir()
                     val missing = listOf("yoloface", "fan2d", "arcface", opts.swapper)
-                        .map { File(models, "${it}_$tier.bin") }.filterNot { it.canRead() }
+                        .filterNot { ModelPaths.present(models, tier, it) }
                         .toMutableList()
                     // The gate is mandatory because it blocks. Either build satisfies it:
-                    // fp32 (`nsfw_`) is the shipping one and only finalizes on v79, so the
-                    // lower tiers carry the quantised `nsfwq_` instead.
-                    if (!File(models, "nsfw_$tier.bin").canRead() &&
-                        !File(models, "nsfwq2_$tier.bin").canRead())
-                        missing += File(models, "nsfw_$tier.bin")
+                    // fp32 (`nsfw_`) only finalizes on v79, so every other tier carries the
+                    // quantised `nsfwq2_` -- and ncnn has neither distinction.
+                    if (!ModelPaths.present(models, tier, "nsfw") &&
+                        !ModelPaths.present(models, tier, "nsfwq2"))
+                        missing += "nsfw"
                     if (missing.isNotEmpty())
-                        error("cannot read ${missing.joinToString { it.name }} in " +
+                        error("cannot read ${missing.joinToString()} for tier $tier in " +
                               "${models.absolutePath} -- run work/device/install_app.ps1")
 
                     status = "Loading models..."

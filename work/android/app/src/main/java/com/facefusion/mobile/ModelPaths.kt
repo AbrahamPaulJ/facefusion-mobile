@@ -41,6 +41,55 @@ object ModelPaths {
      * disk* changes the moment a download finishes.
      */
     @Volatile private var chainCache: List<String>? = null
+    @Volatile private var backendCache: String? = null
+
+    /**
+     * "qnn" or "ncnn" -- which runtime, and therefore which MODEL SET this device needs.
+     *
+     * A silicon property like the tier CHAIN, so it is cached; unlike the tier it does not
+     * depend on what is on disk. "none" is not cached: a failed probe must not be
+     * remembered as an answer.
+     */
+    fun backend(ctx: Context): String {
+        backendCache?.let { return it }
+        val lib = ctx.applicationInfo.nativeLibraryDir
+        val b = NativePipe.probeBackend(lib, lib)
+        if (b == "qnn" || b == "ncnn") backendCache = b
+        return b
+    }
+
+    /**
+     * The files one variant needs, by logical name -> filename.
+     *
+     * ⚠ This MIRRORS what ffnn_qnn.cpp and ffnn_ncnn.cpp resolve at runtime, and the two
+     * must not drift. It exists because the app has to know what to DOWNLOAD before any
+     * backend has opened anything -- native answers "where is yoloface", this answers
+     * "which files must exist first", and only the second question can be asked offline.
+     *
+     * QNN is one context binary per model, tier in the name. ncnn is a param/bin PAIR per
+     * model, no tier, named after the ONNX graph rather than the role.
+     */
+    fun filesFor(tier: String, name: String): List<String> =
+        if (tier == NCNN_TIER) {
+            val stem = NCNN_STEMS[name] ?: return emptyList()
+            listOf("$stem.ncnn.param", "$stem.ncnn.bin")
+        } else {
+            listOf(name + "_" + tier + ".bin")
+        }
+
+    const val NCNN_TIER = "ncnn"
+
+    private val NCNN_STEMS = mapOf(
+        "yoloface" to "yoloface_8n_b1",
+        "fan2d" to "2dfan4_heatmaps",
+        "arcface" to "arcface_w600k_r50_b1",
+        "hyperswap" to "hyperswap_1a_256_fp32",
+        "gpen" to "gpen_ncnn",
+        // One graph serves both gate names: "nsfwq2" exists because a QNN tier below v79
+        // cannot finalize the fp32 gate, which is a QNN fact and means nothing to ncnn.
+        "nsfw" to "nsfw_2_sim",
+        "nsfwq2" to "nsfw_2_sim",
+    )
 
     fun tierChain(ctx: Context): List<String> {
         chainCache?.let { return it }
@@ -69,11 +118,20 @@ object ModelPaths {
      * expensive, and it is cached.
      */
     fun tier(ctx: Context): String {
+        // ncnn has no tiers: one set of files runs on every part, so the answer is fixed
+        // and there is nothing on disk to resolve against.
+        if (backend(ctx) == NCNN_TIER) return NCNN_TIER
         val chain = tierChain(ctx)
         val d = dir(ctx)
-        return chain.firstOrNull { File(d, "yoloface_" + it + ".bin").canRead() }
+        return chain.firstOrNull { present(d, it, "yoloface") }
             ?: chain.firstOrNull()
             ?: ctx.applicationInfo.nativeLibraryDir.let { NativePipe.probeTier(it, it) }
+    }
+
+    /** Every file of [name] for [tier] is on disk. A pair is present only when BOTH are. */
+    fun present(d: File, tier: String, name: String): Boolean {
+        val f = filesFor(tier, name)
+        return f.isNotEmpty() && f.all { File(d, it).canRead() }
     }
 
     /**
@@ -88,11 +146,9 @@ object ModelPaths {
     fun missing(ctx: Context, tier: String, swapper: String): List<String> {
         val d = dir(ctx)
         val absent = listOf("yoloface", "fan2d", "arcface", swapper)
-            .filter { !File(d, it + "_" + tier + ".bin").canRead() }
+            .filter { !present(d, tier, it) }
             .toMutableList()
-        if (!File(d, "nsfw_" + tier + ".bin").canRead() &&
-            !File(d, "nsfwq2_" + tier + ".bin").canRead())
-            absent += "nsfw"
+        if (!present(d, tier, "nsfw") && !present(d, tier, "nsfwq2")) absent += "nsfw"
         return absent
     }
 }

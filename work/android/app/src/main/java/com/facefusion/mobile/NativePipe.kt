@@ -92,6 +92,15 @@ object NativePipe {
      * ⚠ `ok=0` means the PROBE failed and every other field is absent. It does not mean the
      * chip is unsupported -- the same distinction [probeTier] makes when it falls back.
      */
+    /**
+     * Which runtime this device will use: "qnn", "ncnn", or "none" when neither starts.
+     *
+     * Decides which MODEL SET to download, so it is asked before any file exists. It is
+     * answered by TRYING rather than probing -- the HTP cannot be interrogated until QNN is
+     * running, so an "ask first" version reports no-NPU on every device.
+     */
+    @JvmStatic external fun probeBackend(libDir: String, skelDir: String): String
+
     @JvmStatic external fun probeDeviceInfo(libDir: String, skelDir: String): String
 
     /**

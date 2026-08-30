@@ -335,7 +335,7 @@ class ApiServer(
             "source_set" to (sourceBgr != null),
             "busy" to (PipeGuard.holder != null),
             "holder" to PipeGuard.holder,
-            "enhancer" to File(ModelPaths.dir(ctx), "gpen_$tier.bin").canRead(),
+            "enhancer" to ModelPaths.present(ModelPaths.dir(ctx), tier, "gpen"),
         ))
     }
 

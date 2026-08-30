@@ -17,6 +17,7 @@
 
 #include "ffcv.h"
 #include "ffpipe.h"
+#include "ffnn.h"
 #include "ffqnn.h"
 
 namespace {
@@ -212,6 +213,31 @@ Java_com_facefusion_mobile_NativePipe_probeDeviceInfo(JNIEnv* env, jclass, jstri
   s += ";dlbc=" + std::to_string(d.dlbc ? 1 : 0);
   s += ";tier=" + ffqnn::pickTier(d);
   return env->NewStringUTF(s.c_str());
+}
+
+// Which RUNTIME will this device use, asked before anything is downloaded.
+//
+// "qnn" or "ncnn". The answer decides which MODEL SET to fetch -- a Hexagon part wants
+// context binaries, everything else wants the ncnn pair -- so the download screen has to
+// know it before a single file exists.
+//
+// ⚠ It has to be asked by TRYING, not by probing. `QnnDevice_getPlatformInfo` needs QNN
+// already dlopen'd with the skels on ADSP_LIBRARY_PATH, so "probe, then choose" reports
+// no-NPU on every device (ffnn.cpp carries the same warning; an earlier draft shipped it
+// and failed on the bench it was written on).
+JNIEXPORT jstring JNICALL
+Java_com_facefusion_mobile_NativePipe_probeBackend(JNIEnv* env, jclass, jstring jLib,
+                                                   jstring jSkel) {
+  std::string lib = jstr(env, jLib);
+  ffnn::InitSpec spec;
+  spec.libDir = lib;
+  spec.skelDir = jstr(env, jSkel);
+  spec.modelDir = lib;   // unused by init; models are opened later
+  if (!ffnn::init(ffnn::Backend::Auto, spec)) {
+    g_err = ffnn::lastError();
+    return env->NewStringUTF("none");
+  }
+  return env->NewStringUTF(ffnn::active() == ffnn::Backend::Qnn ? "qnn" : "ncnn");
 }
 
 JNIEXPORT jboolean JNICALL
