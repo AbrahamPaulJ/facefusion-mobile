@@ -324,7 +324,17 @@ class MainActivity : ComponentActivity() {
         opts = SwapOptions.load(this)
         ApiService.restore(this)
 
-        if (intent?.getStringExtra("selftest") != null) { selfTest(); return }
+        // adb: ... --es selftest 1 --es enhance 1
+        //
+        // The enhancer is opt-in and off by default, so the selftest never touched it --
+        // which meant gpen had never run through the APK on EITHER backend, and on ncnn it
+        // is the one model with a history of being wrong rather than slow. Not persisted:
+        // this changes the run, not the user's settings.
+        if (intent?.getStringExtra("selftest") != null) {
+            if (intent?.getStringExtra("enhance") != null)
+                opts = opts.copy(faceEnhance = true)
+            selfTest(); return
+        }
 
         // adb: am start -n com.facefusion.mobile/.MainActivity --es api start
         //
