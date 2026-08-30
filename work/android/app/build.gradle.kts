@@ -65,7 +65,13 @@ android {
         //
         // The cost is two different APKs both calling themselves 0.2.0, so BugReport now
         // prints the code alongside the name -- that is what tells them apart in a report.
-        versionCode = 4
+        //
+        // 5 = the output-file leak (2026-08-30). Every finished video was left in
+        // Android/data forever; see MainActivity.discardOutput/sweepOrphanedOutputs. The
+        // code goes up for the same reason it did for 4 -- a THIRD binary calling itself
+        // "0.2.0 (4)" would be indistinguishable from the published one in a bug report,
+        // which is the exact confusion the paragraph above exists to prevent.
+        versionCode = 5
         versionName = "0.2.0$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
