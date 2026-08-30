@@ -141,5 +141,71 @@
       ],
       "bytes": 311612168
     }
+  },
+  "ncnn_preview": {
+    "note": "EXPERIMENTAL, roadmap 6. No shipped app reads this. fp16 storage except where stated; gpen requires fp32 activations and is wrong on Vulkan even at fp32.",
+    "files": [
+      {
+        "name": "ncnn/yoloface_8n_b1.ncnn.param",
+        "bytes": 20161,
+        "sha256": "92c6b406bdda110d2582672479265c5aeb2535dabf6312a382aaca1a61da8de2"
+      },
+      {
+        "name": "ncnn/yoloface_8n_b1.ncnn.bin",
+        "bytes": 6335620,
+        "sha256": "0c7180c4fb7ce28bdfa6a2a21964b68654b6af9f991c628c63fe73ff2e2a06d1"
+      },
+      {
+        "name": "ncnn/2dfan4_heatmaps.ncnn.param",
+        "bytes": 73254,
+        "sha256": "8359b6609898da3fed4fbfdf3dc521dd08d795be5ea9faf393c459e441c4a672"
+      },
+      {
+        "name": "ncnn/2dfan4_heatmaps.ncnn.bin",
+        "bytes": 47954376,
+        "sha256": "5e32dba22dc9256ef9391345ca2a42d352541876b902d8359d675979d3173489"
+      },
+      {
+        "name": "ncnn/arcface_w600k_r50_b1.ncnn.param",
+        "bytes": 13195,
+        "sha256": "a0cad4eab851084396b768214980c698e76572ccd5e394b577a66e0a318cdba2"
+      },
+      {
+        "name": "ncnn/arcface_w600k_r50_b1.ncnn.bin",
+        "bytes": 87263320,
+        "sha256": "e9c9147a406d6856863e14a38a6fe7cd4627a2fd511fac424b0a1f26fdb8b809"
+      },
+      {
+        "name": "ncnn/hyperswap_1a_256_fp32.ncnn.param",
+        "bytes": 41451,
+        "sha256": "0437bb8cff3d58d2b383cd2c4d62553182a2a9e9da00a0b90f846129e3f8be81"
+      },
+      {
+        "name": "ncnn/hyperswap_1a_256_fp32.ncnn.bin",
+        "bytes": 402670444,
+        "sha256": "8ec4daa8ce092fe03cbe4293934399d32f3e03a3c295deacbf8ac949d673ea88"
+      },
+      {
+        "name": "ncnn/nsfw_2_sim.ncnn.param",
+        "bytes": 26914,
+        "sha256": "6200fb9e859cfa59dba49a104b5c2f30b4778e99e1fd8dc3989f8ea804fee7a1"
+      },
+      {
+        "name": "ncnn/nsfw_2_sim.ncnn.bin",
+        "bytes": 11437456,
+        "sha256": "6fbff5ebe0919c3ed5518c2abebd08027bb4d3ffb2f37e805e5e4a3849ec67d1"
+      },
+      {
+        "name": "ncnn/gpen_ncnn.ncnn.param",
+        "bytes": 35497,
+        "sha256": "cedf0ae0209cd572a327be16fee7a1e92fd66e6ac4451a08177759e0f1b383a8"
+      },
+      {
+        "name": "ncnn/gpen_ncnn.ncnn.bin",
+        "bytes": 48242348,
+        "sha256": "f79a16f4700ba0763be1927f4c203178c1a972fe6b38dfc74ff20764893bde03"
+      }
+    ],
+    "bytes": 604114036
   }
 }

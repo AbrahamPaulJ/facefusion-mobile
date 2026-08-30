@@ -3,7 +3,13 @@
 // which is fine for latency and useless for accuracy.
 //
 //   ncnn_run <param> <bin> <mode> <out.raw> <shape>...
-//     mode: fp32 | fp16 | vulkan
+//     mode: fp32 | fp16 | fp16s | vulkan | vulkan32
+//
+// fp16 and vulkan turn fp16 STORAGE and fp16 ARITHMETIC on together, which is the shipping
+// configuration but cannot say which of the two costs the accuracy.  gpen needs that
+// answered -- it survives fp32 at 56.87 dB and collapses to 15.78 in fp16 -- so:
+//   fp16s     fp16 storage, fp32 arithmetic     (is it the STORED weights?)
+//   vulkan32  Vulkan with every fp16 path off   (can the GPU run it correctly at all?)
 //     shape: WxHxC  or  N            -- deterministic seeded input
 //            WxHxC@file or N@file    -- read the input from an NCHW fp32 file
 //
@@ -88,6 +94,24 @@ int main(int argc, char** argv)
         net.opt.use_fp16_storage = true;
         net.opt.use_fp16_arithmetic = true;
         net.opt.use_vulkan_compute = false;
+    } else if (mode == "fp16s") {
+        // Half-stored, full-precision maths. The gap between this and `fp16` is the
+        // arithmetic; the gap between this and `fp32` is the storage.
+        net.opt.use_fp16_packed = true;
+        net.opt.use_fp16_storage = true;
+        net.opt.use_fp16_arithmetic = false;
+        net.opt.use_vulkan_compute = false;
+    } else if (mode == "vulkan32") {
+#if NCNN_VULKAN
+        ncnn::create_gpu_instance();
+        net.opt.use_vulkan_compute = true;
+        net.opt.use_fp16_packed = false;
+        net.opt.use_fp16_storage = false;
+        net.opt.use_fp16_arithmetic = false;
+#else
+        fprintf(stderr, "built without vulkan
+"); return 1;
+#endif
     } else if (mode == "vulkan") {
 #if NCNN_VULKAN
         ncnn::create_gpu_instance();
@@ -155,7 +179,7 @@ int main(int argc, char** argv)
 
     }
 #if NCNN_VULKAN
-    if (mode == "vulkan") ncnn::destroy_gpu_instance();
+    if (mode == "vulkan" || mode == "vulkan32") ncnn::destroy_gpu_instance();
 #endif
     return 0;
 }
