@@ -2,3 +2,7 @@
 # a syntax error, not whitespace: as checked out with core.autocrlf=true, 10 of the 11
 # tracked *.sh failed `bash -n` at their first `for` or `case`. Pin them to LF.
 *.sh text eol=lf
+
+# convert.sh regenerates these with a heredoc, i.e. LF, on every conversion. Tracked with
+# CRLF they came back "modified" after every build even when byte-identical.
+work/qnn/htp_config_*.json text eol=lf

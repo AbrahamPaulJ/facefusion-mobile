@@ -22,7 +22,11 @@ CASES = [
      'work/calib/fan2d/*.raw',     (1,3,256,256),  ['input'], 'heatmaps'),
     ('yoloface',  'work/models/yoloface_8n.onnx',       'work/onnx/yoloface_8n_b1_sim.onnx',
      'work/calib/yoloface/*.raw',  (1,3,640,640),  ['input'], None),
-    ('hyperswap', 'work/models/hyperswap_1a_256.onnx',  'work/onnx/hyperswap_1a_256_sim.onnx',
+    # The SHIPPING graph is the fp32-demoted one -- convert.sh reads
+    # `hyperswap_1a_256_fp32.onnx`, and `..._sim.onnx` has not existed since the demotion was
+    # promoted (2026-08-24).  Pointing this case at the old name meant the one graph carrying
+    # 71% of the frame budget was silently SKIPped by its own audit.
+    ('hyperswap', 'work/models/hyperswap_1a_256.onnx',  'work/onnx/hyperswap_1a_256_fp32.onnx',
      'work/calib/swap_target/*.raw', (1,3,256,256), ['target','source'], 'output'),
     # The enhancer's calibration crops are the SWAPPER'S OUTPUT, not raw target frames --
     # it only ever sees a face that hyperswap already wrote.  Capture them from the stage

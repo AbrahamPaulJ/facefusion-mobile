@@ -32,13 +32,24 @@ SPECS = {
 }
 
 
-def build(name, limit=0):
+def build(name, limit=0, required=True):
+	"""`required=False` reports a missing set and returns instead of exiting.
+
+	Bare `make_calib_lists.py` walks every spec, and `inswapper` has no calibration on this
+	machine -- so the unconditional exit killed the run at inswapper and silently never
+	reached `nsfw` or `gpen`, which come after it in SPECS order.  A set asked for BY NAME
+	still exits: there the absence is the answer to the question.
+	"""
 	spec = SPECS[name]
 	cols = []
 	for input_name, subdir, elems in spec:
 		files = sorted(glob.glob(os.path.join(ROOT, 'calib', subdir, '*.raw')))
 		if not files:
-			sys.exit('no calibration files in calib/%s -- run the reference harness first' % subdir)
+			msg = 'no calibration files in calib/%s -- run the reference harness first' % subdir
+			if required:
+				sys.exit(msg)
+			print('%-10s SKIP (%s)' % (name, msg))
+			return None
 		for f in files:
 			got = os.path.getsize(f) // 4
 			if got != elems:
@@ -64,10 +75,12 @@ def build(name, limit=0):
 
 
 if __name__ == '__main__':
+	explicit = bool(sys.argv[1:])
 	names = sys.argv[1:] or list(SPECS)
 	limit = 0
 	if names and names[0].isdigit():
 		limit = int(names[0]); names = names[1:] or list(SPECS)
+		explicit = bool(names) and explicit
 	for n in names:
 		if n in SPECS:
-			build(n, limit)
+			build(n, limit, required=explicit)

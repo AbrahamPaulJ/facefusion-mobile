@@ -134,8 +134,15 @@ def restrict_frame(frame, resolution):
 	return frame
 
 
-def detect_faces(models, frame):
-	"""facefusion/face_detector.py:298 detect_with_yolo_face"""
+def detect_faces(models, frame, calib=None):
+	"""facefusion/face_detector.py:298 detect_with_yolo_face
+
+	`calib` collects the DETECTOR's own input tensor.  It is the one stage whose
+	calibration cannot be recovered downstream -- every other set is a crop this function's
+	output defines -- so it has to be stashed where it is built, not rebuilt by the caller
+	from the same three lines (trap #4: a calibration set that is not the real tensor is
+	worse than none).
+	"""
 	temp = restrict_frame(frame, FACE_DETECTOR_SIZE)
 	ratio_h = frame.shape[0] / temp.shape[0]
 	ratio_w = frame.shape[1] / temp.shape[1]
@@ -144,6 +151,8 @@ def detect_faces(models, frame):
 	det = numpy.zeros((FACE_DETECTOR_SIZE[1], FACE_DETECTOR_SIZE[0], 3))
 	det[:temp.shape[0], :temp.shape[1], :] = temp
 	det = numpy.expand_dims(det.transpose(2, 0, 1), axis=0).astype(numpy.float32) / 255.0
+	if calib is not None:
+		calib.setdefault('yoloface', []).append(det[0])
 
 	out = models.yoloface.run(None, {'input': det})[0]
 	detection = numpy.squeeze(out).T
@@ -317,7 +326,7 @@ def create_faces(models, frame, boxes, scores, landmarks_5, calib=None):
 
 
 def get_many_faces(models, frame, calib=None):
-	boxes, scores, landmarks_5 = detect_faces(models, frame)
+	boxes, scores, landmarks_5 = detect_faces(models, frame, calib)
 	if not boxes:
 		return []
 	return create_faces(models, frame, boxes, scores, landmarks_5, calib)
