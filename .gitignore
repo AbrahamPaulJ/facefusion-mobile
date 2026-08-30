@@ -8,8 +8,14 @@
 work/models/
 work/onnx/
 work/calib/
-work/device/*.bin
-work/device/*_net.json
+# ** and not *: `work/device/*.bin` matches ONE level only, so a subdirectory of context
+# binaries -- e.g. work/device/shipped_v79/, the backup convert.sh's in-place overwrite
+# makes necessary -- was NOT ignored, in a public repo, for licensed weights.
+work/device/**/*.bin
+work/device/**/*_net.json
+# The backup of what is HOSTED -- convert.sh overwrites work/device/<name>_v79.bin in
+# place, so without this the shipped build is one rebuild away from being unrecoverable.
+work/device/shipped_v79/
 work/device/io/
 work/device/out/
 work/device/prof/
