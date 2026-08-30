@@ -23,7 +23,14 @@ def run(path):
             if not (w and o and i0): unresolved.append((n.op_type, n.name)); continue
             k = 1
             for x in w[2:]: k *= x
-            mac = (o[1]*o[2]*o[3]*w[1]*k) if n.op_type=='Conv' else (i0[1]*i0[2]*i0[3]*w[1]*k)
+            # Spatial extent is EVERY dim after N,C -- not a fixed o[2]*o[3].  Hardcoding two
+            # of them silently drops the last axis of a 3D conv, so a 5D graph comes out short
+            # by that axis: live_portrait_generator read 457 GMAC against a true 617, a 26%
+            # under-count that looked entirely plausible.  Nothing in the shipped set is 5D,
+            # which is why it went unnoticed.
+            sp, ref = 1, (o if n.op_type == 'Conv' else i0)
+            for x in ref[2:]: sp *= x
+            mac = ref[1]*sp*w[1]*k
         elif n.op_type in ('Gemm','MatMul'):
             # input[1] is an INITIALIZER for a weight matmul and an ACTIVATION for the two
             # matmuls inside attention (q@k^T, attn@v).  Looking only in `init` silently

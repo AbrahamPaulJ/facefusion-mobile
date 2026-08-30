@@ -81,6 +81,30 @@ What remains is real work: the runtime is chosen but not written, the content ch
 converted for it, and the face enhancer does not convert cleanly yet. No promises about
 when.
 
+**Chinese language support.** The app is English-only today, and every string in it is
+hardcoded rather than translatable, so this starts with plumbing before it starts with
+translation. Simplified and Traditional both, and the web UI behind the Remote API gets its
+own treatment — it is read on a different machine, by someone who may not be holding the
+phone. Model names, tier names and FaceFusion's own option names stay in English: they are
+the vocabulary of FaceFusion's documentation, and translating them makes the app harder to
+follow, not easier.
+
+**Lip sync.** Drive the mouth from an audio track, as FaceFusion's lip syncer does. The
+model itself is the cheapest thing this project has looked at — 4 GMAC against the 67 the
+swap already runs, about a millisecond a frame — and it needs nothing the NPU cannot
+already do. The work is everywhere else: the app currently copies a video's audio through
+untouched and never decodes a single sample, and lip sync needs the waveform, resampled and
+turned into a spectrogram on the phone, in step with the trim you set. So: plausible, and
+not small.
+
+**Live portrait / expression restore — measured, and it does not fit yet.** Transferring
+expression rather than identity. All six of FaceFusion's LivePortrait graphs were downloaded
+and costed before this line was written, and the generator alone is **9x the entire current
+frame** — around 170 ms per frame at best, turning a 10-second clip from 21 seconds into
+about four minutes. Nothing about it is unsupported; it is simply that expensive. It could
+be a *photo* feature at that price and it cannot be a video one, so if it appears at all it
+will appear for stills first.
+
 ## Install
 
 1. Download the APK (~48 MB) from
