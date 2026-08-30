@@ -5,6 +5,9 @@
 // touching ffpipe, which is the whole point of the seam.
 #include "ffnn.h"
 
+#include <cstdlib>
+#include <cstring>
+
 #include "ffqnn.h"
 
 namespace ffnn {
@@ -43,6 +46,13 @@ bool init(Backend b, const InitSpec& spec) {
   // file had a preferredBackend() that probed first and reported no-NPU on every device,
   // including the one it was running on.
   if (b == Backend::Auto) {
+    // FFBACKEND=ncnn|qnn forces one, for TESTING on a device that has both. Without it the
+    // non-Qualcomm path could only ever be exercised on a phone with no Hexagon, which is
+    // not the bench -- and an untestable path is an unverified one.
+    if (const char* forced = getenv("FFBACKEND")) {
+      if (std::strcmp(forced, "ncnn") == 0) return init(Backend::Ncnn, spec);
+      if (std::strcmp(forced, "qnn") == 0) return init(Backend::Qnn, spec);
+    }
     if (init(Backend::Qnn, spec)) return true;
     return init(Backend::Ncnn, spec);
   }

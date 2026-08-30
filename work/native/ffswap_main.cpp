@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "../android/app/src/main/cpp/ffpipe.h"
+#include "../android/app/src/main/cpp/ffnn.h"
 #include "../android/app/src/main/cpp/ffqnn.h"
 
 static bool readAll(const char* path, std::vector<uint8_t>& out) {
@@ -349,7 +350,10 @@ int main(int argc, char** argv) {
   printf("  %-12s %8.1f ms  <- CPU geometry\n", "geometry", pipe.msGeom);
   double npu = pipe.msDetect + pipe.msLandmark + pipe.msRecognise + pipe.msSwap +
                pipe.msEnhance;
-  printf("  NPU %.1f ms (%.0f%%), CPU %.1f ms (%.0f%%)\n",
-         npu, 100 * npu / wall, pipe.msGeom, 100 * pipe.msGeom / wall);
+  // "NPU" was hardcoded and printed over an ncnn run as `NPU 996.6 ms (94%)`, which is
+  // exactly the kind of confident wrong label that costs an afternoon later.
+  const char* unit = ffnn::active() == ffnn::Backend::Qnn ? "NPU" : "ncnn";
+  printf("  %s %.1f ms (%.0f%%), CPU %.1f ms (%.0f%%)\n",
+         unit, npu, 100 * npu / wall, pipe.msGeom, 100 * pipe.msGeom / wall);
   return 0;
 }
