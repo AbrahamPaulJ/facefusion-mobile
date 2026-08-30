@@ -634,6 +634,12 @@ class MainActivity : ComponentActivity() {
         // required, and a row is only worth flagging when NEITHER is on the device --
         // otherwise a v79 phone, which correctly has just `nsfw_`, would be told the
         // `nsfwq_` it must never download is missing and required.
+        //
+        // ⚠ "v79 and up" was wrong and is now measured: the fp32 gate does NOT build for
+        // v81. qnn-context-binary-generator refuses it with "no properties registered for
+        // q::QNN_Gelu", so v81 ships `nsfwq_` like the tiers BELOW v79 do. fp32 is a v79
+        // fact, not a floor -- which is exactly why this row tests the PAIR and never the
+        // arch (docs/traps.md #10).
         val gateOk = File(modelDir(), "nsfw_$t.bin").canRead() ||
                      File(modelDir(), "nsfwq_$t.bin").canRead()
         val gate = listOf(
