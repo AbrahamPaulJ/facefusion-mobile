@@ -178,6 +178,25 @@ class Pipeline {
   // The source identity: the largest face of the source image, embedding only.
   bool setSource(const ffcv::Image& sourceImage);
 
+  // Whether wav2lip_<tier>.bin was found at init, on the same rule as hasEnhancer():
+  // a switch is offered only for a model that is actually on the device.
+  bool hasLipSyncer() const;
+
+  /**
+   * Upstream's lip syncer on ONE frame (lip_syncer/core.py:sync_lip, wav2lip branch).
+   *
+   * `melWindow` is 80 x 16 row-major, ALREADY through ffaudio::extractWindows -- that is
+   * upstream's prepare_audio_frame including the weight, so this does not scale it again.
+   *
+   * ⚠ This does NOT reuse the swap crop, and that is the whole subtlety. It warps to
+   * ffhq_512 by landmark5_68, transforms the 68 points INTO that crop, and takes both the
+   * lower-face mask and the mouth box from them there. Feeding it the swapper's
+   * arcface_128 crop would run a numerically perfect graph on the wrong pixels.
+   *
+   * Runs after the swap, as its own pass, exactly as upstream orders its processors.
+   */
+  bool syncLip(ffcv::Image& frame, const std::vector<Face>& faces, const float* melWindow);
+
   // Swap every face in `frame`, in place.
   bool swapAll(ffcv::Image& frame, const std::vector<Face>& faces);
 
@@ -187,6 +206,8 @@ class Pipeline {
   // Separate from msSwap on purpose: the enhancer is the one stage a user can turn
   // off, so its cost has to be attributable rather than folded into the swapper's.
   double msEnhance = 0;
+  // Likewise separate: the lip syncer is optional and its cost has to be attributable.
+  double msLipSync = 0;
   int framesDone = 0, facesDone = 0;
 
  private:

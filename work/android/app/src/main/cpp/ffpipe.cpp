@@ -27,6 +27,7 @@ double nowMs() {
 // a graph and that avoids porting its weights separately.
 struct Nets {
   ffnn::Handle det = nullptr, fan = nullptr, fan685 = nullptr, arc = nullptr, swap = nullptr;
+  ffnn::Handle lip = nullptr;   // the lip syncer, optional exactly like the enhancer
   ffnn::Handle nsfw = nullptr;
   // Optional, like fan685: absent simply means the enhancer cannot be offered.
   ffnn::Handle enh = nullptr;
@@ -104,7 +105,7 @@ Pipeline::Pipeline() = default;
 
 Pipeline::~Pipeline() {
   if (p_) {
-    for (auto h : {p_->n.det, p_->n.fan, p_->n.fan685, p_->n.arc, p_->n.swap, p_->n.nsfw,
+    for (auto h : {p_->n.det, p_->n.fan, p_->n.fan685, p_->n.arc, p_->n.swap, p_->n.lip, p_->n.nsfw,
                    p_->n.enh})
       if (h) ffnn::release(h);
   }
@@ -166,7 +167,7 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
   if (candidates.empty()) { err_ = "no tier: the HTP probe returned nothing"; return false; }
 
   auto dropNets = [&]() {
-    for (ffnn::Handle* h : {&p_->n.det, &p_->n.fan, &p_->n.fan685, &p_->n.arc,
+    for (ffnn::Handle* h : {&p_->n.det, &p_->n.fan, &p_->n.fan685, &p_->n.arc, &p_->n.lip,
                             &p_->n.swap, &p_->n.nsfw, &p_->n.enh}) {
       if (*h) ffnn::release(*h);
       *h = nullptr;
@@ -198,6 +199,10 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
     // The face enhancer. Optional in the strongest sense: a separate download, most
     // installs will not have it, and a missing file must never be an init failure.
     p_->n.enh = open("gpen", ffnn::Placement::Cpu);
+
+    // The lip syncer. Same rule as the enhancer: a separate download, absent on every
+    // install that has not asked for it, and never an init failure when missing.
+    p_->n.lip = open("wav2lip");
 
     // The content gate is MANDATORY, because it blocks. A gate that silently does not run
     // is worse than no gate: it reports "checked" to every caller above it.
@@ -237,7 +242,7 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
     struct Probe { std::string name; ffnn::Handle h; };
     const Probe probes[] = {
         {"yoloface", p_->n.det},   {"fan2d", p_->n.fan},  {"arcface", p_->n.arc},
-        {swapperName, p_->n.swap}, {"fan685", p_->n.fan685},
+        {swapperName, p_->n.swap}, {"fan685", p_->n.fan685}, {"wav2lip", p_->n.lip},
         {"gpen", p_->n.enh},       {"gate", p_->n.nsfw},
     };
     std::string report;
@@ -298,6 +303,7 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
 }
 
 bool Pipeline::hasEnhancer() const { return p_ && p_->n.enh != nullptr; }
+bool Pipeline::hasLipSyncer() const { return p_ && p_->n.lip != nullptr; }
 
 void Pipeline::updateConfig(const Config& c) {
   if (!p_) return;
@@ -584,6 +590,96 @@ bool Pipeline::setSource(const ffcv::Image& img) {
   // the source frame's own analysis is bookkeeping, not output
   framesDone = 0; facesDone = 0;
   msDetect = msLandmark = msRecognise = msGeom = msEnhance = 0;
+  return true;
+}
+
+// ---------------------------------------------------- lip syncer (wav2lip_gan_96)
+//
+// lip_syncer/core.py:sync_lip, the wav2lip branch, in order. The one thing to keep in
+// mind reading it: NOTHING here reuses the swapper's crop. The swapper works on
+// arcface_128 at 256; this works on ffhq_512 at 512 and then on a 96x96 mouth box taken
+// from the 68 landmarks INSIDE that crop. Handing it the swapper's crop would run a
+// numerically perfect graph over the wrong pixels, which is trap #9.
+bool Pipeline::syncLip(ffcv::Image& frame, const std::vector<Face>& faces,
+                       const float* melWindow) {
+  if (!p_ || !p_->n.lip || !melWindow) return true;   // absent is not a failure
+  const int LS = 512, MS = 96;
+
+  for (const Face& f : faces) {
+    double t0 = nowMs();
+    // warp_face_by_face_landmark_5(frame, landmark_set['5/68'], 'ffhq_512', (512, 512))
+    float tmpl[10];
+    const float* T = ffcv::warpTemplate(2);          // ffhq_512
+    for (int i = 0; i < 10; ++i) tmpl[i] = T[i] * LS;
+    ffcv::Affine am = ffcv::umeyama(f.landmark5_68, tmpl, 5);
+    ffcv::Image crop = ffcv::warpAffine(frame, am, LS, LS, ffcv::BORDER_REPLICATE);
+
+    // cv2.transform(landmark_68, affine_matrix) -- the 68 points INTO crop space. Every
+    // step below reads these, not the frame-space ones.
+    float lm[136];
+    ffcv::transformPoints(f.landmark68, 68, am, lm);
+
+    ffcv::MatF areaMask = ffcv::createAreaMask(LS, LS, lm, ffcv::AREA_LOWER_FACE);
+    float box[4];
+    ffcv::createBoundingBox(lm, box);
+    ffcv::Affine areaM;
+    ffcv::Image area = ffcv::warpFaceByBoundingBox(crop, box, MS, &areaM);
+    msGeom += nowMs() - t0;
+
+    // prepare_crop_frame: the masked copy CONCATENATED with the reference on the channel
+    // axis, masked first. Upstream zeroes rows 48.. of the HWC frame, i.e. the BOTTOM
+    // half -- the mouth is what the model is asked to invent.
+    t0 = nowMs();
+    std::vector<float> in((size_t)6 * MS * MS);
+    for (int y = 0; y < MS; ++y) {
+      const uint8_t* row = area.row(y);
+      const bool masked = y >= MS / 2;
+      for (int x = 0; x < MS; ++x) {
+        for (int c = 0; c < 3; ++c) {
+          const float v = row[x * 3 + c] / 255.0f;
+          in[(size_t)c * MS * MS + (size_t)y * MS + x] = masked ? 0.0f : v;
+          in[(size_t)(c + 3) * MS * MS + (size_t)y * MS + x] = v;
+        }
+      }
+    }
+    msGeom += nowMs() - t0;
+
+    t0 = nowMs();
+    std::vector<std::vector<float>> out;
+    if (!ffnn::execute(p_->n.lip, {"source", "target"}, {melWindow, in.data()}, out) ||
+        out.empty() || out[0].size() < (size_t)3 * MS * MS) {
+      err_ = std::string("lip syncer: ") + ffnn::lastError();
+      return false;
+    }
+    msLipSync += nowMs() - t0;
+
+    // normalize_crop_frame: clip(0, 1) * 255, back to interleaved BGR.
+    t0 = nowMs();
+    ffcv::Image synced(MS, MS, 3);
+    for (int y = 0; y < MS; ++y) {
+      uint8_t* row = synced.row(y);
+      for (int x = 0; x < MS; ++x) {
+        for (int c = 0; c < 3; ++c) {
+          float v = out[0][(size_t)c * MS * MS + (size_t)y * MS + x];
+          v = v < 0.f ? 0.f : (v > 1.f ? 1.f : v);
+          row[x * 3 + c] = (uint8_t)(v * 255.0f);
+        }
+      }
+    }
+
+    // Back into the 512 crop through the inverse box warp, BORDER_REPLICATE, then paste
+    // the crop into the frame through the lower-face mask.
+    ffcv::Image back = ffcv::warpAffine(synced, ffcv::invertAffine(areaM), LS, LS,
+                                        ffcv::BORDER_REPLICATE);
+    ffcv::MatF backF(LS, LS, 3);
+    for (int y = 0; y < LS; ++y) {
+      const uint8_t* srow = back.row(y);
+      float* drow = backF.row(y);
+      for (int i = 0; i < LS * 3; ++i) drow[i] = srow[i];
+    }
+    ffcv::pasteBack(frame, backF, areaMask, am);
+    msGeom += nowMs() - t0;
+  }
   return true;
 }
 

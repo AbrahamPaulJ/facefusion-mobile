@@ -42,7 +42,7 @@ fi
 "$CXX" -O2 -std=c++17 -fPIC \
   -I"$CPP/include" -I"$CPP/include/QNN" \
   "$FF/work/native/ffswap_main.cpp" "$CPP/ffqnn.cpp" "$CPP/ffcv.cpp" "$CPP/ffpipe.cpp" \
-  "$CPP/ffnn.cpp" "$CPP/ffnn_qnn.cpp" "${NCNN_FLAGS[@]}" \
+  "$CPP/ffnn.cpp" "$CPP/ffnn_qnn.cpp" "$CPP/ffaudio.cpp" "${NCNN_FLAGS[@]}" \
   -o "$OUT/ffswap" -llog -ldl -lm -static-libstdc++ 2>&1 | head -40
 
 [ -f "$OUT/ffswap" ] || { echo "BUILD FAILED"; exit 1; }
