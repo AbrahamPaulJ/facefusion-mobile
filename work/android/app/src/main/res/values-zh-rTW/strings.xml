@@ -40,6 +40,10 @@
     <string name="swap_proc_swapper">face_swapper</string>
     <string name="swap_proc_enhancer">face_enhancer</string>
     <string name="swap_proc_lip_syncer">lip_syncer</string>
+    <string name="proc_get_title">下載 %1$s？</string>
+    <string name="proc_get_body">此處理器需要一個本機尚未下載的模型。它將與其餘缺少的模型一起下載。</string>
+    <string name="proc_get_confirm">下載</string>
+    <string name="proc_get_cancel">暫不</string>
 
     <string name="swap_clip">片段</string>
     <string name="swap_clip_summary">%1$d 影格，共 %2$s   %3$d fps</string>

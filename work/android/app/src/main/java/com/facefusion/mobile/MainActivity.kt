@@ -143,6 +143,16 @@ class MainActivity : ComponentActivity() {
     private var confirmMetered by mutableStateOf(false)
 
     /**
+     * A processor whose model is missing was tapped; the name to name in the prompt.
+     *
+     * The Processors row lists every stage whether or not its model is on the device,
+     * so tapping one that is absent has to lead somewhere. It leads here, and here leads
+     * to the same download the Settings inventory starts -- there is one downloader and
+     * it fetches whatever the manifest says is missing.
+     */
+    private var confirmModel by mutableStateOf<String?>(null)
+
+    /**
      * Whether this tier's set is incomplete, as explicit state refreshed from disk.
      *
      * Not a function evaluated during composition. The first version of this interpolated
@@ -552,6 +562,7 @@ class MainActivity : ComponentActivity() {
                                 hasInswapper = hasInswapper,
                                 hasEnhancer = hasEnhancer,
                                 hasLipSyncer = hasLipSyncer,
+                                onRequestModel = { confirmModel = it },
                                 openCard = openCard,
                                 onToggleCard = { k -> openCard = if (openCard == k) "" else k },
                                 advancedOpen = advancedOpen,
@@ -612,6 +623,24 @@ class MainActivity : ComponentActivity() {
                                     else null,
                             )
                         }
+                    }
+
+                    confirmModel?.let { name ->
+                        AlertDialog(
+                            onDismissRequest = { confirmModel = null },
+                            title = { Text(stringResource(R.string.proc_get_title, name)) },
+                            text = { Text(stringResource(R.string.proc_get_body)) },
+                            confirmButton = {
+                                TextButton({ confirmModel = null; onDownloadTapped() }) {
+                                    Text(stringResource(R.string.proc_get_confirm))
+                                }
+                            },
+                            dismissButton = {
+                                TextButton({ confirmModel = null }) {
+                                    Text(stringResource(R.string.proc_get_cancel))
+                                }
+                            },
+                        )
                     }
 
                     if (confirmMetered) {

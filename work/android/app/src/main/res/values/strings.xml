@@ -56,6 +56,10 @@
     <string name="swap_proc_swapper">face_swapper</string>
     <string name="swap_proc_enhancer">face_enhancer</string>
     <string name="swap_proc_lip_syncer">lip_syncer</string>
+    <string name="proc_get_title">Download %1$s?</string>
+    <string name="proc_get_body">This processor needs a model that is not on this phone yet. It downloads with the rest of the missing set.</string>
+    <string name="proc_get_confirm">Download</string>
+    <string name="proc_get_cancel">Not now</string>
 
     <string name="swap_clip">Clip</string>
     <!-- %1$d frames, %2$s duration, %3$d frames per second -->

@@ -109,6 +109,8 @@ fun SwapScreen(
     hasInswapper: Boolean,
     hasEnhancer: Boolean,
     hasLipSyncer: Boolean,
+    /** A processor whose model is not on the device was tapped. */
+    onRequestModel: (String) -> Unit,
     openCard: String,
     onToggleCard: (String) -> Unit,
     advancedOpen: Boolean,
@@ -173,8 +175,50 @@ fun SwapScreen(
         // face_swapper is drawn selected and is not clickable: this app IS the swapper, and
         // a control that cannot be turned off should still be visible, because the row is
         // there to say WHICH stages will run.
-        if (hasEnhancer || hasLipSyncer) {
+        run {
             Caption(stringResource(R.string.swap_processors))
+            // Every processor is listed whether or not its model is on the device. Hiding
+            // the ones that are missing meant the row silently disagreed with itself
+            // between installs, and a feature nobody can SEE is a feature nobody asks for.
+            // An absent model reads as "not installed" and asks to fetch itself.
+            //
+            // Not `enabled = false`: a disabled chip cannot be tapped, and the tap is the
+            // whole point. It is muted by COLOUR and carries a download icon instead.
+            val muted = FilterChipDefaults.filterChipColors(
+                labelColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                iconColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            )
+
+            @Composable
+            fun ProcessorChip(
+                name: String,
+                installed: Boolean,
+                on: Boolean,
+                available: Boolean,
+                onToggle: () -> Unit,
+            ) {
+                FilterChip(
+                    selected = installed && on && available,
+                    onClick = { if (installed) onToggle() else onRequestModel(name) },
+                    enabled = if (installed) idle && available else idle,
+                    colors = if (installed) FilterChipDefaults.filterChipColors() else muted,
+                    label = { Text(name) },
+                    leadingIcon = when {
+                        // A plus, not a download glyph: Icons.Default has no Download,
+                        // and pulling in material-icons-extended for one vector is not
+                        // worth it on a 66 MB APK. On a muted chip a plus reads as
+                        // "add this one", which is what tapping it does.
+                        !installed -> {
+                            { Icon(Icons.Default.Add, null, Modifier.size(18.dp)) }
+                        }
+                        on && available -> {
+                            { Icon(Icons.Default.Check, null, Modifier.size(18.dp)) }
+                        }
+                        else -> null
+                    },
+                )
+            }
+
             // The chip rows are their OWN Column, and its spacing is ZERO on purpose.
             //
             // A FilterChip draws 32 dp tall but LAYS OUT 48 dp: Material3 enforces a
@@ -183,10 +227,11 @@ fun SwapScreen(
             // there. As siblings of the outer Column the gap measured 32 dp (12 + an 8 dp
             // spacer + 12); at 8 dp here it was still 24; at 0 it is the 16 dp the touch
             // targets need and nothing more.
-            //
-            // Going tighter means giving up the touch target, which is not worth 8 dp.
             Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // face_swapper is drawn selected and is not clickable: this app IS the
+                    // swapper, and a control that cannot be turned off should still be
+                    // visible, because the row is there to say WHICH stages will run.
                     FilterChip(
                         selected = true,
                         onClick = {},
@@ -194,44 +239,30 @@ fun SwapScreen(
                         label = { Text(stringResource(R.string.swap_proc_swapper)) },
                         leadingIcon = { Icon(Icons.Default.Check, null, Modifier.size(18.dp)) },
                     )
-                    if (hasEnhancer) {
-                        FilterChip(
-                            selected = opts.faceEnhance,
-                            onClick = { onOptsChange(opts.copy(faceEnhance = !opts.faceEnhance)) },
-                            enabled = idle,
-                            label = { Text(stringResource(R.string.swap_proc_enhancer)) },
-                            leadingIcon = if (opts.faceEnhance) {
-                                { Icon(Icons.Default.Check, null, Modifier.size(18.dp)) }
-                            } else null,
-                        )
-                    }
+                    ProcessorChip(
+                        name = stringResource(R.string.swap_proc_enhancer),
+                        installed = hasEnhancer,
+                        on = opts.faceEnhance,
+                        available = true,
+                        onToggle = { onOptsChange(opts.copy(faceEnhance = !opts.faceEnhance)) },
+                    )
                 }
                 // lip_syncer gets its OWN row. Three chips do not fit across a phone, and
-                // Row does not wrap -- it squeezes, so the labels lose their shape rather
-                // than moving down. These are upstream's identifiers and a chip whose text
-                // has been compressed to fit stops reading as one.
+                // Row does not wrap -- it SQUEEZES, so the labels lose their shape rather
+                // than moving down, and these are upstream's identifiers.
                 //
-                // Disabled, not hidden, on a photo: the row exists to say which stages
-                // will run, and a chip that vanishes when you pick a still reads as a bug
-                // rather than as "there is no audio to sync to".
-                //
-                // ⚠ But NOT disabled before a target is picked. `durationMs > 0` alone was
-                // false on an empty screen, so the chip greyed out the moment you opened
-                // the app and looked broken next to face_enhancer, which needs no target.
-                // There is nothing to say "no" about until there is a target to say it of.
-                val lipSyncable = !hasTarget || durationMs > 0
-                if (hasLipSyncer) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(
-                            selected = opts.lipSync && lipSyncable,
-                            onClick = { onOptsChange(opts.copy(lipSync = !opts.lipSync)) },
-                            enabled = idle && lipSyncable,
-                            label = { Text(stringResource(R.string.swap_proc_lip_syncer)) },
-                            leadingIcon = if (opts.lipSync && lipSyncable) {
-                                { Icon(Icons.Default.Check, null, Modifier.size(18.dp)) }
-                            } else null,
-                        )
-                    }
+                // ⚠ `available` is false only once a PHOTO is picked. `durationMs > 0`
+                // alone was false on an empty screen, so the chip greyed out the moment the
+                // app opened and looked broken next to face_enhancer, which needs no
+                // target. There is nothing to say no about until there is a target.
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ProcessorChip(
+                        name = stringResource(R.string.swap_proc_lip_syncer),
+                        installed = hasLipSyncer,
+                        on = opts.lipSync,
+                        available = !hasTarget || durationMs > 0,
+                        onToggle = { onOptsChange(opts.copy(lipSync = !opts.lipSync)) },
+                    )
                 }
             }
         }
