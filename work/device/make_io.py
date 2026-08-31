@@ -42,9 +42,12 @@ SPECS = {
 	# The lip syncer. Its two inputs are BUILT rather than captured -- the mouth crop the
 	# app will feed does not exist until roadmap 9 step 5 -- so this verifies the
 	# CONVERSION and says nothing about where the mouth lands. make_lipsync_calib.py.
+	# The HELD-OUT half, on gpen and nsfw's rule: the odd capture frames, disjoint from
+	# the six the encodings were fitted on. Measuring deploy SNR on the calibration set
+	# flatters it.
 	'wav2lip':   dict(onnx='onnx/wav2lip_gan_96_b1_sim.onnx',
-					  inputs=[('source', 'calib/lipsync_source', (1, 1, 80, 16)),
-							  ('target', 'calib/lipsync_target', (1, 6, 96, 96))]),
+					  inputs=[('source', 'calib/lipsync_source_heldout', (1, 1, 80, 16)),
+							  ('target', 'calib/lipsync_target_heldout', (1, 6, 96, 96))]),
 	'inswapper': dict(onnx='onnx/inswapper_128_split_sim.onnx',
 					  inputs=[('target', 'calib/swap_target_128', (1, 3, 128, 128)),
 							  ('source', 'calib/swap_source_128', (1, 512))]),

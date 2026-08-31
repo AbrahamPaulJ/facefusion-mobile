@@ -131,15 +131,29 @@ def main():
 	if not windows:
 		sys.exit('no mel windows -- audio too short for %g fps' % args.fps)
 
+	# Split by PARITY, the rule gpen and nsfw already use: the held-out set is the odd
+	# frames, so it is disjoint from calibration rather than merely the tail of the same
+	# sequence. Consecutive video frames are correlated and this is still a friendly test,
+	# but it is at least not the set that trained the encodings.
 	n = len(targets)
-	for sub in ('lipsync_source', 'lipsync_target'):
+	for sub in ('lipsync_source', 'lipsync_target',
+	            'lipsync_source_heldout', 'lipsync_target_heldout'):
 		os.makedirs(os.path.join(args.out, sub), exist_ok=True)
+	kept = {'lipsync_target': 0, 'lipsync_target_heldout': 0}
 	for i in range(n):
 		w = mel.prepare_audio_frame(windows[(i * len(windows)) // n])
+		suffix = '_heldout' if i % 2 else ''
+		# The index in the filename stays the CAPTURE index, so a held-out file still
+		# says which frame it came from.
 		numpy.ascontiguousarray(targets[i], numpy.float32).tofile(
-			os.path.join(args.out, 'lipsync_target', 'lipsync_target_%03d.raw' % i))
+			os.path.join(args.out, 'lipsync_target' + suffix,
+			             'lipsync_target_%03d.raw' % i))
 		numpy.ascontiguousarray(w, numpy.float32).tofile(
-			os.path.join(args.out, 'lipsync_source', 'lipsync_source_%03d.raw' % i))
+			os.path.join(args.out, 'lipsync_source' + suffix,
+			             'lipsync_source_%03d.raw' % i))
+		kept['lipsync_target' + suffix] += 1
+	print('calibration %d, held out %d'
+	      % (kept['lipsync_target'], kept['lipsync_target_heldout']))
 
 	stack = numpy.concatenate(targets, axis=0)
 	print('%d cases -> %s/lipsync_{source,target}/' % (n, args.out))
