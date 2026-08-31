@@ -175,38 +175,63 @@ fun SwapScreen(
         // there to say WHICH stages will run.
         if (hasEnhancer || hasLipSyncer) {
             Caption(stringResource(R.string.swap_processors))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = true,
-                    onClick = {},
-                    enabled = false,
-                    label = { Text(stringResource(R.string.swap_proc_swapper)) },
-                    leadingIcon = { Icon(Icons.Default.Check, null, Modifier.size(18.dp)) },
-                )
-                if (hasEnhancer) {
+            // The chip rows are their OWN Column, and its spacing is ZERO on purpose.
+            //
+            // A FilterChip draws 32 dp tall but LAYS OUT 48 dp: Material3 enforces a
+            // minimum interactive size, which is 8 dp of invisible padding above and below
+            // every chip. So any vertical spacing lands on top of 16 dp that is already
+            // there. As siblings of the outer Column the gap measured 32 dp (12 + an 8 dp
+            // spacer + 12); at 8 dp here it was still 24; at 0 it is the 16 dp the touch
+            // targets need and nothing more.
+            //
+            // Going tighter means giving up the touch target, which is not worth 8 dp.
+            Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
-                        selected = opts.faceEnhance,
-                        onClick = { onOptsChange(opts.copy(faceEnhance = !opts.faceEnhance)) },
-                        enabled = idle,
-                        label = { Text(stringResource(R.string.swap_proc_enhancer)) },
-                        leadingIcon = if (opts.faceEnhance) {
-                            { Icon(Icons.Default.Check, null, Modifier.size(18.dp)) }
-                        } else null,
+                        selected = true,
+                        onClick = {},
+                        enabled = false,
+                        label = { Text(stringResource(R.string.swap_proc_swapper)) },
+                        leadingIcon = { Icon(Icons.Default.Check, null, Modifier.size(18.dp)) },
                     )
+                    if (hasEnhancer) {
+                        FilterChip(
+                            selected = opts.faceEnhance,
+                            onClick = { onOptsChange(opts.copy(faceEnhance = !opts.faceEnhance)) },
+                            enabled = idle,
+                            label = { Text(stringResource(R.string.swap_proc_enhancer)) },
+                            leadingIcon = if (opts.faceEnhance) {
+                                { Icon(Icons.Default.Check, null, Modifier.size(18.dp)) }
+                            } else null,
+                        )
+                    }
                 }
+                // lip_syncer gets its OWN row. Three chips do not fit across a phone, and
+                // Row does not wrap -- it squeezes, so the labels lose their shape rather
+                // than moving down. These are upstream's identifiers and a chip whose text
+                // has been compressed to fit stops reading as one.
+                //
                 // Disabled, not hidden, on a photo: the row exists to say which stages
                 // will run, and a chip that vanishes when you pick a still reads as a bug
                 // rather than as "there is no audio to sync to".
+                //
+                // ⚠ But NOT disabled before a target is picked. `durationMs > 0` alone was
+                // false on an empty screen, so the chip greyed out the moment you opened
+                // the app and looked broken next to face_enhancer, which needs no target.
+                // There is nothing to say "no" about until there is a target to say it of.
+                val lipSyncable = !hasTarget || durationMs > 0
                 if (hasLipSyncer) {
-                    FilterChip(
-                        selected = opts.lipSync && durationMs > 0,
-                        onClick = { onOptsChange(opts.copy(lipSync = !opts.lipSync)) },
-                        enabled = idle && durationMs > 0,
-                        label = { Text(stringResource(R.string.swap_proc_lip_syncer)) },
-                        leadingIcon = if (opts.lipSync && durationMs > 0) {
-                            { Icon(Icons.Default.Check, null, Modifier.size(18.dp)) }
-                        } else null,
-                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = opts.lipSync && lipSyncable,
+                            onClick = { onOptsChange(opts.copy(lipSync = !opts.lipSync)) },
+                            enabled = idle && lipSyncable,
+                            label = { Text(stringResource(R.string.swap_proc_lip_syncer)) },
+                            leadingIcon = if (opts.lipSync && lipSyncable) {
+                                { Icon(Icons.Default.Check, null, Modifier.size(18.dp)) }
+                            } else null,
+                        )
+                    }
                 }
             }
         }
