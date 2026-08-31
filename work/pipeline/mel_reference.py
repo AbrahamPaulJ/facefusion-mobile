@@ -227,18 +227,25 @@ def selftest():
 def dump(media_path, out_dir, fps):
 	os.makedirs(out_dir, exist_ok=True)
 	raw = decode_audio(media_path)
-	audio = prepare_voice(raw)
+	# Stepwise rather than prepare_voice() in one call, so the C++ test can check the
+	# resample, prepare_audio, the spectrogram and the windows as four separate stages.
+	# A single end-to-end number hides which one moved.
+	resampled = scipy.signal.resample(raw, round(len(raw) * VOICE_RESAMPLE_RATE / AUDIO_SAMPLE_RATE))
+	audio = prepare_audio(resampled)
 	spectrogram = create_spectrogram(audio)
 	frames = extract_audio_frames(spectrogram, fps)
 	prepared = numpy.concatenate([prepare_audio_frame(f) for f in frames
 	                              if f.shape[1] == AUDIO_STEP_SIZE], axis=0)
 	raw.astype(numpy.int16).tofile(os.path.join(out_dir, 'pcm48_stereo.s16'))
+	resampled.astype(numpy.float32).tofile(os.path.join(out_dir, 'resampled16k_stereo.f32'))
 	audio.astype(numpy.float32).tofile(os.path.join(out_dir, 'audio16k.f32'))
+	create_mel_filter_bank().astype(numpy.float32).tofile(os.path.join(out_dir, 'bank.f32'))
 	spectrogram.astype(numpy.float32).tofile(os.path.join(out_dir, 'mel.f32'))
 	prepared.astype(numpy.float32).tofile(os.path.join(out_dir, 'frames.f32'))
 	meta = {
 		'media': os.path.basename(media_path), 'fps': fps,
 		'pcm48_samples': int(raw.shape[0]), 'audio16k_samples': int(audio.shape[0]),
+		'resampled_shape': list(resampled.shape),
 		'mel_shape': list(spectrogram.shape), 'frames_shape': list(prepared.shape),
 		'weight': LIP_SYNCER_WEIGHT,
 	}
