@@ -192,6 +192,34 @@ object NativePipe {
     /** Swaps every face in place; returns the face count, or -1 on error. */
     @JvmStatic external fun processFrame(bgr: ByteArray, w: Int, h: Int): Int
 
+    /** True when wav2lip_<tier>.bin was on the device at init. Gates the UI switch. */
+    @JvmStatic external fun hasLipSyncer(): Boolean
+
+    /**
+     * Hand the whole clip's PCM over once, before the frame loop.
+     *
+     * [pcm] is interleaved as [AudioDecoder] produced it; the resample to 16 kHz, the mix
+     * to mono and upstream's normalise all happen natively, so there is one implementation
+     * of that arithmetic and it is the one work/native/test_ffaudio.py measures.
+     *
+     * [fps] is the OUTPUT rate, not the source's: a rate-reduced run writes fewer frames
+     * than it decodes, and window k belongs to output frame k.
+     */
+    @JvmStatic external fun setAudio(pcm: ShortArray, channels: Int, sampleRate: Int,
+                                     fps: Double): Boolean
+
+    /** How many mel windows [setAudio] produced. */
+    @JvmStatic external fun melWindowTotal(): Int
+
+    /**
+     * Swap, then lip sync, one frame in place; returns the face count, or -1.
+     *
+     * A negative [frameIndex], no lip syncer on the device, or audio that was never set
+     * all fall back to a plain swap, so this is safe to call unconditionally.
+     */
+    @JvmStatic external fun processFrameAt(bgr: ByteArray, w: Int, h: Int,
+                                           frameIndex: Int): Int
+
     @JvmStatic external fun argbToBgr(argb: IntArray, w: Int, h: Int): ByteArray
     @JvmStatic external fun yuvToBgr(
         y: ByteArray, yRow: Int,

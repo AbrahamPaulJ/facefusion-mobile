@@ -45,6 +45,14 @@ class VideoSwapper(
      * nothing here would ever reach a suspension point for the coroutine to cancel at.
      */
     private val isCancelled: () -> Boolean = { false },
+    /**
+     * Run the lip syncer after the swap.
+     *
+     * Off unless the caller asks AND the model is on the device: this is a separate
+     * download like the enhancer, and a clip with no audio track cannot be synced at all.
+     * Both are checked below rather than trusted from here.
+     */
+    private val lipSync: Boolean = false,
 ) {
 
     private var encTrack = -1
@@ -109,6 +117,28 @@ class VideoSwapper(
         onLog("${width}x$height @ ${inFps}fps" +
               (if (rotation != 0) " rot ${rotation} -> ${outW}x$outH" else "") +
               (if (fps != inFps) " -> ${fps}fps" else "") + ", ~$expected frames")
+
+        // The lip syncer's audio, taken once for the whole clip, at the OUTPUT rate --
+        // window k belongs to output frame k, and a rate-reduced run writes fewer frames
+        // than it decodes. Done before the video loop so a clip that cannot be synced says
+        // so up front instead of half way through.
+        var syncing = false
+        if (lipSync && NativePipe.hasLipSyncer()) {
+            val pcm = AudioDecoder.decode(inputPath, trimStartUs, trimEndUs)
+            when {
+                pcm == null || pcm.frames == 0 ->
+                    onLog("lip sync: no audio track, skipping")
+                !NativePipe.setAudio(pcm.samples, pcm.channels, pcm.sampleRate, fps.toDouble()) ->
+                    onLog("lip sync: ${NativePipe.lastError()}, skipping")
+                else -> {
+                    syncing = true
+                    onLog("lip sync: %.1fs of audio at %d Hz, %d windows"
+                        .format(pcm.seconds, pcm.sampleRate, NativePipe.melWindowTotal()))
+                }
+            }
+        } else if (lipSync) {
+            onLog("lip sync: model not installed, skipping")
+        }
 
         extractor.selectTrack(videoTrack)
         if (trimStartUs > 0) extractor.seekTo(trimStartUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
@@ -258,7 +288,10 @@ class VideoSwapper(
                         image.close()
                         val bgr = if (rotation == 0) decoded
                                   else NativePipe.rotateBgr(decoded, width, height, rotation)
-                        val faces = NativePipe.processFrame(bgr, outW, outH)
+                        // `swapped` is the OUTPUT frame index: it counts frames written,
+                        // so it already accounts for the ones decimation dropped.
+                        val faces = NativePipe.processFrameAt(bgr, outW, outH,
+                                                              if (syncing) swapped else -1)
                         if (faces < 0) error("native: ${NativePipe.lastError()}")
                         onFrame(bgr, outW, outH)
                         feedEncoder(encoder, cropBgr(bgr, outW, outH, encW, encH),

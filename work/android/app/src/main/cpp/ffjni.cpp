@@ -416,6 +416,70 @@ Java_com_facefusion_mobile_NativePipe_processFrame(JNIEnv* env, jclass, jbyteArr
   return (jint)faces.size();
 }
 
+// Whether wav2lip_<tier>.bin was present at init. Same contract as hasEnhancer: it
+// decides whether the switch is OFFERED, and false before init hides a control rather
+// than showing one that cannot work.
+JNIEXPORT jboolean JNICALL
+Java_com_facefusion_mobile_NativePipe_hasLipSyncer(JNIEnv*, jclass) {
+  return (g_pipe && g_pipe->hasLipSyncer()) ? JNI_TRUE : JNI_FALSE;
+}
+
+/**
+ * Hand the clip's decoded PCM over once, before the frame loop.
+ *
+ * `fps` is the OUTPUT frame rate, not the source's: window k belongs to output frame k,
+ * and a rate-reduced run writes fewer frames than it decodes.
+ */
+JNIEXPORT jboolean JNICALL
+Java_com_facefusion_mobile_NativePipe_setAudio(JNIEnv* env, jclass, jshortArray jPcm,
+                                               jint channels, jint sampleRate, jdouble fps) {
+  if (!g_pipe) { g_err = "pipeline not initialised"; return JNI_FALSE; }
+  const jsize n = env->GetArrayLength(jPcm);
+  if (n <= 0 || channels <= 0) { g_err = "no audio samples"; return JNI_FALSE; }
+  std::vector<int16_t> pcm((size_t)n);
+  env->GetShortArrayRegion(jPcm, 0, n, (jshort*)pcm.data());
+  const size_t frames = (size_t)n / (size_t)channels;
+  if (!g_pipe->setAudio(pcm.data(), frames, channels, sampleRate, fps)) {
+    g_err = g_pipe->error().empty() ? "could not prepare the audio" : g_pipe->error();
+    return JNI_FALSE;
+  }
+  return JNI_TRUE;
+}
+
+// How many mel windows setAudio produced, for a caller that wants to report coverage.
+JNIEXPORT jint JNICALL
+Java_com_facefusion_mobile_NativePipe_melWindowTotal(JNIEnv*, jclass) {
+  return g_pipe ? (jint)g_pipe->melWindowTotal() : 0;
+}
+
+/**
+ * Swap and then LIP SYNC one BGR frame, in place. Returns the face count, or -1.
+ *
+ * Separate from processFrame only because of the index: the lip syncer is the first stage
+ * here whose input depends on WHICH frame this is. A negative index, no lip syncer on the
+ * device, or audio that was never set all fall back to a plain swap, so a caller may use
+ * this unconditionally.
+ */
+JNIEXPORT jint JNICALL
+Java_com_facefusion_mobile_NativePipe_processFrameAt(JNIEnv* env, jclass, jbyteArray jBgr,
+                                                     jint w, jint h, jint frameIndex) {
+  if (!g_pipe) { g_err = "pipeline not initialised"; return -1; }
+  ffcv::Image img(w, h, 3);
+  env->GetByteArrayRegion(jBgr, 0, (jsize)img.data.size(), (jbyte*)img.data.data());
+  auto faces = g_pipe->analyse(img);
+  if (!faces.empty()) {
+    if (!g_pipe->swapAll(img, faces)) { g_err = g_pipe->error(); return -1; }
+    if (frameIndex >= 0 && g_pipe->hasLipSyncer() && g_pipe->melWindowTotal() > 0) {
+      if (!g_pipe->syncLip(img, faces, g_pipe->melWindow(frameIndex))) {
+        g_err = g_pipe->error();
+        return -1;
+      }
+    }
+    env->SetByteArrayRegion(jBgr, 0, (jsize)img.data.size(), (const jbyte*)img.data.data());
+  }
+  return (jint)faces.size();
+}
+
 /** Bitmap ARGB_8888 ints -> packed BGR bytes. */
 JNIEXPORT jbyteArray JNICALL
 Java_com_facefusion_mobile_NativePipe_argbToBgr(JNIEnv* env, jclass, jintArray jArgb,
