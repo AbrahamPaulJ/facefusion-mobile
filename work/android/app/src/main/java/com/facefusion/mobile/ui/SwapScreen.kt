@@ -28,6 +28,7 @@ import com.facefusion.mobile.FaceMaskerCard
 import com.facefusion.mobile.FaceSwapperCard
 import com.facefusion.mobile.ModelDownload
 import com.facefusion.mobile.OptionSegments
+import com.facefusion.mobile.OptionSteps
 import com.facefusion.mobile.SwapOptions
 import java.io.File
 import kotlin.math.roundToInt
@@ -122,6 +123,14 @@ fun SwapScreen(
     savedPath: String?,
     onPickSource: () -> Unit,
     onPickTarget: () -> Unit,
+    /**
+     * Save the frame currently shown in the SWAPPED pane, as an image.
+     *
+     * Distinct from [onSaveFrame], which takes a position and reads it out of the
+     * FINISHED video. This one needs no argument because the frame is already on
+     * screen, and it works before any run has happened.
+     */
+    onSavePreviewFrame: () -> Unit,
     onClearTarget: () -> Unit,
     onSwap: () -> Unit,
     onCancel: () -> Unit,
@@ -220,12 +229,13 @@ fun SwapScreen(
         val portrait = targetAspect < 1f
         val panes: @Composable (Modifier) -> Unit = { paneModifier ->
             PreviewPane(
-                // "ORIGINAL" is the BEFORE half of a before/after, and there is no
-                // before until a target exists -- an empty box labelled "original" names
-                // something that is not there. Empty, not hidden: the label row reserves
-                // its height either way, so the pane does not jump when a target lands.
+                // "ORIGINAL" is the BEFORE half of a before/after, and there is no before
+                // until a target exists -- an empty box labelled "original" names something
+                // that is not there. So before a target it says TARGET instead, which is
+                // what the pane is ASKING for and the counterpart of SOURCE FACE above.
+                // (It was blank, which left the one pane on the screen with no name at all.)
                 label = when {
-                    !hasTarget -> ""
+                    !hasTarget -> stringResource(R.string.swap_pane_target)
                     preview.timeLabel.isEmpty() ->
                         stringResource(R.string.swap_pane_original)
                     else -> stringResource(R.string.swap_pane_original_at, preview.timeLabel)
@@ -293,8 +303,23 @@ fun SwapScreen(
                 overlay = if (modelsMissing) { { DownloadOverlay(onDownload) } } else null,
                 zoom = zoom,
             ) {
-                // Spinner only. The refresh button is gone -- see item 1 -- and the fixed
-                // slot height in PreviewPane keeps this from moving anything below it.
+                // Spinner WHILE working, save button when there is something to save. Never
+                // both: the fixed slot height in PreviewPane keeps either from moving the
+                // trim slider and the Swap button down the screen mid-interaction.
+                //
+                // The save writes the previewed frame straight out of the pane. The output
+                // pane has had a Save frame button since the video path existed, but it can
+                // only reach frames of a FINISHED run -- so pulling one still out of a clip
+                // meant swapping the whole clip first.
+                if (!preview.busy && preview.swapped != null) {
+                    IconButton(onClick = onSavePreviewFrame, enabled = idle) {
+                        Icon(
+                            IconDownload,
+                            stringResource(R.string.out_save_frame),
+                            Modifier.size(18.dp),
+                        )
+                    }
+                }
                 if (preview.busy) {
                     CircularProgressIndicator(
                         Modifier.size(18.dp),
@@ -349,14 +374,27 @@ fun SwapScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
-                // Frame rate. Only rates at or below the input's are offered: a higher one
-                // would duplicate frames, and each duplicate costs a full swap to produce
-                // nothing new. Dropping frames is the only direction that saves anything.
-                val rates = listOf(0 to stringResource(R.string.swap_rate_same, inputFps)) +
-                    listOf(24, 30, 60).filter { it < inputFps }.map { it to "$it" }
+                // Frame rate. Only rates BELOW the input's are offered: a higher one would
+                // duplicate frames, and each duplicate costs a full swap to produce nothing
+                // new. Dropping frames is the only direction that saves anything.
+                //
+                // ⚠ The low stops are the point, and 24/30/60 alone were not enough to be
+                // useful. On a 30 fps clip the deepest cut available was 24 -- a 20% saving
+                // against the CPU backend, which is an order of magnitude slower than the
+                // NPU -- and on a 24 fps clip nothing qualified, so the control hid itself
+                // and offered no reduction at all. 5/10/15 are what make it worth having:
+                // 30 -> 10 is a third of the frames and close to a third of the time,
+                // because VideoSwapper decimates BEFORE the swap rather than after it.
+                //
+                // Ascending, with "same as source" last: the slider then runs from cheapest
+                // on the left to full quality on the right, which is the direction the
+                // trade-off reads in.
+                val rates = listOf(5, 10, 15, 24, 30, 60).filter { it < inputFps }
+                                .map { it to "$it" } +
+                            listOf(0 to stringResource(R.string.swap_rate_same, inputFps))
                 if (rates.size > 1) {
                     Spacer(Modifier.height(6.dp))
-                    OptionSegments(
+                    OptionSteps(
                         stringResource(R.string.swap_frame_rate),
                         rates,
                         if (opts.outputFps in 1..inputFps) opts.outputFps else 0,
@@ -364,6 +402,7 @@ fun SwapScreen(
                         hint = if (opts.outputFps == 0 || opts.outputFps >= inputFps)
                                    stringResource(R.string.swap_rate_hint_every)
                                else stringResource(R.string.swap_rate_hint_drop),
+                        enabled = idle,
                     )
                 }
             }

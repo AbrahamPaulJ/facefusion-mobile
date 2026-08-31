@@ -27,7 +27,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.viewinterop.AndroidView
@@ -92,6 +94,30 @@ fun Wordmark(modifier: Modifier = Modifier) {
         modifier = modifier,
     )
 }
+
+/**
+ * Material's `file_download`, declared here rather than depended on.
+ *
+ * `material-icons-core` — the artifact material3 already brings in — carries a fixed short
+ * list, and a download glyph is not on it. The rest live in `material-icons-extended`,
+ * which is thousands of vectors pulled in for one, so the path is written out instead. It
+ * is Google's own `file_download` path data, unchanged, on the standard 24 dp viewport.
+ */
+val IconDownload: ImageVector = ImageVector.Builder(
+    name = "file_download",
+    defaultWidth = 24.dp, defaultHeight = 24.dp,
+    viewportWidth = 24f, viewportHeight = 24f,
+).apply {
+    // Black, so Icon()'s tint is what actually colours it — the convention every Material
+    // icon follows. A themed colour baked in here would ignore the caller.
+    path(fill = SolidColor(Color.Black)) {
+        moveTo(19f, 9f); horizontalLineToRelative(-4f); verticalLineTo(3f)
+        horizontalLineTo(9f); verticalLineToRelative(6f); horizontalLineTo(5f)
+        lineToRelative(7f, 7f); lineToRelative(7f, -7f); close()
+        moveTo(5f, 18f); verticalLineToRelative(2f); horizontalLineToRelative(14f)
+        verticalLineToRelative(-2f); horizontalLineTo(5f); close()
+    }
+}.build()
 
 /** A small all-caps caption. Used for the pane labels and settings section headers. */
 @Composable
@@ -177,9 +203,25 @@ fun PreviewPane(
     zoom: ZoomState? = null,
     trailing: @Composable RowScope.() -> Unit = {},
 ) {
-    Column(modifier.fillMaxWidth()) {
+    // ONE container around the caption row AND the image, rather than a caption floating
+    // above a rounded box. The label and its buttons sat flush against the pane's outer
+    // edge while the image below was clipped to a 14 dp radius, so neither lined up with
+    // the other and the text read as belonging to the page rather than to the pane under
+    // it -- most visible on ORIGINAL and SWAPPED, which sit side by side.
+    //
+    // The nesting is the theme's own, not a new colour: `surface` is the card step above
+    // the background and `surfaceVariant` the recessed step above that, so the image still
+    // reads as a panel set INTO the container. The radii are concentric -- inner = outer
+    // minus the padding -- which is what stops the corners looking doubled.
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 6.dp, vertical = 5.dp)
+    ) {
         Row(
-            Modifier.fillMaxWidth().padding(bottom = 4.dp),
+            Modifier.fillMaxWidth().padding(start = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Caption(label, Modifier.weight(1f))
@@ -206,7 +248,8 @@ fun PreviewPane(
             Modifier
                 .fillMaxWidth()
                 .height(height)
-                .clip(RoundedCornerShape(14.dp))
+                // 12, not 14: concentric with the container 18 minus its 6 dp padding.
+                .clip(RoundedCornerShape(12.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
                 .then(
                     // Gestures only once there is an image: with none, the pane is purely a

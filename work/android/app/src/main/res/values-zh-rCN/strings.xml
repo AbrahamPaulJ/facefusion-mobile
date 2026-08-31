@@ -20,6 +20,7 @@
     <string name="swap_source_face">源人脸</string>
     <string name="swap_source_pick">选择源人脸</string>
     <string name="swap_pane_original">原图</string>
+    <string name="swap_pane_target">目标</string>
     <string name="swap_pane_original_at">原图  %1$s</string>
     <string name="swap_pane_swapped">换脸结果</string>
     <string name="swap_reading_video">正在读取视频…</string>
@@ -235,6 +236,8 @@
     <string name="status_cannot_read_image">无法读取图片</string>
     <string name="status_saved_movies">已保存到 Movies/FaceFusion</string>
     <string name="status_saved_pictures">已保存到 Pictures/FaceFusion</string>
+    <string name="toast_saved_to">已保存到 %1$s</string>
+    <string name="toast_models_ready">模型已就绪</string>
     <string name="status_frame_saved">该帧已保存到 Pictures/FaceFusion</string>
     <string name="status_save_failed">保存失败：%1$s</string>
     <string name="status_save_frame_failed">保存该帧失败：%1$s</string>

@@ -6,6 +6,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -93,6 +94,92 @@ fun <T> OptionSegments(
                     onClick = { onSelect(value) },
                     shape = SegmentedButtonDefaults.itemShape(i, options.size),
                 ) { Text(text, maxLines = 1, textAlign = TextAlign.Center, fontSize = 13.sp) }
+            }
+        }
+        if (hint != null)
+            Text(hint, style = MaterialTheme.typography.bodySmall, fontSize = 11.sp,
+                 modifier = Modifier.padding(top = 2.dp))
+    }
+}
+
+/**
+ * A slider that moves between a fixed LIST of values rather than a continuous range.
+ *
+ * For a choice that is ORDERED and has more entries than segmented buttons can hold on a
+ * narrow screen -- the frame rate reaches six. The slider's position is an INDEX into
+ * [options], never the value itself, so the stops are evenly spaced on screen however
+ * uneven the numbers are: 5, 10, 15, 24, 30, 60 gets six equal steps instead of a thumb
+ * that barely moves across the bottom half of the track.
+ *
+ * Every stop is labelled underneath. That is the difference between this and [OptionSlider]
+ * -- a discrete choice whose options you cannot read without dragging it is a worse control
+ * than the buttons it replaced.
+ */
+@Composable
+fun <T> OptionSteps(
+    label: String,
+    options: List<Pair<T, String>>,
+    selected: T,
+    onSelect: (T) -> Unit,
+    hint: String? = null,
+    enabled: Boolean = true,
+) {
+    if (options.size < 2) return
+    // Falls back to the first stop rather than -1: a saved value that is no longer offered
+    // (a 24 fps preference carried onto a 20 fps clip) must still land somewhere real.
+    val index = options.indexOfFirst { it.first == selected }.coerceAtLeast(0)
+    Column(Modifier.padding(top = 8.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, style = MaterialTheme.typography.bodyMedium,
+                 modifier = Modifier.weight(1f))
+            Text(options[index].second, style = MaterialTheme.typography.bodyMedium,
+                 fontFamily = FontFamily.Monospace)
+        }
+        Slider(
+            value = index.toFloat(),
+            onValueChange = { onSelect(options[it.roundToInt().coerceIn(options.indices)].first) },
+            valueRange = 0f..(options.size - 1).toFloat(),
+            // Compose counts INTERIOR stops, so N options have N-2 between the ends.
+            steps = (options.size - 2).coerceAtLeast(0),
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth().height(28.dp),
+        )
+        // ⚠ Each label is CENTRED ON ITS OWN STOP, which needs a Layout rather than a Row.
+        //
+        // `SpaceBetween` distributes by label WIDTH, and the slider's stops are not where
+        // that puts them: the track is inset at both ends by half the thumb, and the stops
+        // are evenly spaced across what is left. So the first and last labels sat outside
+        // the travel and every one in between drifted -- the numbers did not line up with
+        // the positions they name, which is the entire job of a tick label.
+        Layout(
+            content = {
+                options.forEachIndexed { i, (_, text) ->
+                    Text(
+                        text,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        color = if (i == index) MaterialTheme.colorScheme.onSurface
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { measurables, constraints ->
+            val placeables = measurables.map { it.measure(constraints.copy(minWidth = 0)) }
+            val width = constraints.maxWidth
+            // Half the Material thumb (20 dp), which is exactly how far the track is inset
+            // from each end -- so stop 0 sits at `inset` and the last at `width - inset`.
+            val inset = 10.dp.roundToPx()
+            val travel = (width - inset * 2).coerceAtLeast(0)
+            val last = (placeables.size - 1).coerceAtLeast(1)
+            layout(width, placeables.maxOfOrNull { it.height } ?: 0) {
+                placeables.forEachIndexed { i, p ->
+                    val centre = inset + travel * i / last
+                    // Clamped so the end labels stay inside the row instead of being
+                    // clipped by half their width.
+                    p.placeRelative((centre - p.width / 2).coerceIn(0, width - p.width), 0)
+                }
             }
         }
         if (hint != null)

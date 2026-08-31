@@ -45,6 +45,22 @@ class MainActivity : ComponentActivity() {
     private var sourceThumb by mutableStateOf<Bitmap?>(null)
     private var targetFile by mutableStateOf<File?>(null)
     private var targetName by mutableStateOf<String?>(null)
+
+    /**
+     * Bumped every time a target is loaded or cleared.
+     *
+     * ⚠ Exists because `targetFile` CANNOT serve as a state key. Every target is copied to
+     * the same path -- `File(cacheDir, "target.mp4")` -- and `File.equals` compares path
+     * strings, so the File for a new video is EQUAL to the File for the old one. A
+     * `LaunchedEffect` keyed on it therefore does not re-fire, and the auto-warm that draws
+     * the swapped pane never runs for any target after the first. Measured on the bench:
+     * loading a second clip produced no `autowarm fired` line at all.
+     *
+     * It was invisible until 0.4.5 because the pane fell back to the PREVIOUS target's
+     * swapped frame; clearing that stale frame is what turned a wrong preview into an
+     * empty one, and an empty one is what got reported.
+     */
+    private var targetVersion by mutableStateOf(0)
     private var durationMs by mutableStateOf(0L)
     private var trimStartMs by mutableStateOf(0f)
     private var trimEndMs by mutableStateOf(0f)
@@ -176,6 +192,20 @@ class MainActivity : ComponentActivity() {
 
     /** The debounced redraw owned by [previewOptionsChanged]. One at a time. */
     private var refreshJob: Job? = null
+
+    /**
+     * A redraw that was asked for while one was already running.
+     *
+     * ⚠ [refreshSwapped] used to simply `return` when `previewBusy`, and nothing ever asked
+     * again -- so a request that arrived during a preview swap was DROPPED. Scrubbing
+     * produces exactly that: the seek job waits, sets the frame, waits again and calls
+     * refreshSwapped, and if the previous swap is still running at that instant the new
+     * position is silently discarded and the swapped pane keeps showing the old one until
+     * something else happens to trigger it. The whole point of a preview is that it follows
+     * the handle, so it coalesces now instead of dropping.
+     */
+    private var refreshPending = false
+    private var refreshPendingForce = false
 
     /** Set by the Cancel button, read by the swap worker. Volatile: different threads. */
     @Volatile private var cancelRequested = false
@@ -410,6 +440,16 @@ class MainActivity : ComponentActivity() {
                     // to ask again. Without this, a model that finished downloading while
                     // that screen was open stayed listed as missing.
                     modelsVersion++
+                    // ~300 MB is long enough that the user has put the phone down, and the
+                    // notification is the only thing that has been speaking to them. This
+                    // says so in the app too, but only for a download that actually ENDED
+                    // here: the loop also exits on the first composition of an install that
+                    // already has its models, and announcing a download to someone who did
+                    // not start one is worse than saying nothing.
+                    if (announceDownload) {
+                        announceDownload = false
+                        if (!modelsMissing) toast(getString(R.string.toast_models_ready))
+                    }
                 }
 
                 // The preview warms ITSELF once both inputs and the models exist.
@@ -420,10 +460,23 @@ class MainActivity : ComponentActivity() {
                 // refreshSwapped declines to do on its own.
                 //
                 // Keyed on the inputs rather than run in a loop: it fires when the user
-                // finishes picking, and `previewWarm` stops it repeating.
-                LaunchedEffect(sourceUri, targetFile, targetImage, modelsMissing) {
+                // finishes picking, and cannot repeat because refreshing changes none of
+                // its keys.
+                //
+                // ⚠ It used to require `!previewWarm` as well, which quietly made a WARM
+                // pipeline the case it would not redraw for. That was survivable only
+                // because both target paths went cold on their own -- the photo path by
+                // releasing the whole pipeline, the video path by leaving `preview` set so
+                // a stale frame filled the pane instead. Now that a target change keeps the
+                // pipeline (see clearPreviewFrames), this is what draws the new target, and
+                // the guard would have left the pane empty.
+                LaunchedEffect(sourceUri, targetVersion, modelsMissing) {
+                    android.util.Log.d("ffpreview", "autowarm fired: src=" +
+                        (sourceUri != null) + " tgt=" +
+                        (targetFile != null || targetImage != null) +
+                        " missing=" + modelsMissing + " run=" + busy)
                     if (sourceUri != null && (targetFile != null || targetImage != null) &&
-                        !modelsMissing && !previewWarm && !busy) {
+                        !modelsMissing && !busy) {
                         refreshSwapped(force = true)
                     }
                 }
@@ -464,6 +517,12 @@ class MainActivity : ComponentActivity() {
                                 log = log,
                                 opts = opts,
                                 onOptsChange = { o ->
+                                    // Only the SWAPPER selects a different model file.
+                                    // Everything else is a per-frame value the loaded
+                                    // pipeline can simply be told about, so it must not
+                                    // send the preview cold -- going cold is what made a
+                                    // slider cost a model reload.
+                                    val reloads = o.swapper != opts.swapper
                                     opts = o
                                     o.save(this@MainActivity)
                                     // init() consumed the old options; the warm pipeline is
@@ -471,7 +530,7 @@ class MainActivity : ComponentActivity() {
                                     // REDRAWS -- clearing the pane and leaving it cleared is
                                     // how "Preparing preview..." became permanent, since
                                     // nothing was left to ask for the next one.
-                                    previewOptionsChanged()
+                                    previewOptionsChanged(reloads = reloads)
                                 },
                                 hasInswapper = hasInswapper,
                                 hasEnhancer = hasEnhancer,
@@ -486,6 +545,7 @@ class MainActivity : ComponentActivity() {
                                 outputFile = outputFile,
                                 outputPartial = outputPartial,
                                 onSaveFrame = ::saveFrameAt,
+                                onSavePreviewFrame = ::savePreviewFrame,
                                 saved = savedUri != null,
                                 savedPath = savedPathLabel,
                                 onPickSource = { pickSource.launch("image/*") },
@@ -762,6 +822,18 @@ class MainActivity : ComponentActivity() {
         refreshModelsMissing()
     }
 
+    /**
+     * A short confirmation, on top of the status line.
+     *
+     * The status line is where a save already reported itself, and it is easy to miss: it
+     * sits below the panes, it is one line among several, and on a save the user is usually
+     * looking at the pane they just saved rather than at it. A toast says the thing landed
+     * without the user having to go looking for the sentence that says so.
+     */
+    private fun toast(text: String) {
+        android.widget.Toast.makeText(this, text, android.widget.Toast.LENGTH_SHORT).show()
+    }
+
     private fun onDownloadTapped() {
         if (android.os.Build.VERSION.SDK_INT >= 33)
             askNotify.launch(android.Manifest.permission.POST_NOTIFICATIONS)
@@ -769,8 +841,12 @@ class MainActivity : ComponentActivity() {
         if (ModelDownload.isMetered(this)) confirmMetered = true else beginDownload()
     }
 
+    /** True only between starting a download and reporting that it finished. */
+    private var announceDownload = false
+
     private fun beginDownload() {
         ModelDownload.reset()
+        announceDownload = true
         // The whole chain, not one tier: the downloader picks the best tier the manifest
         // actually publishes. Handing it only `tier` would fail outright on a chip whose
         // best tier is not hosted yet.
@@ -912,6 +988,29 @@ class MainActivity : ComponentActivity() {
     private fun invalidatePreview() {
         previews.invalidate()
         previewWarm = false
+        clearPreviewFrames()
+    }
+
+    /**
+     * The DISPLAYED preview is stale. What is loaded is not.
+     *
+     * A new target changes neither of the two things the warm pipeline depends on: the warm
+     * key is the options and the SOURCE, and target frames are handed to `processFrame` one
+     * at a time. So a target change has to forget the pictures on screen and nothing else.
+     *
+     * ⚠ Both target paths got this wrong, in opposite directions, and one fix closes both:
+     *
+     *  - the PHOTO path called [invalidatePreview], which tears the native pipeline down.
+     *    Every context reloaded on the next preview to show a frame the loaded models were
+     *    already able to swap. Invisible on the NPU and seconds of "Loading models" on the
+     *    CPU backend, which is where it was noticed.
+     *  - the VIDEO path cleared `swappedFrame` but not `preview`, and the pane resolves
+     *    `swappedFrame ?: preview`. `preview` holds the last live frame of the last run, so
+     *    picking a new video could show the PREVIOUS target's swapped face over the new
+     *    target's original -- the exact failure invalidatePreview's own comment describes,
+     *    in the one path that did not call it.
+     */
+    private fun clearPreviewFrames() {
         swappedFrame = null
         previewNote = null
         preview = null
@@ -931,12 +1030,15 @@ class MainActivity : ComponentActivity() {
      * dozens of times a second. The wait outlives previewBusy so a change made DURING a
      * refresh still lands, rather than being dropped by refreshSwapped's early return.
      */
-    private fun previewOptionsChanged(hard: Boolean = false) {
+    private fun previewOptionsChanged(hard: Boolean = false, reloads: Boolean = true) {
         // `hard` is for a model that went away underneath the loaded pipeline. Still not
         // while a swap is reading it: the redraw below re-checks the files and reports the
         // missing one, which is the useful half of tearing it down anyway.
         if (hard && !previewBusy) previews.invalidate()
-        previewWarm = false
+        // Cold only when the pipeline really has to be rebuilt. `reloads` is false for a
+        // per-frame option, whose new value refreshSwapped pushes to the warm pipeline --
+        // going cold there would re-decode the source and re-run the gate to change a float.
+        if (hard || reloads) previewWarm = false
         swappedFrame = null
         previewNote = null
         preview = null
@@ -964,7 +1066,14 @@ class MainActivity : ComponentActivity() {
         scrubJob = lifecycleScope.launch {
             delay(150)
             // The frame under the handle being dragged, not always the start.
-            originalFrame = previews.frameAt(previewAtMs)
+            android.util.Log.d("ffpreview", "seek to " + previewAtMs + " edge=" + edge)
+            val got = previews.frameAt(previewAtMs)
+            // Size only. The pixel sampling that lived here is what proved the retriever was
+            // returning identical images for different timestamps (see FrameSeeker); it did
+            // its job and does not belong in a shipping build.
+            android.util.Log.d("ffpreview", "  frame=" +
+                (if (got == null) "NULL" else got.width.toString() + "x" + got.height))
+            originalFrame = got
             if (previewWarm && !busy) {
                 delay(250)
                 refreshSwapped(force = false)
@@ -978,13 +1087,39 @@ class MainActivity : ComponentActivity() {
      * [force] is the refresh button: it is allowed to pay for the model load. Without it,
      * this is a no-op unless the pipeline is already warm.
      */
+    /**
+     * Why a redraw did not happen.
+     *
+     * ⚠ Every `return` below is a silent one: the pane keeps whatever it had and nothing
+     * says why, which is exactly how "stuck on Preparing preview" and "the frame does not
+     * update on seek" arrive as reports with no evidence attached. The same shape as the
+     * QNN error that was thrown away for two releases -- a decision made and not recorded.
+     * One line per refusal, at debug level, on a tag nothing else uses.
+     */
+    private fun skipRefresh(why: String) {
+        android.util.Log.d("ffpreview", "refresh skipped: " + why +
+            "  warm=" + previewWarm + " busy=" + previewBusy + " run=" + busy +
+            " missing=" + modelsMissing + " src=" + (sourceUri != null) +
+            " tgt=" + (targetFile != null || targetImage != null))
+    }
+
     private fun refreshSwapped(force: Boolean) {
-        if (busy || previewBusy) return
-        if (!previewWarm && !force) return
-        val src = sourceUri ?: return
+        if (busy) { skipRefresh("a run owns the pipeline"); return }
+        // Coalesced, not dropped: remember that the pane is out of date and redraw once the
+        // in-flight one lets go. `force` is OR-ed in so a cold request cannot be downgraded
+        // by a warm one arriving behind it.
+        if (previewBusy) {
+            refreshPending = true
+            refreshPendingForce = refreshPendingForce || force
+            skipRefresh("one already running; queued")
+            return
+        }
+        if (!previewWarm && !force) { skipRefresh("cold and not forced"); return }
+        val src = sourceUri ?: run { skipRefresh("no source"); return }
         // An image target has no targetFile -- it is held as a bitmap. Testing the
         // video handle here meant an image never previewed at all.
-        if (targetFile == null && targetImage == null) return
+        if (targetFile == null && targetImage == null) { skipRefresh("no target"); return }
+        android.util.Log.d("ffpreview", "refresh start force=" + force + " warm=" + previewWarm)
 
         lifecycleScope.launch {
             // The API server may be mid-request. Wait briefly rather than bounce: a preview
@@ -1003,6 +1138,10 @@ class MainActivity : ComponentActivity() {
 
             previewBusy = true
             previewNote = null
+            // Per-frame options onto the WARM pipeline, before the frame is swapped with
+            // them. No-ops when nothing is loaded or nothing changed; when the swapper
+            // changed it does nothing and ensureReady below does the reload instead.
+            previews.applyOptions(opts)
             try {
                 val frame = originalFrame ?: previews.frameAt(previewAtMs)?.also {
                     originalFrame = it
@@ -1076,6 +1215,8 @@ class MainActivity : ComponentActivity() {
                 }
 
                 val out = previews.swap(frame)
+                android.util.Log.d("ffpreview", "  swapped faces=" + out.faces +
+                                                " err=" + out.error)
                 when {
                     out.error != null -> { previewNote = out.error; swappedFrame = null }
                     out.faces == 0 -> {
@@ -1095,6 +1236,16 @@ class MainActivity : ComponentActivity() {
             } finally {
                 previewBusy = false
                 PipeGuard.release()
+                // Whatever arrived while this one held the pipeline. Reads the CURRENT
+                // position rather than a remembered one -- the seek job keeps
+                // `originalFrame` up to date, so the redraw lands on the newest frame
+                // rather than replaying the one that was missed.
+                if (refreshPending) {
+                    refreshPending = false
+                    val f = refreshPendingForce
+                    refreshPendingForce = false
+                    refreshSwapped(force = f)
+                }
             }
         }
     }
@@ -1157,8 +1308,10 @@ class MainActivity : ComponentActivity() {
                 status = getString(R.string.status_target_ready_video,
                                    l.width, l.height, fmt(l.durationMs.toFloat()))
                 // Open it for scrubbing and show the first frame straight away.
-                previews.openTarget(l.file.absolutePath)
-                swappedFrame = null; previewNote = null
+                previews.openTarget(l.file.absolutePath, l.fps)
+                targetVersion++
+                // `preview` too, which this path used to leave set -- see clearPreviewFrames.
+                clearPreviewFrames()
                 originalFrame = previews.frameAt(0f)
             }.onFailure {
                 status = getString(R.string.status_cannot_read_video, it.message ?: "")
@@ -1191,9 +1344,10 @@ class MainActivity : ComponentActivity() {
             durationMs = 0L
             trimStartMs = 0f; trimEndMs = 0f
             targetAspect = if (bmp.height > 0) bmp.width.toFloat() / bmp.height else 1f
-            originalFrame = bmp
-            swappedFrame = null; previewNote = null
-            invalidatePreview()
+            // The frames, not the pipeline. The double `originalFrame = bmp` this replaces
+            // was working around invalidatePreview clearing state this path had just set.
+            clearPreviewFrames()
+            targetVersion++
             originalFrame = bmp
             status = getString(R.string.status_target_ready_image, bmp.width, bmp.height)
             preparing = false
@@ -1265,6 +1419,7 @@ class MainActivity : ComponentActivity() {
         trimStartMs = 0f; trimEndMs = 0f
         targetAspect = 16f / 9f
         originalFrame = null
+        targetVersion++
         invalidatePreview()
         status = ""
     }
@@ -1445,6 +1600,7 @@ class MainActivity : ComponentActivity() {
                 savedUri = it
                 savedPathLabel = "Movies/FaceFusion/" + file.name
                 status = getString(R.string.status_saved_movies)
+                toast(getString(R.string.toast_saved_to, savedPathLabel!!))
             }.onFailure {
                 status = getString(R.string.status_save_failed, it.message ?: "")
             }
@@ -1471,6 +1627,7 @@ class MainActivity : ComponentActivity() {
                 savedUri = it
                 savedPathLabel = "Pictures/FaceFusion/" + name
                 status = getString(R.string.status_saved_pictures)
+                toast(getString(R.string.toast_saved_to, savedPathLabel!!))
             }.onFailure {
                 status = getString(R.string.status_save_failed, it.message ?: "")
             }
@@ -1485,8 +1642,44 @@ class MainActivity : ComponentActivity() {
      * frame you are looking at would hand back a different one whenever the scrub position
      * sits inside a GOP.
      */
+    /**
+     * Save the frame the SWAPPED pane is showing, as an image.
+     *
+     * Distinct from [saveFrameAt], which reads a frame back out of the finished video and
+     * therefore needs a run to have happened first. This one saves what is already on
+     * screen -- so a single still can be pulled out of a clip without swapping the clip,
+     * which on the CPU backend is the difference between seconds and many minutes.
+     *
+     * The bitmap is the pane's own, at the resolution the pipeline produced it, not the
+     * scaled-down thing being displayed.
+     */
+    private fun savePreviewFrame() {
+        val bmp = swappedFrame ?: preview ?: return
+        lifecycleScope.launch {
+            val stem = targetName?.substringBeforeLast('.')?.take(40) ?: "facefusion"
+            // The timestamp only means something for a video; a still has exactly one frame
+            // and "_000000ms" on it is noise.
+            val name = if (durationMs > 0)
+                           stem + "_swapped_%06dms.png".format(previewAtMs.toInt())
+                       else stem + "_swapped.png"
+            val r = withContext(Dispatchers.IO) {
+                GallerySaver.saveImage(this@MainActivity, bmp, name)
+            }
+            r.onSuccess {
+                status = getString(R.string.status_frame_saved)
+                toast(getString(R.string.toast_saved_to, "Pictures/FaceFusion/" + name))
+            }
+             .onFailure {
+                 status = getString(R.string.status_save_frame_failed, it.message ?: "")
+             }
+        }
+    }
+
     private fun saveFrameAt(positionMs: Int) {
         val file = outputFile ?: return
+        // Hoisted out of the mapCatching that used to build it, so the toast can name the
+        // file it just wrote rather than the directory it went into.
+        val name = file.nameWithoutExtension + "_%06dms.png".format(positionMs)
         lifecycleScope.launch {
             val r = withContext(Dispatchers.IO) {
                 runCatching {
@@ -1496,11 +1689,13 @@ class MainActivity : ComponentActivity() {
                     mmr.release()
                     bmp ?: error("no frame at that position")
                 }.mapCatching { bmp ->
-                    val name = file.nameWithoutExtension + "_%06dms.png".format(positionMs)
                     GallerySaver.saveImage(this@MainActivity, bmp, name).getOrThrow()
                 }
             }
-            r.onSuccess { status = getString(R.string.status_frame_saved) }
+            r.onSuccess {
+                status = getString(R.string.status_frame_saved)
+                toast(getString(R.string.toast_saved_to, "Pictures/FaceFusion/" + name))
+            }
              .onFailure {
                  status = getString(R.string.status_save_frame_failed, it.message ?: "")
              }

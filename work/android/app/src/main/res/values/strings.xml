@@ -36,6 +36,9 @@
     <string name="swap_source_face">Source face</string>
     <string name="swap_source_pick">Pick source face</string>
     <string name="swap_pane_original">Original</string>
+    <!-- The same pane BEFORE a target is picked, where "Original" would name something
+         that is not there yet. It is the counterpart of "Source face". -->
+    <string name="swap_pane_target">Target</string>
     <!-- %1$s is a timestamp like "0.42s" -->
     <string name="swap_pane_original_at">Original  %1$s</string>
     <string name="swap_pane_swapped">Swapped</string>
@@ -296,6 +299,9 @@
     <string name="status_cannot_read_image">Cannot read image</string>
     <string name="status_saved_movies">Saved to Movies/FaceFusion</string>
     <string name="status_saved_pictures">Saved to Pictures/FaceFusion</string>
+    <!-- %1$s is a gallery path like "Pictures/FaceFusion/name.png" -->
+    <string name="toast_saved_to">Saved to %1$s</string>
+    <string name="toast_models_ready">Models ready</string>
     <string name="status_frame_saved">Frame saved to Pictures/FaceFusion</string>
     <!-- %1$s is an underlying error message, which is not translated -->
     <string name="status_save_failed">Save failed: %1$s</string>
