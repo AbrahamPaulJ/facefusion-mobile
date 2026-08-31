@@ -5,7 +5,7 @@
 #   ./build_all.sh              # all four
 #   ./build_all.sh fan2d yoloface
 set -uo pipefail
-FF=${FF:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
+FF=${FF:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
 MODELS=${*:-"arcface fan2d yoloface hyperswap"}
 
 for m in $MODELS; do

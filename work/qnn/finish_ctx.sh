@@ -10,7 +10,7 @@
 # one exists for the case where step 2 still has to run.
 set -uo pipefail
 source "$HOME/npuconvert/qnn_env.sh"
-FF=${FF:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
+FF=${FF:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
 NAME=${1:?usage: finish_ctx.sh <name> [suffix]}
 SUF=${2:-}
 ARCH=${ARCH:-v79}

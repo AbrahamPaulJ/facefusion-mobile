@@ -41,7 +41,7 @@ esac
 ARCH=${ARCH:-v79}
 VTCM=${VTCM:-8}
 
-FF=${FF:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
+FF=${FF:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
 NAME=${1:?usage: convert.sh <name> [--layout]}
 MODE=${2:-full}
 

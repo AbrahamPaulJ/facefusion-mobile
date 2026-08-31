@@ -25,7 +25,7 @@ case "$QSDK" in
   *) echo "unknown QSDK: $QSDK (want 249 or 228)"; exit 1 ;;
 esac
 
-FF=${FF:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
+FF=${FF:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
 
 # The shipping tiers, mirroring LocalDream's _min / _8gen1 / _8gen2 split plus our v79.
 # soc_model is emitted only for v79: it pins a context to one SoC, and below v79 the whole

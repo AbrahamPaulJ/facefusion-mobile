@@ -8,7 +8,7 @@
 set -uo pipefail
 source "$HOME/npuconvert/qnn_env.sh"
 
-FF=${FF:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
+FF=${FF:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
 NAME=${1:?usage: run_host_cpu.sh <name> [buildsuffix]}
 SUF=${2:-}
 BUILD=$HOME/ff-build/${NAME}${SUF}

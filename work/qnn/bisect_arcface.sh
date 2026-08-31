@@ -9,7 +9,7 @@
 #
 # So the remaining suspects are the quantiser OPTIONS and the activation bitwidth.
 set -uo pipefail
-FF=${FF:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
+FF=${FF:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
 
 run() {
   echo "===== $* ====="

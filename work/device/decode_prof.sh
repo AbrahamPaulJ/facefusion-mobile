@@ -7,7 +7,7 @@
 # trap #10: the DSP throttles, so the headline number is the MINIMUM over inferences.
 set -uo pipefail
 source "$HOME/npuconvert/qnn_env.sh"
-FF=${FF:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
+FF=${FF:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
 
 for m in "$@"; do
   LOG=$FF/work/device/prof/$m/prof.log

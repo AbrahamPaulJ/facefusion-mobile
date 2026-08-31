@@ -6,7 +6,7 @@
 # in /data/local/tmp, where a binary IS allowed to reach the DSP (trap #33 only bites
 # executables launched out of an APK).
 set -uo pipefail
-FF=${FF:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
+FF=${FF:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
 # The Windows SDK NDK only ships windows-x86_64 prebuilts, and this cross-compile runs
 # under WSL, so it needs the Linux NDK Neodragon installed for the same reason.
 NDK=${NDK:-$HOME/ndk/android-ndk-r26d}
