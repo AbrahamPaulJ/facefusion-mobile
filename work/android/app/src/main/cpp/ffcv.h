@@ -102,6 +102,33 @@ MatF gaussianBlur(const MatF& src, double sigma);
 void pasteBack(Image& frame, const MatF& crop /*HxWx3, 0..255*/, const MatF& mask,
                const Affine& affine);
 
+// ---------------------------------------------------------------- lip syncer crop
+
+// The lip syncer does NOT reuse the swap crop. Upstream warps to ffhq_512 by landmark-5
+// exactly as the swapper does, but then takes its own box from the 68 landmarks
+// TRANSFORMED INTO that crop, and warps THAT to 96x96. So these operate in crop space,
+// not frame space, and the 68 points must have been through transformPoints first.
+
+// cv2.getAffineTransform -- the exact affine through three correspondences.
+// `src` and `dst` are 3 (x, y) pairs each.
+Affine getAffineTransform(const float* src, const float* dst);
+
+// facefusion/face_helper.py:150 -- min/max over all 68 points, then sorted so x1 <= x2.
+// Writes [x1, y1, x2, y2].
+void createBoundingBox(const float* landmark68, float* outBox);
+
+// facefusion/face_helper.py:83 -- warp a bounding box to crop_size. Upstream picks
+// INTER_AREA when the box is larger than the crop, but cv2.warpAffine SILENTLY IGNORES
+// INTER_AREA (measured, see the header comment), so bilinear is both branches.
+Image warpFaceByBoundingBox(const Image& src, const float* box, int size, Affine* outAffine);
+
+enum FaceMaskArea { AREA_UPPER_FACE = 0, AREA_LOWER_FACE = 1, AREA_MOUTH = 2 };
+
+// facefusion/face_masker.py:226 -- convex hull of the area's landmark subset, filled,
+// blurred at sigma 5, then (clip(0.5, 1) - 0.5) * 2. The landmarks are cast to int32
+// FIRST, which truncates toward zero; that is upstream's and it moves the hull.
+MatF createAreaMask(int w, int h, const float* landmark68, FaceMaskArea area);
+
 // ---------------------------------------------------------------- warp templates
 
 // facefusion/face_helper.py:10. `which`: 0=arcface_112_v2, 1=arcface_128, 2=ffhq_512

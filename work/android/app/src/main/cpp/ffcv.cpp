@@ -384,6 +384,171 @@ void pasteBack(Image& frame, const MatF& crop, const MatF& mask, const Affine& a
 
 // ---------------------------------------------------------------- warp templates
 
+// ---------------------------------------------------------------- lip syncer crop
+
+Affine getAffineTransform(const float* src, const float* dst) {
+  // Two independent 3x3 solves, one per output row, by Cramer's rule. The system is
+  //   [x0 y0 1][a]   [u0]
+  //   [x1 y1 1][b] = [u1]
+  //   [x2 y2 1][c]   [u2]
+  const double x0 = src[0], y0 = src[1], x1 = src[2], y1 = src[3], x2 = src[4], y2 = src[5];
+  const double det = x0 * (y1 - y2) - y0 * (x1 - x2) + (x1 * y2 - x2 * y1);
+  Affine out;
+  if (det == 0.0) return out;   // degenerate: three collinear points, identity is honest
+  for (int r = 0; r < 2; ++r) {
+    const double u0 = dst[0 + r], u1 = dst[2 + r], u2 = dst[4 + r];
+    const double da = u0 * (y1 - y2) - y0 * (u1 - u2) + (u1 * y2 - u2 * y1);
+    const double db = x0 * (u1 - u2) - u0 * (x1 - x2) + (x1 * u2 - x2 * u1);
+    const double dc = x0 * (y1 * u2 - y2 * u1) - y0 * (x1 * u2 - x2 * u1)
+                    + u0 * (x1 * y2 - x2 * y1);
+    out.m[r * 3 + 0] = da / det;
+    out.m[r * 3 + 1] = db / det;
+    out.m[r * 3 + 2] = dc / det;
+  }
+  return out;
+}
+
+void createBoundingBox(const float* landmark68, float* outBox) {
+  float x1 = landmark68[0], y1 = landmark68[1], x2 = landmark68[0], y2 = landmark68[1];
+  for (int i = 1; i < 68; ++i) {
+    x1 = std::min(x1, landmark68[i * 2]);
+    x2 = std::max(x2, landmark68[i * 2]);
+    y1 = std::min(y1, landmark68[i * 2 + 1]);
+    y2 = std::max(y2, landmark68[i * 2 + 1]);
+  }
+  // normalize_bounding_box sorts each pair; min/max already did, but upstream applies it
+  // and a caller may hand this an arbitrary box later.
+  outBox[0] = std::min(x1, x2);
+  outBox[1] = std::min(y1, y2);
+  outBox[2] = std::max(x1, x2);
+  outBox[3] = std::max(y1, y2);
+}
+
+Image warpFaceByBoundingBox(const Image& src, const float* box, int size, Affine* outAffine) {
+  const float srcPts[6] = {box[0], box[1], box[2], box[1], box[0], box[3]};
+  const float dstPts[6] = {0.f, 0.f, (float)size, 0.f, 0.f, (float)size};
+  Affine m = getAffineTransform(srcPts, dstPts);
+  if (outAffine) *outAffine = m;
+  return warpAffine(src, m, size, size, BORDER_CONSTANT);
+}
+
+namespace {
+
+// facefusion/choices.py:26. Indices into the 68-point set.
+const std::vector<int>& areaPoints(FaceMaskArea area) {
+  static const std::vector<int> kUpper = {0, 1, 2, 31, 32, 33, 34, 35, 14, 15, 16,
+                                          26, 25, 24, 23, 22, 21, 20, 19, 18, 17};
+  static const std::vector<int> kLower = {3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
+                                          35, 34, 33, 32, 31};
+  static const std::vector<int> kMouth = {48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59,
+                                          60, 61, 62, 63, 64, 65, 66, 67};
+  switch (area) {
+    case AREA_UPPER_FACE: return kUpper;
+    case AREA_MOUTH: return kMouth;
+    default: return kLower;
+  }
+}
+
+// cv2.convexHull over integer points: Andrew's monotone chain, counter-clockwise, with
+// collinear points dropped the way OpenCV drops them.
+std::vector<std::array<int, 2>> convexHull(std::vector<std::array<int, 2>> pts) {
+  std::sort(pts.begin(), pts.end(), [](const std::array<int, 2>& a, const std::array<int, 2>& b) {
+    return a[0] != b[0] ? a[0] < b[0] : a[1] < b[1];
+  });
+  pts.erase(std::unique(pts.begin(), pts.end()), pts.end());
+  if (pts.size() < 3) return pts;
+
+  auto cross = [](const std::array<int, 2>& o, const std::array<int, 2>& a,
+                  const std::array<int, 2>& b) {
+    return (long long)(a[0] - o[0]) * (b[1] - o[1]) - (long long)(a[1] - o[1]) * (b[0] - o[0]);
+  };
+  std::vector<std::array<int, 2>> hull(pts.size() * 2);
+  size_t k = 0;
+  for (size_t i = 0; i < pts.size(); ++i) {
+    while (k >= 2 && cross(hull[k - 2], hull[k - 1], pts[i]) <= 0) --k;
+    hull[k++] = pts[i];
+  }
+  const size_t lower = k + 1;
+  for (size_t i = pts.size() - 1; i-- > 0;) {
+    while (k >= lower && cross(hull[k - 2], hull[k - 1], pts[i]) <= 0) --k;
+    hull[k++] = pts[i];
+  }
+  hull.resize(k - 1);
+  return hull;
+}
+
+}  // namespace
+
+MatF createAreaMask(int w, int h, const float* landmark68, FaceMaskArea area) {
+  MatF mask(w, h, 1);
+  std::fill(mask.data.begin(), mask.data.end(), 0.f);
+
+  // astype(numpy.int32) truncates TOWARD ZERO, which is not floor for negatives. The
+  // hull is built on those truncated points, so doing it any other way moves the mask.
+  std::vector<std::array<int, 2>> pts;
+  for (int index : areaPoints(area)) {
+    pts.push_back({(int)landmark68[index * 2], (int)landmark68[index * 2 + 1]});
+  }
+  std::vector<std::array<int, 2>> hull = convexHull(pts);
+  if (hull.size() >= 3) {
+    // cv2.fillConvexPoly: one span per scanline between the polygon's left and right
+    // edges. Convexity is what makes a single span correct.
+    int top = hull[0][1], bottom = hull[0][1];
+    for (const std::array<int, 2>& p : hull) {
+      top = std::min(top, p[1]);
+      bottom = std::max(bottom, p[1]);
+    }
+    top = std::max(top, 0);
+    bottom = std::min(bottom, h - 1);
+    for (int y = top; y <= bottom; ++y) {
+      double left = 1e30, right = -1e30;
+      for (size_t i = 0; i < hull.size(); ++i) {
+        const std::array<int, 2>& a = hull[i];
+        const std::array<int, 2>& b = hull[(i + 1) % hull.size()];
+        const double ay = a[1], by = b[1];
+        const double yLo = std::min(ay, by), yHi = std::max(ay, by);
+        if (ay == by) {
+          if ((int)ay == y) {
+            left = std::min(left, (double)std::min(a[0], b[0]));
+            right = std::max(right, (double)std::max(a[0], b[0]));
+          }
+          continue;
+        }
+        // cv2.fillConvexPoly does NOT sample the edge at the row centre. Its span covers
+        // everything the edge SWEEPS THROUGH between y - 0.5 and y + 0.5, so a shallow
+        // edge widens the row by half its dx/dy. Derived by probing cv2 with a known
+        // triangle, then confirmed on the real hull: at a row where the true edge sits at
+        // 206.59 with slope -3.41/row, cv2 fills from 205, which is the sweep's minimum
+        // rounded, not the centre's. Sampling the centre instead loses 1.26% of the mask
+        // area, all of it around the boundary where the mouth is blended.
+        const double s0 = std::max((double)y - 0.5, yLo);
+        const double s1 = std::min((double)y + 0.5, yHi);
+        if (s0 > s1) continue;
+        for (double sy : {s0, s1}) {
+          const double x = a[0] + (sy - ay) / (by - ay) * (b[0] - a[0]);
+          left = std::min(left, x);
+          right = std::max(right, x);
+        }
+      }
+      if (left > right) continue;
+      // ...and the ends are CEIL on the left, FLOOR on the right, not rounded: the span
+      // is the integer pixels lying inside the swept interval. Rounding both ends instead
+      // still lost 0.66% of the area. Both halves of this rule were derived by probing
+      // cv2 rather than read off its source, then checked row by row against the real
+      // hull -- 42 of 71 rows disagreed on rounding alone.
+      const int x0 = std::max(0, (int)std::ceil(left));
+      const int x1 = std::min(w - 1, (int)std::floor(right));
+      for (int x = x0; x <= x1; ++x) mask.row(y)[x] = 1.f;
+    }
+  }
+
+  mask = gaussianBlur(mask, 5.0);
+  for (float& v : mask.data) {
+    v = (std::min(std::max(v, 0.5f), 1.0f) - 0.5f) * 2.0f;
+  }
+  return mask;
+}
+
 const float* warpTemplate(int which) {
   static const float kArc112v2[10] = {
       0.34191607f, 0.46157411f, 0.65653393f, 0.45983393f, 0.50022500f,

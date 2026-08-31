@@ -46,6 +46,13 @@ ff.ff_paste_back.argtypes = [P(ctypes.c_uint8), ctypes.c_int, ctypes.c_int,
                              P(ctypes.c_float), P(ctypes.c_double)]
 ff.ff_warp_template.argtypes = [ctypes.c_int]
 ff.ff_warp_template.restype = P(ctypes.c_float)   # without this ctypes truncates to int
+ff.ff_get_affine_transform.argtypes = [P(ctypes.c_float), P(ctypes.c_float), P(ctypes.c_double)]
+ff.ff_create_bounding_box.argtypes = [P(ctypes.c_float), P(ctypes.c_float)]
+ff.ff_warp_face_by_bbox.argtypes = [P(ctypes.c_uint8), ctypes.c_int, ctypes.c_int,
+                                    P(ctypes.c_float), ctypes.c_int, P(ctypes.c_uint8),
+                                    P(ctypes.c_double)]
+ff.ff_create_area_mask.argtypes = [ctypes.c_int, ctypes.c_int, P(ctypes.c_float),
+                                   ctypes.c_int, P(ctypes.c_float)]
 
 # Keep every buffer handed to C alive for the whole test: binding the array to `_` lets
 # it be freed on the next assignment while the pointer is still in flight.
@@ -244,8 +251,88 @@ def test_mask_and_paste():
     report('paste_back meandiff', d.mean(), 0.1, 'LSB')
 
 
+
+
+def test_lipsync_crop():
+    """The lip syncer's own crop chain, which is NOT the swap crop.
+
+    Upstream: warp to ffhq_512 by landmark-5, transform the 68 points by that same
+    affine, take create_area_mask(lower-face) and create_bounding_box IN CROP SPACE,
+    warp that box to 96x96. Only the last three steps are new; the ffhq_512 warp is
+    already covered above.
+    """
+    print('\n[lip syncer crop]')
+    LOWER_FACE = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 35, 34, 33, 32, 31]
+
+    # A plausible 68-point set in a 512 crop: an ellipse for the jaw and a scatter for
+    # the rest. The hull only ever sees the subset, so the rest just has to exist.
+    t = numpy.linspace(numpy.pi * 0.15, numpy.pi * 0.85, 17)
+    lm = numpy.zeros((68, 2), numpy.float32)
+    lm[:17, 0] = 256 - 190 * numpy.cos(t)
+    lm[:17, 1] = 150 + 210 * numpy.sin(t)
+    lm[17:, 0] = rng.uniform(120, 400, 51)
+    lm[17:, 1] = rng.uniform(100, 380, 51)
+    lm[31:36, 0] = numpy.linspace(210, 300, 5)
+    lm[31:36, 1] = 290.0
+
+    # getAffineTransform against cv2's
+    src = numpy.array([[10.0, 20.0], [300.0, 25.0], [15.0, 260.0]], numpy.float32)
+    dst = numpy.array([[0.0, 0.0], [96.0, 0.0], [0.0, 96.0]], numpy.float32)
+    _, sp = cp(src.ravel(), numpy.float32)
+    _, dp = cp(dst.ravel(), numpy.float32)
+    got = numpy.zeros(6, numpy.float64)
+    ff.ff_get_affine_transform(sp, dp, got.ctypes.data_as(P(ctypes.c_double)))
+    ref = cv2.getAffineTransform(src, dst)
+    report('getAffineTransform', numpy.abs(got.reshape(2, 3) - ref).max(), 1e-9)
+
+    # create_bounding_box against upstream's min/max
+    _, lp = cp(lm.ravel(), numpy.float32)
+    box = numpy.zeros(4, numpy.float32)
+    ff.ff_create_bounding_box(lp, box.ctypes.data_as(P(ctypes.c_float)))
+    x1, y1 = lm.min(axis=0)
+    x2, y2 = lm.max(axis=0)
+    report('create_bounding_box', numpy.abs(box - numpy.array([x1, y1, x2, y2])).max(), 0.0)
+
+    # warp_face_by_bounding_box against cv2
+    frame = (rng.random((512, 512, 3)) * 255).astype(u8)
+    _, fp = cp(frame, numpy.uint8)
+    _, bp = cp(box, numpy.float32)
+    mine = numpy.zeros(96 * 96 * 3, numpy.uint8)
+    aff = numpy.zeros(6, numpy.float64)
+    _LIVE.append(mine)
+    ff.ff_warp_face_by_bbox(fp, 512, 512, bp, 96, mine.ctypes.data_as(P(ctypes.c_uint8)),
+                            aff.ctypes.data_as(P(ctypes.c_double)))
+    srcp = numpy.array([[box[0], box[1]], [box[2], box[1]], [box[0], box[3]]], numpy.float32)
+    dstp = numpy.array([[0, 0], [96, 0], [0, 96]], numpy.float32)
+    M = cv2.getAffineTransform(srcp, dstp)
+    ref = cv2.warpAffine(frame, M, (96, 96), flags=cv2.INTER_AREA)
+    d = numpy.abs(mine.reshape(96, 96, 3).astype(int) - ref.astype(int))
+    report('warp_by_bbox maxdiff', d.max(), 2, 'LSB')
+    report('warp_by_bbox meandiff', d.mean(), 0.35, 'LSB')
+
+    # create_area_mask against cv2's convexHull + fillConvexPoly + blur
+    got = numpy.zeros(512 * 512, numpy.float32)
+    _LIVE.append(got)
+    ff.ff_create_area_mask(512, 512, lp, 1, got.ctypes.data_as(P(ctypes.c_float)))
+    hull = cv2.convexHull(lm[LOWER_FACE].astype(numpy.int32))
+    ref = numpy.zeros((512, 512), numpy.float32)
+    cv2.fillConvexPoly(ref, hull, 1.0)
+    ref = (cv2.GaussianBlur(ref.clip(0, 1), (0, 0), 5).clip(0.5, 1) - 0.5) * 2
+    got = got.reshape(512, 512)
+    report('create_area_mask maxdiff', numpy.abs(got - ref).max(), 1e-6)
+    report('create_area_mask meandiff', numpy.abs(got - ref).mean(), 1e-8)
+    # The mask is a gate on where the mouth is written, so its AREA is the number that
+    # matters more than any single pixel.
+    # The FILL is bit-identical: (mine > 0) equals (cv2 > 0) everywhere, so the hull and
+    # every scanline span agree exactly, and the area limit is a true 0. What is left is
+    # 5.96e-07 max on 5374 pixels, which is one float32 ULP at magnitude 1 out of the
+    # Gaussian blur. Measured, not chosen.
+    report('create_area_mask area %', abs(got.sum() - ref.sum()) / max(ref.sum(), 1) * 100,
+           0.0, '%')
+
+
 for t in (test_affine_helpers, test_warp_and_resize, test_nms, test_heatmaps,
-          test_landmark_helpers, test_mask_and_paste):
+          test_landmark_helpers, test_mask_and_paste, test_lipsync_crop):
     t()
 
 print('\n' + ('ALL CHECKS PASSED' if not FAILURES else 'FAILED: ' + ', '.join(FAILURES)))

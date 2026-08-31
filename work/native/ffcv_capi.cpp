@@ -36,6 +36,30 @@ void ff_invert_affine(const double* m, double* out) {
   for (int i = 0; i < 6; ++i) out[i] = r.m[i];
 }
 
+void ff_get_affine_transform(const float* src, const float* dst, double* out) {
+  Affine r = getAffineTransform(src, dst);
+  for (int i = 0; i < 6; ++i) out[i] = r.m[i];
+}
+
+void ff_create_bounding_box(const float* landmark68, float* outBox) {
+  createBoundingBox(landmark68, outBox);
+}
+
+void ff_warp_face_by_bbox(const uint8_t* srcPix, int sw, int sh, const float* box, int size,
+                          uint8_t* dst, double* outAffine) {
+  Image in(sw, sh, 3);
+  std::memcpy(in.data.data(), srcPix, (size_t)sw * sh * 3);
+  Affine m;
+  Image out = warpFaceByBoundingBox(in, box, size, &m);
+  std::memcpy(dst, out.data.data(), (size_t)size * size * 3);
+  for (int i = 0; i < 6; ++i) outAffine[i] = m.m[i];
+}
+
+void ff_create_area_mask(int w, int h, const float* landmark68, int area, float* dst) {
+  MatF m = createAreaMask(w, h, landmark68, (FaceMaskArea)area);
+  std::memcpy(dst, m.data.data(), (size_t)w * h * sizeof(float));
+}
+
 void ff_umeyama(const float* src, const float* dst, int n, double* out) {
   Affine r = umeyama(src, dst, n);
   for (int i = 0; i < 6; ++i) out[i] = r.m[i];
