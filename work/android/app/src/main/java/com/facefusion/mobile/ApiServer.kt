@@ -455,6 +455,7 @@ class ApiServer(
                 outputFps = opts.outputFps,
                 onProgress = { done, _ -> frames = done },
                 onLog = { log(it) },
+                lipSync = opts.lipSync,
             ).swap(inFile.absolutePath, outFile.absolutePath)
             r.fold({
                 val secs = (System.currentTimeMillis() - t0) / 1000.0
@@ -602,6 +603,7 @@ private fun SwapOptions.overrides(q: Map<String, String>): SwapOptions {
         pixelBoost = i("boost")?.coerceIn(1, 4) ?: pixelBoost,
         largestOnly = b("largest") ?: largestOnly,
         faceEnhance = b("enhancer") ?: faceEnhance,
+        lipSync = b("lip_sync") ?: lipSync,
         enhanceBlend = f("enhance_blend")?.coerceIn(0f, 1f) ?: enhanceBlend,
         outputFps = i("fps")?.coerceIn(0, 240) ?: outputFps,
         swapper = q["swapper"]?.takeIf { it == "hyperswap" || it == "inswapper" } ?: swapper,

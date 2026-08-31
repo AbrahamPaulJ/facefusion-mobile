@@ -353,6 +353,16 @@ class MainActivity : ComponentActivity() {
     private val hasEnhancer: Boolean
         get() = ModelPaths.present(modelDir(), tier, "gpen")
 
+    /**
+     * Whether the lip syncer's binary is on the device.
+     *
+     * Same rule as [hasEnhancer], and for the same reason: asked of the filesystem so the
+     * chip is drawable before a pipeline exists, with the native side still the authority
+     * at execution time.
+     */
+    private val hasLipSyncer: Boolean
+        get() = ModelPaths.present(modelDir(), tier, "wav2lip")
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         BugReport.install(this)
@@ -534,6 +544,7 @@ class MainActivity : ComponentActivity() {
                                 },
                                 hasInswapper = hasInswapper,
                                 hasEnhancer = hasEnhancer,
+                                hasLipSyncer = hasLipSyncer,
                                 openCard = openCard,
                                 onToggleCard = { k -> openCard = if (openCard == k) "" else k },
                                 advancedOpen = advancedOpen,
@@ -1525,6 +1536,7 @@ class MainActivity : ComponentActivity() {
 
                     VideoSwapper(
                         outputFps = opts.outputFps,
+                        lipSync = opts.lipSync,
                         trimStartUs = (trimStartMs * 1000).toLong(),
                         trimEndUs = if (trimEndMs >= durationMs) Long.MAX_VALUE
                                     else (trimEndMs * 1000).toLong(),

@@ -55,6 +55,7 @@
     <string name="swap_processors">Processors</string>
     <string name="swap_proc_swapper">face_swapper</string>
     <string name="swap_proc_enhancer">face_enhancer</string>
+    <string name="swap_proc_lip_syncer">lip_syncer</string>
 
     <string name="swap_clip">Clip</string>
     <!-- %1$d frames, %2$s duration, %3$d frames per second -->

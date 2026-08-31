@@ -36,6 +36,7 @@
     <string name="swap_processors">处理器</string>
     <string name="swap_proc_swapper">face_swapper</string>
     <string name="swap_proc_enhancer">face_enhancer</string>
+    <string name="swap_proc_lip_syncer">lip_syncer</string>
 
     <string name="swap_clip">片段</string>
     <string name="swap_clip_summary">%1$d 帧，共 %2$s   %3$d fps</string>

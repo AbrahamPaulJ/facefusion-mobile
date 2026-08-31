@@ -65,6 +65,19 @@ data class SwapOptions(
     val enhanceBlend: Float = 0.8f,
 
     /**
+     * `--processors lip_syncer`, wav2lip_gan_96. Off by default.
+     *
+     * Costs 1.95 ms per face on the NPU, which is small; the audio front end costs 28.4 ms
+     * per SECOND of audio once per clip, which is where the time actually goes. Needs its
+     * own context binary, so asking for it does not mean getting it -- VideoSwapper checks
+     * [NativePipe.hasLipSyncer] and the clip's audio track, and falls back to a plain swap
+     * with a log line rather than failing.
+     *
+     * Video only. A photo has no audio to sync to.
+     */
+    val lipSync: Boolean = false,
+
+    /**
      * Output frame rate. **0 means "same as the input"**, which is the default and the only
      * value that cannot be wrong -- every other choice is a resample.
      *
@@ -91,6 +104,7 @@ data class SwapOptions(
             .putBoolean(K_LARGEST, largestOnly)
             .putBoolean(K_ENHANCE, faceEnhance)
             .putFloat(K_ENHANCE_BLEND, enhanceBlend)
+            .putBoolean(K_LIP_SYNC, lipSync)
             .putInt(K_FPS, outputFps)
             .apply()
     }
@@ -107,6 +121,7 @@ data class SwapOptions(
         private const val K_LARGEST = "largest_only"
         private const val K_ENHANCE = "face_enhance"
         private const val K_ENHANCE_BLEND = "face_enhance_blend"
+        private const val K_LIP_SYNC = "lip_sync"
         private const val K_FPS = "output_fps"
 
         private fun prefs(context: Context) =
@@ -132,6 +147,7 @@ data class SwapOptions(
                 largestOnly = p.getBoolean(K_LARGEST, d.largestOnly),
                 faceEnhance = p.getBoolean(K_ENHANCE, d.faceEnhance),
                 enhanceBlend = p.getFloat(K_ENHANCE_BLEND, d.enhanceBlend),
+                lipSync = p.getBoolean(K_LIP_SYNC, d.lipSync),
                 outputFps = p.getInt(K_FPS, d.outputFps),
             )
         }

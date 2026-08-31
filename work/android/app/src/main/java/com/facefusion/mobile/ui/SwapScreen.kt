@@ -108,6 +108,7 @@ fun SwapScreen(
     onOptsChange: (SwapOptions) -> Unit,
     hasInswapper: Boolean,
     hasEnhancer: Boolean,
+    hasLipSyncer: Boolean,
     openCard: String,
     onToggleCard: (String) -> Unit,
     advancedOpen: Boolean,
@@ -172,7 +173,7 @@ fun SwapScreen(
         // face_swapper is drawn selected and is not clickable: this app IS the swapper, and
         // a control that cannot be turned off should still be visible, because the row is
         // there to say WHICH stages will run.
-        if (hasEnhancer) {
+        if (hasEnhancer || hasLipSyncer) {
             Caption(stringResource(R.string.swap_processors))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(
@@ -182,15 +183,31 @@ fun SwapScreen(
                     label = { Text(stringResource(R.string.swap_proc_swapper)) },
                     leadingIcon = { Icon(Icons.Default.Check, null, Modifier.size(18.dp)) },
                 )
-                FilterChip(
-                    selected = opts.faceEnhance,
-                    onClick = { onOptsChange(opts.copy(faceEnhance = !opts.faceEnhance)) },
-                    enabled = idle,
-                    label = { Text(stringResource(R.string.swap_proc_enhancer)) },
-                    leadingIcon = if (opts.faceEnhance) {
-                        { Icon(Icons.Default.Check, null, Modifier.size(18.dp)) }
-                    } else null,
-                )
+                if (hasEnhancer) {
+                    FilterChip(
+                        selected = opts.faceEnhance,
+                        onClick = { onOptsChange(opts.copy(faceEnhance = !opts.faceEnhance)) },
+                        enabled = idle,
+                        label = { Text(stringResource(R.string.swap_proc_enhancer)) },
+                        leadingIcon = if (opts.faceEnhance) {
+                            { Icon(Icons.Default.Check, null, Modifier.size(18.dp)) }
+                        } else null,
+                    )
+                }
+                // Disabled, not hidden, on a photo: the row exists to say which stages
+                // will run, and a chip that vanishes when you pick a still reads as a bug
+                // rather than as "there is no audio to sync to".
+                if (hasLipSyncer) {
+                    FilterChip(
+                        selected = opts.lipSync && durationMs > 0,
+                        onClick = { onOptsChange(opts.copy(lipSync = !opts.lipSync)) },
+                        enabled = idle && durationMs > 0,
+                        label = { Text(stringResource(R.string.swap_proc_lip_syncer)) },
+                        leadingIcon = if (opts.lipSync && durationMs > 0) {
+                            { Icon(Icons.Default.Check, null, Modifier.size(18.dp)) }
+                        } else null,
+                    )
+                }
             }
         }
 
