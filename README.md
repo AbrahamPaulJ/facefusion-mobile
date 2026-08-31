@@ -1,7 +1,8 @@
 # FaceFusion Mobile
 
 Offline face swapping on Android. Pick a source face and a target photo or video, and the
-swap runs entirely on your phone. No server, no account, nothing uploaded.
+swap runs entirely on your phone — on the Qualcomm Hexagon NPU where there is one, on the
+GPU and CPU where there is not. No server, no account, nothing uploaded.
 
 This is a mobile port of [FaceFusion](https://github.com/facefusion/facefusion) by Henry
 Ruhs. The pipeline, the models, and the option names, defaults and ranges are FaceFusion's.
@@ -39,7 +40,7 @@ of 256 at a proportional cost in time.
 
 <img src="media/app-run.gif" width="220" alt="The app running a swap">
 
-## Requirements
+## Requirements and supported Snapdragon chips
 
 - Android 12 (API 31) or newer, 64 bit ARM.
 - A Qualcomm Snapdragon phone for the NPU path. Other phones run the GPU and CPU path.
@@ -61,7 +62,7 @@ nothing extra is downloaded to talk to your chip.
 > real hardware of its own generation. If you run one, **Settings → Share bug report** is
 > the most useful thing you can send.
 
-## Install
+## Install the APK
 
 1. Download the APK (about 66 MB) from
    [Releases](https://github.com/AbrahamPaulJ/facefusion-mobile/releases).
@@ -75,7 +76,7 @@ before it is used. You are warned before it starts on a metered connection.
 Models are not bundled in the APK. They are large, and their licences are not ours to
 redistribute inside an application binary.
 
-## Speed
+## Speed: NPU vs GPU and CPU
 
 Measured on a Snapdragon 8 Elite, same clip through the same app.
 
