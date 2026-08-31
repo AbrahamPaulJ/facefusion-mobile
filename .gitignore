@@ -97,3 +97,9 @@ work/qnn/htp_backend_*.json
 # lost, no future build can ever update an already-installed app.
 work/android/*.jks
 work/android/keystore.properties
+
+# README media: the GIFs and stills in media/ ARE tracked -- they are the public face of
+# the project and the README renders them. media/source/ is not: it holds the original
+# clips those were generated from (~6 MB of mp4), which nothing reads at build or run time
+# and which would sit in every clone of the history for ever.
+media/source/
