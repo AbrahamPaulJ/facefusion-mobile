@@ -16,8 +16,12 @@
         <item name="android:windowBackground">@color/ff_background</item>
         <item name="android:statusBarColor">@color/ff_background</item>
         <item name="android:navigationBarColor">@color/ff_background</item>
-        <!-- Dark chrome: icons in the system bars must stay light. -->
-        <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowLightNavigationBar">false</item>
+        <!--
+            LIGHT chrome, so the system-bar icons must be DARK. "windowLightStatusBar"
+            names the BAR, not the icons: true means the bar is light and Android draws
+            dark icons on it. values-night/ flips both back.
+        -->
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
     </style>
 </resources>

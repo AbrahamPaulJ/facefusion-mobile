@@ -155,6 +155,7 @@
     <string name="model_content_checker">內容檢查</string>
     <string name="model_content_checker_quantised">內容檢查（量化版）</string>
     <string name="model_enhancer">人臉增強</string>
+    <string name="model_lip_syncer">口型同步</string>
     <string name="model_landmark_refiner">關鍵點細化</string>
 
     <string name="set_models_npu">NPU 模型 (%1$s)</string>

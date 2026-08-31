@@ -1,8 +1,10 @@
 package com.facefusion.mobile.ui
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -13,22 +15,65 @@ import androidx.compose.ui.unit.sp
 /**
  * The app's colour and type.
  *
- * Previously this was bare `darkColorScheme()`, i.e. Material 3's stock baseline purple.
- * That palette is the one every unstyled Compose app ships with, which is most of why the
- * UI read as a debug harness rather than a product.
+ * The accent is **upstream FaceFusion's own red**, sampled from its web UI: `#EF4444` for
+ * a control that is ON, `#DC2626` a step darker for the mark inside it. This replaces a
+ * near-white primary that was chosen here on the argument that a neutral accent "cannot
+ * clash with whatever is in the user's photo". That argument was not wrong, but it was
+ * answering the wrong question: the accent's job is to say WHICH APP THIS IS, and taking
+ * it from the project this one ports settles that better than avoiding the issue did.
  *
- * FaceFusion's own mark is black-and-white, so the scheme is monochrome-forward: the
- * primary is a near-white that puts DARK text on a LIGHT button, which is both the highest
- * contrast available on a near-black ground and the only accent choice that cannot clash
- * with whatever is in the user's photo -- every screen here is dominated by two large
- * images we do not control.
+ * Both schemes exist and the phone chooses. Two things that follow from that and are easy
+ * to miss:
+ *
+ *   * Nothing outside this file names a colour. Every screen reads MaterialTheme, so the
+ *     light scheme needed no changes anywhere else -- verified by grep, not by hope.
+ *   * The WINDOW is separate. `res/values/themes.xml` paints the frame before the first
+ *     composition, so it needs its own light/night pair, and the system-bar icons have to
+ *     flip with it or they vanish into their own background.
+ *
+ * The greys are Tailwind's zinc, which is what upstream's UI uses: the light surfaces
+ * measure #FAFAFA, #F4F4F5 and #E4E4E7 in a screenshot of it.
  */
-private val FfColors = darkColorScheme(
-    // The call to action. Near-white rather than tinted: see above.
-    primary = Color(0xFFECEAF0),
-    onPrimary = Color(0xFF101014),
-    primaryContainer = Color(0xFF2A2A34),
-    onPrimaryContainer = Color(0xFFECEAF0),
+
+/** ON. Upstream's red-500. */
+val FfRed = Color(0xFFEF4444)
+
+/** The mark inside an ON control. Upstream's red-600, one step down so it reads on the red. */
+val FfRedDeep = Color(0xFFDC2626)
+
+private val FfLight = lightColorScheme(
+    primary = FfRed,
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = FfRed,
+    onPrimaryContainer = Color(0xFFFFFFFF),
+
+    secondary = Color(0xFF52525B),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFF4F4F5),
+    onSecondaryContainer = Color(0xFF27272A),
+
+    background = Color(0xFFFFFFFF),
+    onBackground = Color(0xFF18181B),
+
+    surface = Color(0xFFFAFAFA),
+    onSurface = Color(0xFF18181B),
+    surfaceVariant = Color(0xFFF4F4F5),
+    onSurfaceVariant = Color(0xFF52525B),
+
+    outline = Color(0xFFD4D4D8),
+    outlineVariant = Color(0xFFE4E4E7),
+
+    error = Color(0xFFDC2626),
+    onError = Color(0xFFFFFFFF),
+    errorContainer = Color(0xFFFEE2E2),
+    onErrorContainer = Color(0xFF7F1D1D),
+)
+
+private val FfDark = darkColorScheme(
+    primary = FfRed,
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = FfRed,
+    onPrimaryContainer = Color(0xFFFFFFFF),
 
     secondary = Color(0xFF9AA0B4),
     onSecondary = Color(0xFF16161B),
@@ -88,4 +133,8 @@ val WordmarkStyle = TextStyle(
 
 @Composable
 fun FaceFusionTheme(content: @Composable () -> Unit) =
-    MaterialTheme(colorScheme = FfColors, typography = FfTypography, content = content)
+    MaterialTheme(
+        colorScheme = if (isSystemInDarkTheme()) FfDark else FfLight,
+        typography = FfTypography,
+        content = content,
+    )

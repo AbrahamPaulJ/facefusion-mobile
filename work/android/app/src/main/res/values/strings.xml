@@ -191,6 +191,7 @@
     <string name="model_content_checker">Content checker</string>
     <string name="model_content_checker_quantised">Content checker (quantised)</string>
     <string name="model_enhancer">Face enhancer</string>
+    <string name="model_lip_syncer">Lip syncer</string>
     <string name="model_landmark_refiner">Landmark refiner</string>
 
     <!-- ==================================================== settings: device -->

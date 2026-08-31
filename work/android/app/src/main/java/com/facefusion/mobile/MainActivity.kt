@@ -975,6 +975,13 @@ class MainActivity : ComponentActivity() {
             // the Advanced panel offers a switch for, and that /health reports as present,
             // was invisible on the one screen whose job is to say what is installed.
             "gpen" to getString(R.string.model_enhancer),
+            // Added the day the lip syncer shipped, and it is the SECOND time this list
+            // has caused exactly this bug: the comment above records gpen being invisible
+            // on the one screen whose job is to say what is installed. A hardcoded list
+            // beside a manifest-driven downloader will drift again -- what saves it is
+            // that `row()` reads ModelPaths and `hostedFiles`, so a name added here is
+            // enough and a name forgotten is invisible rather than broken.
+            "wav2lip" to getString(R.string.model_lip_syncer),
             "fan685" to getString(R.string.model_landmark_refiner),
         )
         // What can be fetched is whatever the MANIFEST publishes for this tier -- asked

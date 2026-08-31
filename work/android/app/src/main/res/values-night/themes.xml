@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The dark half of the window theme. See values/themes.xml for what this dresses and why
+    it is separate from Compose's own scheme.
+-->
+<resources>
+    <style name="Theme.FaceFusion" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/ff_background</item>
+        <item name="android:statusBarColor">@color/ff_background</item>
+        <item name="android:navigationBarColor">@color/ff_background</item>
+        <!-- Dark chrome: icons in the system bars must stay light. -->
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+</resources>

@@ -3,10 +3,13 @@
     Window-chrome colours only.
 
     Compose does not read this file for its colour scheme — that lives in ui/Theme.kt.
-    What is here exists so the window behind Compose is already the right dark before the
-    first frame is composed, otherwise launching flashes the platform's white.
+    What is here exists so the window behind Compose is already the right colour before
+    the first frame is composed, otherwise launching flashes.
+
+    This file is the LIGHT value and values-night/ carries the dark one; the pair has to
+    track ui/Theme.kt's two schemes, which follow the phone.
 -->
 <resources>
-    <color name="ff_background">#FF0D0D10</color>
+    <color name="ff_background">#FFFFFFFF</color>
 
 </resources>

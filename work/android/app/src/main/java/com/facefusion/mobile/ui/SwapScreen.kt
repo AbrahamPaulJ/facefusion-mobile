@@ -1,6 +1,10 @@
 package com.facefusion.mobile.ui
 
 import android.graphics.Bitmap
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -15,6 +19,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
@@ -177,18 +182,15 @@ fun SwapScreen(
         // there to say WHICH stages will run.
         run {
             Caption(stringResource(R.string.swap_processors))
-            // Every processor is listed whether or not its model is on the device. Hiding
-            // the ones that are missing meant the row silently disagreed with itself
-            // between installs, and a feature nobody can SEE is a feature nobody asks for.
-            // An absent model reads as "not installed" and asks to fetch itself.
+            // Styled after upstream FaceFusion's own web UI, which is what these controls
+            // are a port of: ON is a solid red chip with a white label and a filled darker
+            // circle holding a white tick; OFF is a plain surface chip with a flat grey
+            // disc and no tick. Both colours are sampled from a screenshot of it --
+            // #EF4444 and #DC2626, in ui/Theme.kt.
             //
-            // Not `enabled = false`: a disabled chip cannot be tapped, and the tap is the
-            // whole point. It is muted by COLOUR and carries a download icon instead.
-            val muted = FilterChipDefaults.filterChipColors(
-                labelColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                iconColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-            )
-
+            // Deliberately NOT Material3's default FilterChip look, which says "selected"
+            // with a faint tonal wash and a bare tick. Upstream's row is the thing a user
+            // arriving from the desktop app already knows how to read.
             @Composable
             fun ProcessorChip(
                 name: String,
@@ -197,47 +199,81 @@ fun SwapScreen(
                 available: Boolean,
                 onToggle: () -> Unit,
             ) {
-                FilterChip(
-                    selected = installed && on && available,
+                val active = installed && on && available
+                val clickable = idle && (!installed || available)
+                Surface(
                     onClick = { if (installed) onToggle() else onRequestModel(name) },
-                    enabled = if (installed) idle && available else idle,
-                    colors = if (installed) FilterChipDefaults.filterChipColors() else muted,
-                    label = { Text(name) },
-                    leadingIcon = when {
-                        // A plus, not a download glyph: Icons.Default has no Download,
-                        // and pulling in material-icons-extended for one vector is not
-                        // worth it on a 66 MB APK. On a muted chip a plus reads as
-                        // "add this one", which is what tapping it does.
-                        !installed -> {
-                            { Icon(Icons.Default.Add, null, Modifier.size(18.dp)) }
+                    enabled = clickable,
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (active) FfRed else MaterialTheme.colorScheme.surfaceVariant,
+                    // No border on the red: a solid chip that also has an outline reads as
+                    // two controls stacked.
+                    border = if (active) null
+                             else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Box(
+                            Modifier
+                                .size(18.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    when {
+                                        active -> FfRedDeep
+                                        // A model that is not on the device gets a hollow
+                                        // disc, so "off" and "not installed" are not the
+                                        // same picture. Upstream has no such state.
+                                        !installed -> Color.Transparent
+                                        else -> MaterialTheme.colorScheme.outlineVariant
+                                    }
+                                )
+                                .then(
+                                    if (!installed)
+                                        Modifier.border(1.dp, MaterialTheme.colorScheme.outline,
+                                                        CircleShape)
+                                    else Modifier
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (active) {
+                                Icon(Icons.Default.Check, null, Modifier.size(12.dp),
+                                     tint = Color.White)
+                            } else if (!installed) {
+                                Icon(Icons.Default.Add, null, Modifier.size(12.dp),
+                                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
-                        on && available -> {
-                            { Icon(Icons.Default.Check, null, Modifier.size(18.dp)) }
-                        }
-                        else -> null
-                    },
-                )
+                        Text(
+                            name,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = when {
+                                active -> Color.White
+                                !installed -> MaterialTheme.colorScheme.onSurfaceVariant
+                                else -> MaterialTheme.colorScheme.onSurface
+                            },
+                        )
+                    }
+                }
             }
 
-            // The chip rows are their OWN Column, and its spacing is ZERO on purpose.
+            // Two rows of two, upstream's shape. Three chips do not fit across a phone and
+            // Row does not wrap -- it SQUEEZES, so labels lose their shape rather than
+            // moving down, and these are upstream's identifiers.
             //
-            // A FilterChip draws 32 dp tall but LAYS OUT 48 dp: Material3 enforces a
-            // minimum interactive size, which is 8 dp of invisible padding above and below
-            // every chip. So any vertical spacing lands on top of 16 dp that is already
-            // there. As siblings of the outer Column the gap measured 32 dp (12 + an 8 dp
-            // spacer + 12); at 8 dp here it was still 24; at 0 it is the 16 dp the touch
-            // targets need and nothing more.
-            Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+            // 8 dp both ways here, unlike the Material chips this replaces: a Surface has
+            // no enforced 48 dp interactive box padding it out, so the spacing asked for
+            // is the spacing seen.
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // face_swapper is drawn selected and is not clickable: this app IS the
-                    // swapper, and a control that cannot be turned off should still be
-                    // visible, because the row is there to say WHICH stages will run.
-                    FilterChip(
-                        selected = true,
-                        onClick = {},
-                        enabled = false,
-                        label = { Text(stringResource(R.string.swap_proc_swapper)) },
-                        leadingIcon = { Icon(Icons.Default.Check, null, Modifier.size(18.dp)) },
+                    // face_swapper is always on and cannot be turned off: this app IS the
+                    // swapper. It still gets a chip, because the row exists to say WHICH
+                    // stages run.
+                    ProcessorChip(
+                        name = stringResource(R.string.swap_proc_swapper),
+                        installed = true, on = true, available = true, onToggle = {},
                     )
                     ProcessorChip(
                         name = stringResource(R.string.swap_proc_enhancer),
@@ -247,14 +283,10 @@ fun SwapScreen(
                         onToggle = { onOptsChange(opts.copy(faceEnhance = !opts.faceEnhance)) },
                     )
                 }
-                // lip_syncer gets its OWN row. Three chips do not fit across a phone, and
-                // Row does not wrap -- it SQUEEZES, so the labels lose their shape rather
-                // than moving down, and these are upstream's identifiers.
-                //
                 // ⚠ `available` is false only once a PHOTO is picked. `durationMs > 0`
                 // alone was false on an empty screen, so the chip greyed out the moment the
-                // app opened and looked broken next to face_enhancer, which needs no
-                // target. There is nothing to say no about until there is a target.
+                // app opened and looked broken beside face_enhancer, which needs no target.
+                // There is nothing to say no about until there is a target.
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ProcessorChip(
                         name = stringResource(R.string.swap_proc_lip_syncer),
