@@ -87,6 +87,15 @@ case "$NAME" in
     DIMS=(--input_dim input 1,3,256,256)
     PRESERVE=(--preserve_io layout input output)
     ;;
+  edtalk)
+    # The 256x256 lip syncer. Screened and REJECTED once on a raw-graph op census, which
+    # was wrong: onnxsim with the shapes pinned folds 4772 nodes to 1170 and both `If`
+    # nodes away. This case exists to settle the rest the way trap #2 says to -- by
+    # building it float and reading the converter's own complaint.
+    ONNX=$FF/work/onnx/edtalk_256_sim.onnx
+    DIMS=(--input_dim source 1,1,80,16 --input_dim target 1,3,256,256 --input_dim weight 1)
+    PRESERVE=(--preserve_io layout target output)
+    ;;
   wav2lip)
     # The lip syncer (upstream's default is the GAN variant; the two are the same graph
     # to the node).  Two inputs: `source` is the 80x16 mel window, `target` is the masked

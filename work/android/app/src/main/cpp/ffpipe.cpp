@@ -679,16 +679,31 @@ bool Pipeline::syncLip(ffcv::Image& frame, const std::vector<Face>& faces,
     const float* T = ffcv::warpTemplate(2);          // ffhq_512
     for (int i = 0; i < 10; ++i) tmpl[i] = T[i] * LS;
     ffcv::Affine am = ffcv::umeyama(f.landmark5_68, tmpl, 5);
-    ffcv::Image crop = ffcv::warpAffine(frame, am, LS, LS, ffcv::BORDER_REPLICATE);
 
     // cv2.transform(landmark_68, affine_matrix) -- the 68 points INTO crop space. Every
-    // step below reads these, not the frame-space ones.
+    // step below reads these, not the frame-space ones. Taken BEFORE the crop, because
+    // the crop is now built only where these say it will be read.
     float lm[136];
     ffcv::transformPoints(f.landmark68, 68, am, lm);
 
-    ffcv::MatF areaMask = ffcv::createAreaMask(LS, LS, lm, ffcv::AREA_LOWER_FACE);
     float box[4];
     ffcv::createBoundingBox(lm, box);
+
+    // Only a rectangle of the 512 crop is ever read: the box comes from these same 68
+    // points, and the lower-face hull is built from a SUBSET of them, so hull ⊆ box. The
+    // margin is two blur radii, because createAreaMask blurs at sigma 5 and the mask can
+    // therefore be non-zero up to ~20 px outside the hull.
+    //
+    // Warping the whole 512x512 measured 6.66 ms on the host and this is the same picture
+    // wherever anything looks at it. Outside the rectangle both the crop and the pasted
+    // result are multiplied by a mask that is zero.
+    const int kBlurMargin = 2 * ((int)std::lround(5.0 * 4.0 * 2.0 + 1.0) / 2);
+    const int rx0 = (int)box[0] - kBlurMargin, ry0 = (int)box[1] - kBlurMargin;
+    const int rx1 = (int)box[2] + kBlurMargin + 1, ry1 = (int)box[3] + kBlurMargin + 1;
+    ffcv::Image crop = ffcv::warpAffineRoi(frame, am, LS, LS, ffcv::BORDER_REPLICATE,
+                                           rx0, ry0, rx1, ry1);
+
+    ffcv::MatF areaMask = ffcv::createAreaMask(LS, LS, lm, ffcv::AREA_LOWER_FACE);
     ffcv::Affine areaM;
     ffcv::Image area = ffcv::warpFaceByBoundingBox(crop, box, MS, &areaM);
     msGeom += nowMs() - t0;
@@ -736,8 +751,8 @@ bool Pipeline::syncLip(ffcv::Image& frame, const std::vector<Face>& faces,
 
     // Back into the 512 crop through the inverse box warp, BORDER_REPLICATE, then paste
     // the crop into the frame through the lower-face mask.
-    ffcv::Image back = ffcv::warpAffine(synced, ffcv::invertAffine(areaM), LS, LS,
-                                        ffcv::BORDER_REPLICATE);
+    ffcv::Image back = ffcv::warpAffineRoi(synced, ffcv::invertAffine(areaM), LS, LS,
+                                           ffcv::BORDER_REPLICATE, rx0, ry0, rx1, ry1);
     ffcv::MatF backF(LS, LS, 3);
     for (int y = 0; y < LS; ++y) {
       const uint8_t* srow = back.row(y);

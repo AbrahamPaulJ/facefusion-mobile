@@ -69,6 +69,17 @@ Affine umeyama(const float* src, const float* dst, int n);
 // cv2.warpAffine(src, M, (dw,dh), flags=INTER_LINEAR, borderMode=...)
 Image warpAffine(const Image& src, const Affine& M, int dw, int dh, Border border);
 MatF warpAffineF(const MatF& src, const Affine& M, int dw, int dh, Border border);
+/**
+ * warpAffine that fills only [x0, x1) x [y0, y1) of the destination.
+ *
+ * Everything outside the rectangle is left BLACK, not warped. That is only ever correct
+ * when the caller knows those pixels are never read -- the lip syncer's are multiplied by
+ * a mask that is zero there -- so this is a sharp tool: a caller that is wrong about the
+ * rectangle gets a black band rather than a slow frame.
+ */
+Image warpAffineRoi(const Image& src, const Affine& M, int dw, int dh, Border border,
+                    int x0, int y0, int x1, int y1);
+
 // cv2.resize(src, (dw,dh), interpolation=INTER_LINEAR)
 Image resizeLinear(const Image& src, int dw, int dh);
 

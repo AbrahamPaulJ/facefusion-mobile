@@ -136,6 +136,26 @@ Image warpAffine(const Image& src, const Affine& M, int dw, int dh, Border borde
   return dst;
 }
 
+Image warpAffineRoi(const Image& src, const Affine& M, int dw, int dh, Border border,
+                    int x0, int y0, int x1, int y1) {
+  Image dst(dw, dh, src.c);
+  x0 = iclamp(x0, 0, dw); x1 = iclamp(x1, 0, dw);
+  y0 = iclamp(y0, 0, dh); y1 = iclamp(y1, 0, dh);
+  Affine inv = invertAffine(M);
+  for (int y = y0; y < y1; ++y) {
+    uint8_t* out = dst.row(y);
+    for (int x = x0; x < x1; ++x) {
+      float sxf = (float)(inv(0, 0) * x + inv(0, 1) * y + inv(0, 2));
+      float syf = (float)(inv(1, 0) * x + inv(1, 1) * y + inv(1, 2));
+      float px[4];
+      sampleBilinear<uint8_t, 3>(src.data.data(), src.w, src.h, sxf, syf, border, px);
+      for (int ch = 0; ch < 3; ++ch)
+        out[x * 3 + ch] = (uint8_t)iclamp((int)std::lround(px[ch]), 0, 255);
+    }
+  }
+  return dst;
+}
+
 MatF warpAffineF(const MatF& src, const Affine& M, int dw, int dh, Border border) {
   MatF dst(dw, dh, src.c);
   Affine inv = invertAffine(M);
