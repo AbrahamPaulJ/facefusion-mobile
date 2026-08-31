@@ -1,5 +1,7 @@
 #include "ffpipe.h"
 
+#include "ffaudio.h"
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -31,6 +33,16 @@ struct Nets {
   ffnn::Handle nsfw = nullptr;
   // Optional, like fan685: absent simply means the enhancer cannot be offered.
   ffnn::Handle enh = nullptr;
+};
+
+// One clip's audio, reduced to what the lip syncer eats: a mel window per OUTPUT frame.
+// Held here rather than handed across JNI per frame, for the same reason the source
+// embedding is -- it is set once and read every frame.
+struct AudioState {
+  std::vector<ffaudio::MelWindow> windows;
+  // create_empty_audio_frame through prepare_audio_frame: zeros become a uniform -4,
+  // which is what the model reads as silence.
+  std::vector<float> silence;
 };
 
 // content_analyser.py:create_static_model_set -- nsfw_2 is 384x384, mean 0, std 1.
@@ -94,6 +106,7 @@ bool probeExecutes(ffnn::Handle h, std::string* why) {
 
 struct Pipeline::Impl {
   Nets n;
+  AudioState audio;
   Config cfg;
   float srcEmbedding[512]{};
   float srcEmbeddingNorm[512]{};
@@ -304,6 +317,60 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
 
 bool Pipeline::hasEnhancer() const { return p_ && p_->n.enh != nullptr; }
 bool Pipeline::hasLipSyncer() const { return p_ && p_->n.lip != nullptr; }
+
+bool Pipeline::setAudio(const int16_t* pcm, size_t frames, int channels, int inRate,
+                        double fps) {
+  if (!p_) return false;
+  p_->audio.windows.clear();
+  if (!pcm || frames == 0 || channels <= 0 || inRate <= 0 || fps <= 0.0) return false;
+
+  // prepare_voice, in upstream's order: resample first, THEN mix and normalise. The mix
+  // is linear and so is the resample, so the two commute, but the PEAK the normalise
+  // divides by is measured after resampling and that does not commute -- doing it the
+  // other way scales the whole signal differently.
+  std::vector<float> wide((size_t)frames * channels);
+  for (size_t i = 0; i < wide.size(); ++i) wide[i] = (float)pcm[i];
+
+  std::vector<float> mono(frames);
+  if (channels == 1) {
+    mono.assign(wide.begin(), wide.end());
+  } else {
+    for (size_t i = 0; i < frames; ++i) {
+      double acc = 0.0;
+      for (int c = 0; c < channels; ++c) acc += wide[i * channels + c];
+      mono[i] = (float)(acc / channels);
+    }
+  }
+  std::vector<float> at16k = ffaudio::resampleToVoiceRate(mono.data(), mono.size(), inRate);
+  if (at16k.empty()) return false;
+  std::vector<float> prepared = ffaudio::prepareAudio(at16k.data(), at16k.size(), 1);
+
+  ffaudio::Spectrogram spec = ffaudio::createSpectrogram(prepared);
+  if (spec.columns > ffaudio::melColumnLimit()) {
+    // Upstream's index array is int16 and wraps negative past here. Refusing is the only
+    // honest option: reproducing the wrap would silently sync the wrong 6.8 minutes.
+    err_ = "audio too long for the lip syncer (over 6.8 minutes)";
+    return false;
+  }
+  p_->audio.windows = ffaudio::extractWindows(spec, fps);
+  // Built here rather than lazily in melWindow(), which is const: a const method quietly
+  // filling a cache is legal and is still a worse thing to read.
+  p_->audio.silence.assign((size_t)ffaudio::kMelFilterTotal * ffaudio::kAudioStepSize,
+                           -4.0f);
+  return !p_->audio.windows.empty();
+}
+
+const float* Pipeline::melWindow(int frameIndex) const {
+  if (!p_ || p_->audio.windows.empty()) return nullptr;
+  if (frameIndex >= 0 && (size_t)frameIndex < p_->audio.windows.size()) {
+    return p_->audio.windows[(size_t)frameIndex].data.data();
+  }
+  return p_->audio.silence.data();
+}
+
+int Pipeline::melWindowTotal() const {
+  return p_ ? (int)p_->audio.windows.size() : 0;
+}
 
 void Pipeline::updateConfig(const Config& c) {
   if (!p_) return;

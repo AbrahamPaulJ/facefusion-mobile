@@ -178,6 +178,34 @@ class Pipeline {
   // The source identity: the largest face of the source image, embedding only.
   bool setSource(const ffcv::Image& sourceImage);
 
+  /**
+   * Take the clip's audio once, and hold one 80x16 mel window per video frame.
+   *
+   * `pcm` is interleaved as the decoder produced it; the resample to 16 kHz, the mix to
+   * mono, the normalise and the pre-emphasis all happen HERE rather than in Kotlin, so
+   * there is exactly one implementation of upstream's arithmetic and it is the one the
+   * host test measures.
+   *
+   * `fps` is the rate frames will be PRESENTED at, which for a rate-reduced run is the
+   * output rate and not the source's: window k belongs to output frame k.
+   */
+  bool setAudio(const int16_t* pcm, size_t frames, int channels, int inRate, double fps);
+
+  /**
+   * The window for one output frame, or SILENCE past the end of the audio.
+   *
+   * Silence is upstream's behaviour, not a guard: `create_empty_audio_frame` gives zeros,
+   * which `prepare_audio_frame` turns into a uniform -4, and the model reads that as "no
+   * speech" and closes the mouth. Returning null and skipping the frame instead would
+   * leave the mouth wherever the swapper put it, which is worse and looks like a stutter.
+   *
+   * Null only when setAudio has never been called.
+   */
+  const float* melWindow(int frameIndex) const;
+
+  // How many windows setAudio produced. Zero before it is called.
+  int melWindowTotal() const;
+
   // Whether wav2lip_<tier>.bin was found at init, on the same rule as hasEnhancer():
   // a switch is offered only for a model that is actually on the device.
   bool hasLipSyncer() const;
