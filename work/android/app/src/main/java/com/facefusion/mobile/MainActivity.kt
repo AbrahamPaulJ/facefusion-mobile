@@ -393,15 +393,22 @@ class MainActivity : ComponentActivity() {
         opts = SwapOptions.load(this)
         ApiService.restore(this)
 
-        // adb: ... --es selftest 1 --es enhance 1
+        // adb: ... --es selftest 1 --es enhance 1 --es lipsync 1
         //
         // The enhancer is opt-in and off by default, so the selftest never touched it --
         // which meant gpen had never run through the APK on EITHER backend, and on ncnn it
         // is the one model with a history of being wrong rather than slow. Not persisted:
         // this changes the run, not the user's settings.
+        //
+        // `lipsync` is here for the same reason and it is the ONLY way the lip syncer gets
+        // exercised over adb: the chip needs a target with an audio track and a hand on the
+        // screen, and a stage nobody can run from a script is a stage that only breaks in
+        // the field.
         if (intent?.getStringExtra("selftest") != null) {
             if (intent?.getStringExtra("enhance") != null)
                 opts = opts.copy(faceEnhance = true)
+            if (intent?.getStringExtra("lipsync") != null)
+                opts = opts.copy(lipSync = true)
             selfTest(); return
         }
 
@@ -1820,8 +1827,10 @@ class MainActivity : ComponentActivity() {
                 }
                 val out = File(getExternalFilesDir(null), "selftest.mp4")
                 val t1 = System.currentTimeMillis()
+                say("lip syncer on device: ${NativePipe.hasLipSyncer()}, asked: ${opts.lipSync}")
                 VideoSwapper(onProgress = { d, t -> if (d % 25 == 0) say("frame $d/$t") },
-                             onLog = { say(it) })
+                             onLog = { say(it) },
+                             lipSync = opts.lipSync)
                     .swap(tgtFile.absolutePath, out.absolutePath)
                     .fold({ say("SELFTEST OK -> $it in ${(System.currentTimeMillis() - t1) / 1000.0} s") },
                           { say("SWAP FAILED: ${it.message}") })
