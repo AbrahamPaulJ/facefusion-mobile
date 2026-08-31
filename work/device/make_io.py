@@ -39,6 +39,12 @@ SPECS = {
 	# this is a friendly test -- but it is at least not the set that trained the encodings.
 	'gpen':      dict(onnx='onnx/gpen_bfr_256_sim.onnx',
 					  inputs=[('input', 'calib/gpen_heldout', (1, 3, 256, 256))]),
+	# The lip syncer. Its two inputs are BUILT rather than captured -- the mouth crop the
+	# app will feed does not exist until roadmap 9 step 5 -- so this verifies the
+	# CONVERSION and says nothing about where the mouth lands. make_lipsync_calib.py.
+	'wav2lip':   dict(onnx='onnx/wav2lip_gan_96_b1_sim.onnx',
+					  inputs=[('source', 'calib/lipsync_source', (1, 1, 80, 16)),
+							  ('target', 'calib/lipsync_target', (1, 6, 96, 96))]),
 	'inswapper': dict(onnx='onnx/inswapper_128_split_sim.onnx',
 					  inputs=[('target', 'calib/swap_target_128', (1, 3, 128, 128)),
 							  ('source', 'calib/swap_source_128', (1, 512))]),
@@ -49,10 +55,16 @@ def main():
 	ap = argparse.ArgumentParser()
 	ap.add_argument('name', choices=list(SPECS))
 	ap.add_argument('-n', type=int, default=16, help='how many held-out cases')
+	# A float build and a quantised one are different context binaries over the SAME
+	# graph, and run_device.ps1 keys the io dir and the .bin off one name. --as lets the
+	# same held-out set be staged under wav2lipf as well as wav2lip, rather than being
+	# rebuilt or hand-copied with input_list.txt left pointing at the other directory.
+	ap.add_argument('--as', dest='stage_as', default=None, help='stage under another name')
 	args = ap.parse_args()
 
 	spec = SPECS[args.name]
-	out = os.path.join(ROOT, 'device', 'io', args.name)
+	staged = args.stage_as or args.name
+	out = os.path.join(ROOT, 'device', 'io', staged)
 	for sub in ('in', 'ref'):
 		os.makedirs(os.path.join(out, sub), exist_ok=True)
 
@@ -79,9 +91,9 @@ def main():
 		for input_name, files, shape in cols:
 			x = numpy.fromfile(files[i], numpy.float32).reshape(shape)
 			feed[input_name] = x
-			dst = os.path.join(out, 'in', '%s_%s_%03d.raw' % (args.name, input_name, i))
+			dst = os.path.join(out, 'in', '%s_%s_%03d.raw' % (staged, input_name, i))
 			numpy.ascontiguousarray(x).tofile(dst)
-			rp = '%s/io/%s/in/%s' % (REMOTE, args.name, os.path.basename(dst))
+			rp = '%s/io/%s/in/%s' % (REMOTE, staged, os.path.basename(dst))
 			parts.append(('%s:=%s' % (input_name, rp)) if multi else rp)
 		lines.append(' '.join(parts))
 
@@ -101,7 +113,7 @@ def main():
 
 	with open(os.path.join(out, 'input_list.txt'), 'w', newline='\n') as fh:
 		fh.write('\n'.join(lines) + '\n')
-	print('  wrote %d inputs + refs -> work/device/io/%s/' % (n, args.name))
+	print('  wrote %d inputs + refs -> work/device/io/%s/' % (n, staged))
 
 
 if __name__ == '__main__':
