@@ -16,6 +16,13 @@ int ff_prepare_audio(const float* interleaved, int frames, int channels, float* 
   return (int)mono.size();
 }
 
+// prepare_voice's resample step. Returns the sample count written.
+int ff_resample_voice(const float* mono, int frames, int inRate, float* dst) {
+  std::vector<float> out = resampleToVoiceRate(mono, (size_t)frames, inRate);
+  std::memcpy(dst, out.data(), out.size() * sizeof(float));
+  return (int)out.size();
+}
+
 // The mel filter bank, 80 x 401, so the test can diff it against numpy's directly rather
 // than only seeing it through the spectrogram.
 void ff_mel_filter_bank(float* dst) {

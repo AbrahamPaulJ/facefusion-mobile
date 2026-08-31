@@ -43,6 +43,8 @@ TOL_WINDOWS = 1e-5
 
 ff = ctypes.CDLL(os.path.join(HERE, 'libffaudio.so'))
 P = ctypes.POINTER
+ff.ff_resample_voice.argtypes = [P(ctypes.c_float), ctypes.c_int, ctypes.c_int, P(ctypes.c_float)]
+ff.ff_resample_voice.restype = ctypes.c_int
 ff.ff_prepare_audio.argtypes = [P(ctypes.c_float), ctypes.c_int, ctypes.c_int, P(ctypes.c_float)]
 ff.ff_prepare_audio.restype = ctypes.c_int
 ff.ff_mel_filter_bank.argtypes = [P(ctypes.c_float)]
@@ -91,6 +93,39 @@ def main():
     got_bank = numpy.zeros((MEL_FILTER_TOTAL, SPECTRUM_BINS), dtype=f32)
     ff.ff_mel_filter_bank(got_bank.ctypes.data_as(P(ctypes.c_float)))
     check('mel bank', got_bank, want_bank, TOL_BANK)
+
+    # ---- the resampler, against upstream's FFT-based scipy.signal.resample
+    # This is the ONE stage that cannot match by construction: upstream transforms the
+    # whole signal, this is a windowed sinc. The number is reported rather than asserted
+    # tight, and the interior is separated from the edges because they fail differently.
+    pcm48 = numpy.fromfile(os.path.join(ORACLE, 'pcm48_stereo.s16'), dtype=numpy.int16)
+    pcm48 = pcm48.reshape(-1, 2).astype(numpy.float64)
+    mono48 = pcm48.mean(axis=1).astype(f32)
+    want_rs = numpy.fromfile(os.path.join(ORACLE, 'resampled16k_stereo.f32'), dtype=f32)
+    want_rs = want_rs.reshape(meta['resampled_shape']).mean(axis=1)
+    src48, src48_p = fp(mono48)
+    got_rs = numpy.zeros(len(want_rs) + 16, dtype=f32)
+    n = ff.ff_resample_voice(src48_p, src48.size, 48000,
+                             got_rs.ctypes.data_as(P(ctypes.c_float)))
+    if n != len(want_rs):
+        print('  %-14s FAIL length %d, oracle %d' % ('resample', n, len(want_rs)))
+        FAILURES.append('resample length')
+    else:
+        got_rs = got_rs[:n].astype(numpy.float64)
+        ref_rs = want_rs.astype(numpy.float64)
+        edge = 2048
+        # Floors, not targets. Measured 62.78 / 65.27 dB with a wrapping kernel; a change
+        # that drops below these is a regression, and the gap between the two says whether
+        # it is the edges (the periodic wrap) or the filter itself.
+        for label, a, b, floor in (('resample all', got_rs, ref_rs, 62.0),
+                                   ('resample interior', got_rs[edge:-edge],
+                                    ref_rs[edge:-edge], 64.0)):
+            snr = 10 * numpy.log10(numpy.mean(b ** 2) / numpy.mean((a - b) ** 2))
+            ok = snr >= floor
+            print('  %-18s SNR %6.2f dB  floor %.0f  max abs %.3e  %s'
+                  % (label, snr, floor, numpy.abs(a - b).max(), 'ok' if ok else 'FAIL'))
+            if not ok:
+                FAILURES.append(label)
 
     # ---- prepare_audio, from the resampled stereo the oracle dumped
     resampled = numpy.fromfile(os.path.join(ORACLE, 'resampled16k_stereo.f32'), dtype=f32)

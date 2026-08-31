@@ -123,6 +123,91 @@ std::vector<float> prepareAudio(const int16_t* interleaved, size_t frames, int c
   return prepareAudio(wide.data(), frames, channels);
 }
 
+namespace {
+
+// Modified Bessel I0, for the Kaiser window. The series converges fast for the betas used
+// here and this runs 2 x kSincHalf times per resample, not per sample.
+double besselI0(double x) {
+  double sum = 1.0, term = 1.0;
+  for (int k = 1; k < 40; ++k) {
+    term *= (x / (2.0 * k)) * (x / (2.0 * k));
+    sum += term;
+    if (term < 1e-18 * sum) break;
+  }
+  return sum;
+}
+
+// 32 zero crossings each side and beta 8.6 is the usual high-quality windowed-sinc
+// setting. It is a choice, and test_ffaudio.py is what says whether it is good enough
+// against upstream's FFT resample rather than merely good in the abstract.
+constexpr int kSincZeroCrossings = 32;
+constexpr double kKaiserBeta = 8.6;
+
+}  // namespace
+
+std::vector<float> resampleToVoiceRate(const float* mono, size_t frames, int inRate) {
+  if (frames == 0 || inRate <= 0) return {};
+  if (inRate == kVoiceSampleRate) return std::vector<float>(mono, mono + frames);
+
+  // round(), matching prepare_voice's audio_resample_factor.
+  const size_t out = (size_t)std::llround((double)frames * kVoiceSampleRate / inRate);
+  if (out == 0) return {};
+  const double step = (double)frames / (double)out;   // input samples per output sample
+
+  // Cutoff at the lower of the two Nyquists, expressed in input-sample cycles. Upsampling
+  // keeps the input's band; downsampling has to band-limit or it aliases.
+  const double fc = 0.5 * std::min(1.0, 1.0 / step);
+  const double halfWidth = kSincZeroCrossings / (2.0 * fc);
+  const double i0beta = besselI0(kKaiserBeta);
+
+  // The kernel is sampled into a table and interpolated, NOT evaluated per tap. The first
+  // version called besselI0 (a 40-term series) and sin() inside the inner loop and cost
+  // 105.8 ms per second of audio, which is 6.4 s for a 60 s clip on the host and several
+  // times that on a phone. The table is built once per call and makes the inner loop two
+  // multiplies and an add.
+  constexpr int kTable = 1 << 16;
+  std::vector<double> kernel((size_t)kTable + 2);
+  for (int i = 0; i <= kTable + 1; ++i) {
+    const double r = (double)i / kTable;              // |t| / halfWidth, in [0, 1]
+    const double t = r * halfWidth;
+    const double x = 2.0 * fc * t;
+    const double sinc = (x < 1e-12) ? 1.0 : std::sin(M_PI * x) / (M_PI * x);
+    const double w = (r >= 1.0) ? 0.0
+                   : besselI0(kKaiserBeta * std::sqrt(1.0 - r * r)) / i0beta;
+    kernel[i] = sinc * w;
+  }
+  auto kernelAt = [&](double t) {
+    const double r = std::fabs(t) / halfWidth;
+    if (r >= 1.0) return 0.0;
+    const double f = r * kTable;
+    const size_t i = (size_t)f;
+    const double frac = f - (double)i;
+    return kernel[i] * (1.0 - frac) + kernel[i + 1] * frac;
+  };
+
+  std::vector<float> dst(out);
+  for (size_t m = 0; m < out; ++m) {
+    const double centre = (double)m * step;
+    const long long lo = (long long)std::ceil(centre - halfWidth);
+    const long long hi = (long long)std::floor(centre + halfWidth);
+    double acc = 0.0, norm = 0.0;
+    for (long long k = lo; k <= hi; ++k) {
+      // WRAPPED, not clipped. scipy.signal.resample is an FFT, so it treats the signal as
+      // PERIODIC: its first output samples are influenced by the end of the clip and vice
+      // versa. Zero-extending instead is arguably more physical and measured 3.3e+03 max
+      // error at the edges against 1.1e+01 in the interior, 50.98 dB against 62.78 overall.
+      // Reproducing upstream wins: this port's job is to be FaceFusion on a phone, not to
+      // be a better resampler.
+      const long long kk = ((k % (long long)frames) + (long long)frames) % (long long)frames;
+      const double h = kernelAt((double)k - centre);
+      acc += mono[kk] * h;
+      norm += h;
+    }
+    dst[m] = (float)(norm != 0.0 ? acc / norm : 0.0);
+  }
+  return dst;
+}
+
 const std::vector<float>& melFilterBank() {
   static const std::vector<float> bank = [] {
     std::vector<float> b((size_t)kMelFilterTotal * kSpectrumBins, 0.0f);

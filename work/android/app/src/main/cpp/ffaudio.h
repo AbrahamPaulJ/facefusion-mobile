@@ -69,6 +69,20 @@ std::vector<float> prepareAudio(const float* interleaved, size_t frames, int cha
 // Same, from the 16-bit PCM a decoder actually hands over.
 std::vector<float> prepareAudio(const int16_t* interleaved, size_t frames, int channels);
 
+/**
+ * audio.py:prepare_voice's resample step, to kVoiceSampleRate.
+ *
+ * ⚠ Upstream calls `scipy.signal.resample`, which is FFT-based: it takes the rfft of the
+ * WHOLE signal, truncates the spectrum and inverts. That is not reproducible on a phone
+ * for an arbitrary length, so this is a windowed-sinc polyphase instead, and the
+ * difference is a MEASURED number in test_ffaudio.py rather than an assumption.
+ *
+ * The output length is `round(frames * 16000 / inRate)` and output sample m is centred on
+ * input position `m * frames / outFrames`, both of which are scipy's own conventions -- a
+ * resampler that is a hair better but off by half a sample would move every mel column.
+ */
+std::vector<float> resampleToVoiceRate(const float* mono, size_t frames, int inRate);
+
 // audio.py:create_mel_filter_bank -- 80 x 401, built once and cached.
 const std::vector<float>& melFilterBank();
 
