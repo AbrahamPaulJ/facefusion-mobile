@@ -38,6 +38,39 @@ std::string jstr(JNIEnv* env, jstring s) {
 
 inline uint8_t clamp8(int v) { return (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v)); }
 
+/**
+ * The per-frame tunables, clamped, into `cfg`.
+ *
+ * Shared by initEx and setOptions BECAUSE it is the clamping: these come from sliders, and
+ * a bad pixelBoost allocates a crop of pixelBoost^2 the area and runs that many graph
+ * invocations per face. Two copies of that would be one copy away from a path that trusts
+ * Kotlin, and the live-update path is exactly the one that could be reached most often.
+ *
+ * Touches nothing derived from WHICH SWAPPER is loaded -- swapSize and the normalisation
+ * belong to the model, not to the sliders.
+ */
+void tunables(JNIEnv* env, ffpipe::Config& cfg, jfloat weight, jfloat maskBlur,
+              jintArray jPadding, jfloat detScore, jfloat lmkScore, jint pixelBoost,
+              jboolean largestOnly, jboolean faceEnhance, jfloat enhanceBlend) {
+  cfg.swapperWeight = std::fmin(1.f, std::fmax(0.f, weight));
+  cfg.maskBlur = std::fmin(1.f, std::fmax(0.f, maskBlur));
+  cfg.detectorScore = std::fmin(1.f, std::fmax(0.f, detScore));
+  cfg.landmarkerScore = std::fmin(1.f, std::fmax(0.f, lmkScore));
+  cfg.pixelBoost = pixelBoost < 1 ? 1 : (pixelBoost > 4 ? 4 : pixelBoost);
+  cfg.swapLargestOnly = largestOnly == JNI_TRUE;
+  // Asking for the enhancer is not the same as having it: hasEnhancer() decides, and the
+  // stage is skipped silently when gpen_<tier>.bin was not there. A stale saved preference
+  // from a build that had the model must not become a failed run.
+  cfg.faceEnhance = faceEnhance == JNI_TRUE;
+  cfg.faceEnhancerBlend = std::fmin(1.f, std::fmax(0.f, enhanceBlend));
+  if (jPadding && env->GetArrayLength(jPadding) == 4) {
+    jint pad[4];
+    env->GetIntArrayRegion(jPadding, 0, 4, pad);
+    for (int i = 0; i < 4; ++i)
+      cfg.maskPadding[i] = pad[i] < 0 ? 0 : (pad[i] > 100 ? 100 : (int)pad[i]);
+  }
+}
+
 }  // namespace
 
 extern "C" {
@@ -62,26 +95,8 @@ Java_com_facefusion_mobile_NativePipe_initEx(JNIEnv* env, jclass, jstring jLib, 
     cfg.swapSize = 128; cfg.swapMean = 0.f; cfg.swapStd = 1.f;
     cfg.swapDenorm = false; cfg.swapperIsHyperswap = false;
   }
-  // Clamped here rather than trusted from Kotlin: these come from sliders, and a bad
-  // pixelBoost would allocate a crop of pixelBoost^2 the area and run that many graph
-  // invocations per face.
-  cfg.swapperWeight = std::fmin(1.f, std::fmax(0.f, weight));
-  cfg.maskBlur = std::fmin(1.f, std::fmax(0.f, maskBlur));
-  cfg.detectorScore = std::fmin(1.f, std::fmax(0.f, detScore));
-  cfg.landmarkerScore = std::fmin(1.f, std::fmax(0.f, lmkScore));
-  cfg.pixelBoost = pixelBoost < 1 ? 1 : (pixelBoost > 4 ? 4 : pixelBoost);
-  cfg.swapLargestOnly = largestOnly == JNI_TRUE;
-  // Asking for the enhancer is not the same as having it: hasEnhancer() decides, and
-  // the stage is skipped silently when gpen_<tier>.bin was not there. A stale saved
-  // preference from a build that had the model must not become a failed run.
-  cfg.faceEnhance = faceEnhance == JNI_TRUE;
-  cfg.faceEnhancerBlend = std::fmin(1.f, std::fmax(0.f, enhanceBlend));
-  if (jPadding && env->GetArrayLength(jPadding) == 4) {
-    jint pad[4];
-    env->GetIntArrayRegion(jPadding, 0, 4, pad);
-    for (int i = 0; i < 4; ++i)
-      cfg.maskPadding[i] = pad[i] < 0 ? 0 : (pad[i] > 100 ? 100 : (int)pad[i]);
-  }
+  tunables(env, cfg, weight, maskBlur, jPadding, detScore, lmkScore, pixelBoost,
+           largestOnly, faceEnhance, enhanceBlend);
 
   // PUSHED, not passed. There are four paths into init -- the preview, runSwap, the
   // self-test and the API -- and a per-call-site argument is a list you can be absent
@@ -100,6 +115,32 @@ Java_com_facefusion_mobile_NativePipe_initEx(JNIEnv* env, jclass, jstring jLib, 
     g_pipe.reset();
     return JNI_FALSE;
   }
+  return JNI_TRUE;
+}
+
+/**
+ * Change the per-frame tunables WITHOUT reloading anything.
+ *
+ * Returns false only when nothing is loaded, which is not an error -- the caller then does
+ * a normal init and these values go in through it.
+ *
+ * ⚠ The SWAPPER is not a parameter here, deliberately. It selects a different model file
+ * and different input geometry, so it is the one option that still costs a reload; leaving
+ * it out means this entry point cannot be used to ask for one by accident.
+ */
+JNIEXPORT jboolean JNICALL
+Java_com_facefusion_mobile_NativePipe_setOptionsEx(JNIEnv* env, jclass,
+                                                   jfloat weight, jfloat maskBlur,
+                                                   jintArray jPadding, jfloat detScore,
+                                                   jfloat lmkScore, jint pixelBoost,
+                                                   jboolean largestOnly,
+                                                   jboolean faceEnhance,
+                                                   jfloat enhanceBlend) {
+  if (!g_pipe) return JNI_FALSE;
+  ffpipe::Config cfg;
+  tunables(env, cfg, weight, maskBlur, jPadding, detScore, lmkScore, pixelBoost,
+           largestOnly, faceEnhance, enhanceBlend);
+  g_pipe->updateConfig(cfg);
   return JNI_TRUE;
 }
 

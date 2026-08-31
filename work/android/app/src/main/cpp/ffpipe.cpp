@@ -299,6 +299,24 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
 
 bool Pipeline::hasEnhancer() const { return p_ && p_->n.enh != nullptr; }
 
+void Pipeline::updateConfig(const Config& c) {
+  if (!p_) return;
+  Config& live = p_->cfg;
+  // Named one by one rather than assigned wholesale. A `p_->cfg = c` would also overwrite
+  // the swapper-derived geometry with whatever the caller happened to be carrying, and the
+  // failure that produces is not a crash -- it is a swap that runs and looks wrong.
+  live.detectorScore     = c.detectorScore;
+  live.landmarkerScore   = c.landmarkerScore;
+  live.nmsThreshold      = c.nmsThreshold;
+  live.maskBlur          = c.maskBlur;
+  for (int i = 0; i < 4; ++i) live.maskPadding[i] = c.maskPadding[i];
+  live.swapperWeight     = c.swapperWeight;
+  live.pixelBoost        = c.pixelBoost;
+  live.swapLargestOnly   = c.swapLargestOnly;
+  live.faceEnhance       = c.faceEnhance;
+  live.faceEnhancerBlend = c.faceEnhancerBlend;
+}
+
 // ------------------------------------------------------------ content gate
 
 ContentVerdict Pipeline::checkContent(const ffcv::Image& frame) {

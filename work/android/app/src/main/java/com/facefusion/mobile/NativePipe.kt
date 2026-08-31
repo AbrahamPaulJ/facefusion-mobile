@@ -50,6 +50,31 @@ object NativePipe {
     @JvmStatic external fun setSkipTiers(tiers: String)
 
     /**
+     * Change the per-frame options on the ALREADY LOADED pipeline. False when none is.
+     *
+     * ⚠ Takes no swapper. Every value here is read once per frame inside the native
+     * pipeline and none is consumed at load time, so changing one never needed a model
+     * reloaded -- including the face enhancer, whose model is opened whether the switch is
+     * on or off, because the flag decides whether the STAGE RUNS. The swapper is the one
+     * option that genuinely selects a different file, and leaving it out of this signature
+     * is what stops it being changed here by accident.
+     */
+    @JvmStatic external fun setOptionsEx(
+        weight: Float, maskBlur: Float, maskPadding: IntArray,
+        detectorScore: Float, landmarkerScore: Float,
+        pixelBoost: Int, largestOnly: Boolean,
+        faceEnhance: Boolean, enhanceBlend: Float,
+    ): Boolean
+
+    /** [setOptionsEx] from a [SwapOptions]. `swapper` and `outputFps` are not sent: the
+     *  first needs a reload, the second never reaches the pipeline at all. */
+    fun setOptions(opts: SwapOptions): Boolean =
+        setOptionsEx(opts.weight, opts.maskBlur, opts.maskPadding.toIntArray(),
+                     opts.detectorScore, opts.landmarkerScore,
+                     opts.pixelBoost, opts.largestOnly,
+                     opts.faceEnhance, opts.enhanceBlend)
+
+    /**
      * The tier that LOADED and then would not execute, or "".
      *
      * Meaningful after any [init], failed OR successful: a device can reject its best tier

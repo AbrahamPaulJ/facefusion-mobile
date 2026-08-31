@@ -112,6 +112,25 @@ class Pipeline {
             const std::string& modelDir, const std::string& swapperName,
             const Config& cfg);
 
+  /**
+   * Change the per-frame tunables on a pipeline that is ALREADY LOADED.
+   *
+   * ⚠ Every field this copies is read inside `analyse`/`swapAll`/`checkContent`, once per
+   * frame — none of them is consumed at init. So a weight, a mask blur, a detector
+   * threshold, a pixel boost, and the face enhancer's on/off are all just numbers the next
+   * frame will read, and changing one never needed a model reloaded. `gpen` in particular
+   * is opened whether or not `faceEnhance` is set, because the flag decides whether the
+   * STAGE RUNS, not whether the model exists.
+   *
+   * What it deliberately does NOT copy is everything derived from WHICH SWAPPER is loaded
+   * — swapSize, swapMean, swapStd, swapDenorm, swapperIsHyperswap — and `skipVariants`,
+   * which only tier selection reads. Those describe the loaded graph, so accepting them
+   * here would let a caller silently tell a 256-pixel hyperswap context that it is a
+   * 128-pixel inswapper. Changing the swapper is a reload, and that is the only thing that
+   * still is one.
+   */
+  void updateConfig(const Config& c);
+
   // The tier init() chose. Empty until init() has run.
   const std::string& tier() const { return tier_; }
 
