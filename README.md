@@ -6,11 +6,17 @@ swap runs entirely on your phone. No server, no account, nothing uploaded.
 This is a mobile port of [FaceFusion](https://github.com/facefusion/facefusion) by Henry
 Ruhs. The pipeline, the models, and the option names, defaults and ranges are FaceFusion's.
 
-| Source face | Target | Result |
-|:---:|:---:|:---:|
-| <img src="media/source-face.jpg" width="240"> | <img src="media/swap-before.gif" width="240"> | <img src="media/swap-after.gif" width="240"> |
+**Source face**
 
-<img src="media/app-run.gif" width="220" align="right">
+<img src="media/source-face.jpg" width="200" alt="Source face">
+
+**Target**
+
+<img src="media/swap-before.gif" width="260" alt="Target clip">
+
+**Result**
+
+<img src="media/swap-after.gif" width="260" alt="Swapped clip">
 
 ## What it does
 
@@ -28,6 +34,10 @@ Ruhs. The pipeline, the models, and the option names, defaults and ranges are Fa
 Optional extras: a face enhancer (`gpen_bfr_256`, about 2.5 ms more per face, a separate
 25 MB download) and pixel boost, which renders the swapped face at 512, 768 or 1024 instead
 of 256 at a proportional cost in time.
+
+**The app running a swap**
+
+<img src="media/app-run.gif" width="220" alt="The app running a swap">
 
 ## Requirements
 
@@ -78,8 +88,6 @@ Measured on a Snapdragon 8 Elite, same clip through the same app.
 The GPU and CPU path produces the same swap rather than an approximation of it. Two stages
 stay on the CPU whatever the phone has, because on the GPU they come out measurably wrong:
 the content checker and the face enhancer.
-
-<img src="media/app-photo.jpg" width="200" align="right">
 
 ## Remote API
 
