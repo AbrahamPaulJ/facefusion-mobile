@@ -29,12 +29,20 @@ Ruhs. The pipeline, the models, and the option names, defaults and ranges are Fa
 - Shows the target frame and the swapped frame side by side before you commit to a run.
 - Trims the clip, drops the frame rate if you want it faster, and lets you cancel mid run.
 - Saves to your gallery, or hands a still straight out of the preview.
+- Lip sync, optionally: redraws the mouth to match the speech on the clip's own audio
+  track, at about 1 ms per frame on the NPU.
 - Speaks English, 简体中文 and 繁體中文.
 - Can be driven from a browser on your PC over the local network, if you turn that on.
 
-Optional extras: a face enhancer (`gpen_bfr_256`, about 2.5 ms more per face, a separate
-25 MB download) and pixel boost, which renders the swapped face at 512, 768 or 1024 instead
-of 256 at a proportional cost in time.
+Optional extras, each a separate download: a face enhancer (`gpen_bfr_256`, about 2.5 ms
+more per face, 25 MB), a lip syncer (`wav2lip_gan_96`, 44 MB) and pixel boost, which renders
+the swapped face at 512, 768 or 1024 instead of 256 at a proportional cost in time.
+
+The lip syncer needs a video with sound. It takes a 200 ms window of the audio and redraws
+the mouth to match it, so a photo or a silent clip has nothing to sync to. The model itself
+is about 1 ms per frame; decoding the audio and turning it into a spectrogram costs roughly
+28 ms per second of audio, once per clip. It runs on the speech as recorded, with no attempt
+to separate a voice from a music bed, so it is at its best on clean speech.
 
 **The app running a swap**
 
@@ -67,7 +75,7 @@ nothing extra is downloaded to talk to your chip.
 1. Download the APK (about 66 MB) from
    [Releases](https://github.com/AbrahamPaulJ/facefusion-mobile/releases).
 2. Install it and open the app.
-3. Tap **Download models**. The app fetches the roughly 300 MB set for your chip from
+3. Tap **Download models**. The app fetches the roughly 360 MB set for your chip from
    [Hugging Face](https://huggingface.co/AbrahamPJ/facefusion-mobile-models).
 
 The download resumes if it is interrupted, and every file is checked against a SHA256 hash
@@ -102,8 +110,6 @@ you say otherwise.
 - Get the GPU and CPU path onto a phone that actually needs it. It has only ever run on a
   Snapdragon with the NPU switched off.
 - Show the faces detected in the target, so you can see what will be swapped.
-- Lip sync. The model is cheap, about 1 ms per frame. The audio decoding and resampling
-  around it is the real work, and the app currently copies audio through untouched.
 - Live portrait, for stills only. The generator costs nine times the entire current frame,
   which turns a 10 second clip into about four minutes.
 
@@ -130,8 +136,8 @@ which carries use restrictions. Read
 using, modifying or redistributing this.
 
 The models are converted from FaceFusion's and are not uniformly permissive.
-`yoloface_8n` is GPL-3.0, `arcface_w600k_r50` and `inswapper_128` are Non-Commercial, and
-`hyperswap_1a_256` is ResearchRAIL. See the
+`yoloface_8n` is GPL-3.0, `arcface_w600k_r50`, `inswapper_128` and `wav2lip_gan_96` are
+Non-Commercial, and `hyperswap_1a_256` is ResearchRAIL. See the
 [model repository](https://huggingface.co/AbrahamPJ/facefusion-mobile-models) for details.
 
 The app icon is FaceFusion's, used with permission.

@@ -66,7 +66,13 @@ Bodies are raw bytes, not multipart — the client is `curl --data-binary @file`
 
 Options default to whatever the app's Advanced panel is set to, per-request overrides in the
 query string: `weight`, `blur`, `detector`, `boost` (1-4), `largest`, `enhancer`,
-`enhance_blend`, `fps`, `swapper`.
+`enhance_blend`, `fps`, `swapper`, `lip_sync`.
+
+`lip_sync=1` applies only to `/swap_video`, and only when the clip HAS AN AUDIO TRACK: the
+lip syncer redraws the mouth to match speech, so a silent clip and a still image have
+nothing to condition on. It is a separate model download like the enhancer; when it is
+absent, or the clip is silent, the run logs a reason and continues as a plain swap rather
+than failing. `GET /health` lists missing models.
 
 ```powershell
 curl --data-binary "@face.jpg" http://127.0.0.1:8760/source
