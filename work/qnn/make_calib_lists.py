@@ -29,6 +29,13 @@ SPECS = {
 	# of the swapper in run_reference.swap_face -- gpen never sees a target crop, only a
 	# face hyperswap has already written, so `swap_target` would be the wrong distribution.
 	'gpen':      [('input',  'gpen',        1 * 3 * 256 * 256)],
+	# The lip syncer. `source` is the mel window and `target` is the masked crop
+	# concatenated with the reference crop, both captured by
+	# work/pipeline/capture_lipsync_calib.py from REAL frames through the real crop chain
+	# -- make_lipsync_calib.py's fan2d stand-ins were for verifying the conversion and are
+	# the wrong distribution to quantise against (trap #4).
+	'wav2lip':   [('source', 'lipsync_source', 1 * 1 * 80 * 16),
+				  ('target', 'lipsync_target', 1 * 6 * 96 * 96)],
 }
 
 
