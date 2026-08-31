@@ -39,6 +39,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -75,6 +76,13 @@ bool fail(const std::string& m) {
   LOGE("%s", m.c_str());
   return false;
 }
+
+// The entry points that can fail clear it first, so `lastError()` describes the call that
+// just returned false rather than the last one that ever did. This became load-bearing when
+// ffnn_qnn.cpp stopped shadowing this string: a stale message there hid an execution
+// failure behind a load failure for two releases, and the only thing that stops the same
+// mistake here is that nothing is left over to be read by accident.
+void clearError() { g_err.clear(); }
 
 // ---------------------------------------------------------------------------
 // Tensor field access. Qnn_Tensor_t is a versioned union and the binaries this
@@ -416,6 +424,9 @@ struct Model {
   std::vector<Qnn_Tensor_t> inputs, outputs;      // shallow copies of binary metadata
   std::vector<std::vector<uint8_t>> inBuf, outBuf;
   QnnSystemContext_Handle_t sysCtx = nullptr;
+  // The file's basename, carried purely so an execution failure can name the graph that
+  // failed. The caller knows which model it asked for; a bug report does not.
+  std::string name;
 };
 
 bool bindTensors(Model* m, const QnnSystemContext_GraphInfo_t& gi) {
@@ -484,20 +495,27 @@ bool init(const std::string& backendLib, const std::string& systemLib,
 
 Handle load(const std::string& binPath) {
   std::lock_guard<std::mutex> lk(g_mu);
+  clearError();
   if (!g_be.ready) { fail("ffqnn::init not called"); return nullptr; }
 
   // mmap, never a heap copy: a heap copy doubles peak footprint for the duration of the
   // load, which on an 11 GB phone drew lmkd and killed the activity mid-run (trap #35).
+  // errno, because "open <path>" alone cannot tell a file that is ABSENT from one that is
+  // present and unreadable, and those have opposite fixes -- download it, versus the mode
+  // 660 that makes /sdcard/Download copies invisible to the app (HANDOFF, self-test).
   int fd = open(binPath.c_str(), O_RDONLY);
-  if (fd < 0) { fail("open " + binPath); return nullptr; }
+  if (fd < 0) { fail("open " + binPath + ": " + strerror(errno)); return nullptr; }
   struct stat st{};
-  if (fstat(fd, &st) != 0 || st.st_size <= 0) { close(fd); fail("stat " + binPath); return nullptr; }
+  if (fstat(fd, &st) != 0 || st.st_size <= 0) {
+    close(fd); fail("stat " + binPath + ": " + strerror(errno)); return nullptr;
+  }
   void* map = mmap(nullptr, (size_t)st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
   close(fd);
-  if (map == MAP_FAILED) { fail("mmap " + binPath); return nullptr; }
+  if (map == MAP_FAILED) { fail("mmap " + binPath + ": " + strerror(errno)); return nullptr; }
   madvise(map, (size_t)st.st_size, MADV_SEQUENTIAL);
 
   auto* m = new Model();
+  m->name = binPath.substr(binPath.find_last_of('/') + 1);
   const QnnSystemContext_BinaryInfo_t* info = nullptr;
   Qnn_ContextBinarySize_t infoSize = 0;
 
@@ -577,10 +595,41 @@ std::vector<std::string> outputNames(Handle h) { return namesOf(((Model*)h)->out
 std::vector<std::vector<int>> inputShapes(Handle h) { return shapesOf(((Model*)h)->inputs); }
 std::vector<std::vector<int>> outputShapes(Handle h) { return shapesOf(((Model*)h)->outputs); }
 
+// A QNN error handle is a number, and a number in a bug report from a device nobody here
+// owns is a second round trip. QNN_GRAPH_ERROR_MEM_ALLOC and QNN_GRAPH_ERROR_UNSUPPORTED_
+// FEATURE point at completely different fixes -- VTCM budget versus an op the arch will not
+// run -- and asking a user to reproduce because the app printed a bare integer is asking
+// them to do work the app could have done once, here, for everybody.
+static const char* graphErrorName(Qnn_ErrorHandle_t e) {
+  switch ((QnnGraph_Error_t)e) {
+    case QNN_GRAPH_ERROR_UNSUPPORTED_FEATURE:    return "UNSUPPORTED_FEATURE";
+    case QNN_GRAPH_ERROR_MEM_ALLOC:              return "MEM_ALLOC";
+    case QNN_GRAPH_ERROR_GENERAL:                return "GENERAL";
+    case QNN_GRAPH_ERROR_INVALID_ARGUMENT:       return "INVALID_ARGUMENT";
+    case QNN_GRAPH_ERROR_INVALID_HANDLE:         return "INVALID_HANDLE";
+    case QNN_GRAPH_ERROR_GRAPH_DOES_NOT_EXIST:   return "GRAPH_DOES_NOT_EXIST";
+    case QNN_GRAPH_ERROR_INVALID_NAME:           return "INVALID_NAME";
+    case QNN_GRAPH_ERROR_INVALID_TENSOR:         return "INVALID_TENSOR";
+    case QNN_GRAPH_ERROR_INVALID_OP_CONFIG:      return "INVALID_OP_CONFIG";
+    case QNN_GRAPH_ERROR_GRAPH_NOT_FINALIZED:    return "GRAPH_NOT_FINALIZED";
+    case QNN_GRAPH_ERROR_EXECUTION_ASYNC_FIFO_FULL: return "ASYNC_FIFO_FULL";
+    case QNN_GRAPH_ERROR_ABORTED:                return "ABORTED";
+    case QNN_GRAPH_ERROR_TIMED_OUT:              return "TIMED_OUT";
+    case QNN_GRAPH_ERROR_SUBGRAPH:               return "SUBGRAPH";
+    case QNN_GRAPH_ERROR_DISABLED:               return "DISABLED";
+    case QNN_GRAPH_ERROR_DYNAMIC_TENSOR_SHAPE:   return "DYNAMIC_TENSOR_SHAPE";
+    case QNN_GRAPH_ERROR_TENSOR_SPARSITY:        return "TENSOR_SPARSITY";
+    case QNN_GRAPH_ERROR_EARLY_TERMINATION:      return "EARLY_TERMINATION";
+    case QNN_GRAPH_ERROR_INVALID_CONTEXT:        return "INVALID_CONTEXT";
+    default:                                     return "unrecognised";
+  }
+}
+
 bool execute(Handle h, const std::vector<std::string>& names,
              const std::vector<const float*>& data,
              std::vector<std::vector<float>>& outs) {
   std::lock_guard<std::mutex> lk(g_mu);
+  clearError();
   auto* m = (Model*)h;
   if (!m || !m->graph) return fail("execute: model not loaded");
   if (names.size() != data.size()) return fail("execute: names/data length mismatch");
@@ -597,7 +646,12 @@ bool execute(Handle h, const std::vector<std::string>& names,
   Qnn_ErrorHandle_t e = g_be.qnn.graphExecute(
       m->graph, m->inputs.data(), (uint32_t)m->inputs.size(),
       m->outputs.data(), (uint32_t)m->outputs.size(), nullptr, nullptr);
-  if (e != QNN_SUCCESS) return fail("graphExecute failed: " + std::to_string((long long)e));
+  if (e != QNN_SUCCESS) {
+    char buf[96];
+    std::snprintf(buf, sizeof(buf), "graphExecute failed: %s (0x%llx)", graphErrorName(e),
+                  (unsigned long long)e);
+    return fail(std::string(buf) + " on " + m->name);
+  }
 
   outs.resize(m->outputs.size());
   for (size_t i = 0; i < m->outputs.size(); ++i) {

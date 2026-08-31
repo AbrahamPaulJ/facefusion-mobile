@@ -35,8 +35,24 @@
 
             which surfaces four layers up as the far less helpful
             "Failed to load skel, error: 4000" / "Device Creation failure".
+
+            ⚠ required="false", and the "false" is the entire non-Qualcomm story.
+            `required` is an INSTALL GATE, not a link-time hint: with "true" the package
+            manager refuses to install on any device that does not carry the library, and
+            libcdsprpc.so is a QUALCOMM vendor library. So 0.4.0 shipped an ncnn backend
+            for phones that physically could not install the APK to run it. A Dimensity
+            Poco reported "no se instaló la app porque no es compatible con el teléfono"
+            and read this very comment on GitHub to work out why.
+
+            (Note for anyone editing this block: XML forbids a double hyphen inside a
+            comment, and one here failed the manifest merger rather than the build.)
+
+            "false" changes nothing on a Hexagon: naming the library here is what puts it
+            in the app's linker namespace, and that still happens wherever it exists. What
+            it stops doing is deciding, at install time, that a phone with no DSP has no
+            business running a build whose whole second backend is for phones with no DSP.
         -->
-        <uses-native-library android:name="libcdsprpc.so" android:required="true" />
+        <uses-native-library android:name="libcdsprpc.so" android:required="false" />
         <uses-native-library android:name="libadsprpc.so" android:required="false" />
 
         <activity

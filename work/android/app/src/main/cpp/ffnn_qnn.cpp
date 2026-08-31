@@ -16,10 +16,25 @@ namespace {
 InitSpec g_spec;
 std::string g_tier;
 std::vector<std::string> g_chain;
+
+// ⚠ STICKY, and it SHADOWS the runner's own error -- see qnnLastError. So every operation
+// that can fail clears it first, and the invariant is: this string describes the call that
+// just returned false, or it is empty and the runner's error is the live one.
+//
+// Without that clear, the pipeline could not report why a tier failed to EXECUTE, because
+// loading always poisoned it first. `ffpipe::init` tries `nsfw` before `nsfwq2`, and on
+// every tier except v79 the fp32 gate does not exist -- by design, it does not build there
+// -- so the miss is expected, unavoidable and happens on the way to a SUCCESSFUL open.
+// It left "load .../nsfw_v81.bin: open .../nsfw_v81.bin" here for the rest of the process.
+// When the gate then failed `graphExecute`, ffpipe printed that stale line instead, and an
+// 8 Elite Gen 5 owner was told a file was missing while looking at it in the inventory.
+// Two releases went to a device nobody here owns without the error code that would have
+// explained them.
 std::string g_err;
 }  // namespace
 
 bool qnnInit(const InitSpec& spec) {
+  g_err.clear();
   g_spec = spec;
   if (!ffqnn::init(spec.libDir + "/libQnnHtp.so", spec.libDir + "/libQnnSystem.so",
                    spec.skelDir)) {
@@ -48,6 +63,7 @@ bool qnnVariantPresent(const std::string& v) {
 }
 
 Handle qnnOpen(const std::string& logicalName) {
+  g_err.clear();
   std::string path = g_spec.modelDir + "/" + logicalName + "_" + g_tier + ".bin";
   Handle h = ffqnn::load(path);
   if (!h) g_err = std::string("load ") + path + ": " + ffqnn::lastError();

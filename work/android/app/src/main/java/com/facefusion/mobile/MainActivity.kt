@@ -1027,7 +1027,17 @@ class MainActivity : ComponentActivity() {
                             if (v.ok) null else ContentGate.message(this@MainActivity, R.string.gate_subject_source_image, v)
                         },
                     )
-                    if (err != null) { previewNote = err; return@launch }
+                    if (err != null) {
+                        // The LOG too, not just the pane. A bug report carries the log and
+                        // the status line; it does not carry the pane. So the one report
+                        // this project most needed to explain -- an 8 Elite Gen 5 whose
+                        // v81 tier loads and will not execute -- arrived with the failure
+                        // filling the screen and "-- run log --  (empty)" underneath it,
+                        // and the user had to photograph the pane to say what happened.
+                        appendLog(err)
+                        previewNote = err
+                        return@launch
+                    }
                     previewWarm = true
                 }
 

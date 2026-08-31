@@ -87,6 +87,11 @@ bool ncnnInit(const InitSpec& spec) {
 }
 
 Handle ncnnOpen(const std::string& logicalName, Placement p) {
+  // Cleared first, so this string always describes the call that just failed. The QNN side
+  // shipped without that invariant and a stale load error masked an execution failure on a
+  // device nobody here owns for two releases -- see ffnn_qnn.cpp. Same shape of bug, and
+  // this backend is about to get its first real users, so it does not get to repeat it.
+  g_err.clear();
   auto it = specs().find(logicalName);
   if (it == specs().end()) {
     g_err = "ncnn: no model named " + logicalName;
@@ -153,6 +158,7 @@ void ncnnRelease(Handle h) { delete static_cast<Model*>(h); }
 bool ncnnExecute(Handle h, const std::vector<std::string>& names,
                  const std::vector<const float*>& data,
                  std::vector<std::vector<float>>& outs) {
+  g_err.clear();
   Model* m = static_cast<Model*>(h);
   if (!m || names.size() != data.size()) {
     g_err = "ncnn: bad execute arguments";
