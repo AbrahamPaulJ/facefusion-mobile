@@ -542,9 +542,43 @@ MatF createAreaMask(int w, int h, const float* landmark68, FaceMaskArea area) {
     }
   }
 
-  mask = gaussianBlur(mask, 5.0);
-  for (float& v : mask.data) {
-    v = (std::min(std::max(v, 0.5f), 1.0f) - 0.5f) * 2.0f;
+  // The blur is the expensive half of this function -- measured 20.7 ms of 21.3 on a
+  // 512x512 host, and the lip syncer calls it once per FRAME, where the swap's box mask
+  // was once per face. It is restricted to the hull's bounding box grown by the kernel
+  // radius, which is EXACT rather than an approximation: outside the hull the fill is 0,
+  // a blur of 0 is 0, and (clip(0, 0.5, 1) - 0.5) * 2 is 0 too. So every pixel this skips
+  // was going to be zero.
+  const int rad = (int)std::lround(5.0 * 4.0 * 2.0 + 1.0) / 2;
+  int bx0 = w, by0 = h, bx1 = -1, by1 = -1;
+  for (int y = 0; y < h; ++y) {
+    const float* row = mask.row(y);
+    for (int x = 0; x < w; ++x) {
+      if (row[x] > 0.f) {
+        if (x < bx0) bx0 = x;
+        if (x > bx1) bx1 = x;
+        if (y < by0) by0 = y;
+        if (y > by1) by1 = y;
+      }
+    }
+  }
+  if (bx1 < 0) return mask;   // nothing filled: an all-zero mask is already correct
+
+  bx0 = std::max(0, bx0 - 2 * rad); by0 = std::max(0, by0 - 2 * rad);
+  bx1 = std::min(w - 1, bx1 + 2 * rad); by1 = std::min(h - 1, by1 + 2 * rad);
+  const int rw = bx1 - bx0 + 1, rh = by1 - by0 + 1;
+
+  MatF window(rw, rh, 1);
+  for (int y = 0; y < rh; ++y)
+    std::memcpy(window.row(y), mask.row(by0 + y) + bx0, (size_t)rw * sizeof(float));
+  window = gaussianBlur(window, 5.0);
+
+  std::fill(mask.data.begin(), mask.data.end(), 0.f);
+  for (int y = 0; y < rh; ++y) {
+    const float* srow = window.row(y);
+    float* drow = mask.row(by0 + y) + bx0;
+    for (int x = 0; x < rw; ++x) {
+      drow[x] = (std::min(std::max(srow[x], 0.5f), 1.0f) - 0.5f) * 2.0f;
+    }
   }
   return mask;
 }
