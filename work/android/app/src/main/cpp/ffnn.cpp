@@ -30,6 +30,8 @@ void ncnnRelease(Handle);
 bool ncnnExecute(Handle, const std::vector<std::string>&, const std::vector<const float*>&,
                  std::vector<std::vector<float>>&);
 std::vector<std::vector<int>> ncnnOutputShapes(Handle);
+std::vector<std::string> ncnnInputNames(Handle);
+std::vector<std::vector<int>> ncnnInputShapes(Handle);
 const char* ncnnLastError();
 bool ncnnVariantPresent(const std::string&);
 DeviceInfo ncnnDeviceInfo();
@@ -145,6 +147,24 @@ std::vector<std::vector<int>> outputShapes(Handle h) {
   if (r->backend == Backend::Ncnn) return ncnnOutputShapes(r->inner);
 #endif
   return ffqnn::outputShapes(r->inner);
+}
+
+std::vector<std::string> inputNames(Handle h) {
+  if (!h) return {};
+  HandleRec* r = static_cast<HandleRec*>(h);
+#ifdef FFNN_HAVE_NCNN
+  if (r->backend == Backend::Ncnn) return ncnnInputNames(r->inner);
+#endif
+  return ffqnn::inputNames(r->inner);
+}
+
+std::vector<std::vector<int>> inputShapes(Handle h) {
+  if (!h) return {};
+  HandleRec* r = static_cast<HandleRec*>(h);
+#ifdef FFNN_HAVE_NCNN
+  if (r->backend == Backend::Ncnn) return ncnnInputShapes(r->inner);
+#endif
+  return ffqnn::inputShapes(r->inner);
 }
 
 const char* lastError() {

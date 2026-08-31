@@ -77,6 +77,16 @@ struct Config {
 
   // content_analyser.py:detect_with_nsfw_2 -- `logit[0] - logit[1] > 0.25` flags a frame.
   float nsfwThreshold = 0.25f;
+
+  // Tiers this DEVICE has already proved it cannot run, so init does not spend a load on
+  // them again. Set by the caller from what a previous init reported through
+  // `rejectedVariant()`; empty on a device that has never rejected one.
+  //
+  // ⚠ Advisory, never absolute. If skipping leaves no candidate at all, init ignores this
+  // list entirely and tries anyway: a wrong entry here must cost a slow start, never the
+  // whole app. The caller is also expected to forget these on an app UPDATE -- the next
+  // build may be exactly the one that fixes the tier.
+  std::vector<std::string> skipVariants;
 };
 
 // The content gate's answer for ONE frame.
@@ -104,6 +114,20 @@ class Pipeline {
 
   // The tier init() chose. Empty until init() has run.
   const std::string& tier() const { return tier_; }
+
+  /**
+   * A tier that LOADED and then would not execute, or empty.
+   *
+   * The distinction from an ordinary init failure is the whole point: a tier whose files
+   * are missing is a download problem and says nothing about the silicon, while a tier
+   * that loads every context and then fails to run one is a property of THIS chip that
+   * will be just as true next launch. Only the second is worth remembering, and only the
+   * second belongs in `Config::skipVariants`.
+   *
+   * Set even when init ultimately SUCCEEDS on a later tier, so the caller can record the
+   * rejection without having to fail first.
+   */
+  const std::string& rejectedVariant() const { return rejected_; }
 
   /**
    * Upstream's content gate on ONE frame (content_analyser.py:detect_with_nsfw_2).
@@ -151,6 +175,7 @@ class Pipeline {
   std::unique_ptr<Impl> p_;
   std::string err_;
   std::string tier_;
+  std::string rejected_;
   bool nsfwQuantised_ = false;
 };
 

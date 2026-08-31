@@ -503,7 +503,12 @@ class ApiServer(
             }
             if (loadedOpts != opts) {
                 val lib = ctx.applicationInfo.nativeLibraryDir
-                if (!NativePipe.init(lib, lib, ModelPaths.dir(ctx).absolutePath, opts)) {
+                val ok = NativePipe.init(lib, lib, ModelPaths.dir(ctx).absolutePath, opts)
+                // The same record the UI keeps. This path can be the FIRST init on a
+                // device driven entirely over the network, and a rejection learned here is
+                // no less true for having been learned without a screen attached.
+                ModelPaths.rejectTier(ctx, NativePipe.rejectedTier())
+                if (!ok) {
                     respond(out, 500, "application/json",
                             json("error" to ("init: " + NativePipe.lastError())))
                     return

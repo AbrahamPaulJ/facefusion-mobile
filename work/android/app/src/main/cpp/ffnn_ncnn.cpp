@@ -212,6 +212,28 @@ std::vector<std::vector<int>> ncnnOutputShapes(Handle h) {
   return {};   // ffpipe only asks this of the detector, whose shape it already knows
 }
 
+// The spec table is already the authority on what each graph wants -- `execute` is handed a
+// bare `const float*` and sizes every input from it -- so the probe reads the same entries
+// the real call does, rather than a second description that could disagree with it.
+std::vector<std::string> ncnnInputNames(Handle h) {
+  Model* m = static_cast<Model*>(h);
+  if (!m || !m->spec) return {};
+  std::vector<std::string> out;
+  for (const InSpec& in : m->spec->ins) out.push_back(in.name);
+  return out;
+}
+
+std::vector<std::vector<int>> ncnnInputShapes(Handle h) {
+  Model* m = static_cast<Model*>(h);
+  if (!m || !m->spec) return {};
+  std::vector<std::vector<int>> out;
+  // c == 0 is a 1-D tensor of `w` floats, not a zero-element one. Reporting {w,h,0} here
+  // would make the prober allocate nothing and feed a 512-d embedding from a null buffer.
+  for (const InSpec& in : m->spec->ins)
+    out.push_back(in.c == 0 ? std::vector<int>{in.w} : std::vector<int>{in.c, in.h, in.w});
+  return out;
+}
+
 const char* ncnnLastError() { return g_err.c_str(); }
 
 bool ncnnVariantPresent(const std::string&) {

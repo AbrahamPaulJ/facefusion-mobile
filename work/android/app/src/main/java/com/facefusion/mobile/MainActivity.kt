@@ -742,6 +742,26 @@ class MainActivity : ComponentActivity() {
         modelsMissing = now
     }
 
+    /**
+     * Record a tier this chip loaded and would not run, and re-ask what is missing.
+     *
+     * Called after EVERY init, successful or not. A device can reject its best tier and
+     * come up on the next one, and that rejection is worth keeping either way -- it is a
+     * property of the silicon, and re-proving it costs a full context load per launch.
+     *
+     * The `refreshModelsMissing` is the half that matters to the user. Rejecting v81 drops
+     * it from the chain, which makes v73 the tier this device wants and v73 is not on
+     * disk -- so the download overlay has to re-ask, or they are left looking at an error
+     * with nothing on screen that would act on it.
+     */
+    private fun noteTierRejection() {
+        val bad = NativePipe.rejectedTier()
+        if (bad.isBlank() || bad in ModelPaths.rejectedTiers(this)) return
+        appendLog("tier $bad will not execute on this device; falling back")
+        ModelPaths.rejectTier(this, bad)
+        refreshModelsMissing()
+    }
+
     private fun onDownloadTapped() {
         if (android.os.Build.VERSION.SDK_INT >= 33)
             askNotify.launch(android.Manifest.permission.POST_NOTIFICATIONS)
@@ -1027,6 +1047,9 @@ class MainActivity : ComponentActivity() {
                             if (v.ok) null else ContentGate.message(this@MainActivity, R.string.gate_subject_source_image, v)
                         },
                     )
+                    // Before the error branch, because a rejection is worth recording even
+                    // when the fallback then succeeded and there is no error to report.
+                    noteTierRejection()
                     if (err != null) {
                         // The LOG too, not just the pane. A bug report carries the log and
                         // the status line; it does not carry the pane. So the one report
@@ -1294,8 +1317,9 @@ class MainActivity : ComponentActivity() {
 
                     status = getString(R.string.status_loading_models)
                     val libDir = applicationInfo.nativeLibraryDir
-                    if (!NativePipe.init(libDir, libDir, models.absolutePath, opts))
-                        error("init: ${NativePipe.lastError()}")
+                    val ok = NativePipe.init(libDir, libDir, models.absolutePath, opts)
+                    noteTierRejection()
+                    if (!ok) error("init: ${NativePipe.lastError()}")
                     appendLog("weight %.2f  blur %.2f  padding %s  boost %s%s"
                         .format(opts.weight, opts.maskBlur,
                                 opts.maskPadding.joinToString("/"), opts.pixelBoostLabel,
@@ -1538,7 +1562,9 @@ class MainActivity : ComponentActivity() {
                 // this run is supposed to be avoiding.
                 if (backend != ModelPaths.NCNN_TIER)
                     say("fp16: ${NativePipe.probeFp16(libDir, libDir, canaryDir().absolutePath)}")
-                if (!NativePipe.init(libDir, libDir, models.absolutePath, opts)) {
+                val initOk = NativePipe.init(libDir, libDir, models.absolutePath, opts)
+                noteTierRejection()
+                if (!initOk) {
                     say("INIT FAILED: ${NativePipe.lastError()}"); return@launch
                 }
                 say("$backend init OK")

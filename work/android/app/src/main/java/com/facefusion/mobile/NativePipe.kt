@@ -38,6 +38,29 @@ object NativePipe {
                opts.detectorScore, opts.landmarkerScore,
                opts.pixelBoost, opts.largestOnly,
                opts.faceEnhance, opts.enhanceBlend)
+
+    /**
+     * Tiers to skip at the next [init], comma-separated; "" clears.
+     *
+     * ⚠ Pushed rather than passed for the same reason the content gate enumerates its
+     * paths: there are four callers of [init] and a per-call argument is a list something
+     * can be left out of. Set it once, from [ModelPaths.apply], and no future path can
+     * forget it.
+     */
+    @JvmStatic external fun setSkipTiers(tiers: String)
+
+    /**
+     * The tier that LOADED and then would not execute, or "".
+     *
+     * Meaningful after any [init], failed OR successful: a device can reject its best tier
+     * and run on the next one, and that rejection is worth recording either way -- it is a
+     * property of the silicon, not of this run, and re-proving it costs a full context load
+     * on every launch.
+     *
+     * ⚠ Not the same as "init failed". A tier whose files are missing is a DOWNLOAD
+     * problem and never appears here; only a tier the chip refused to run does.
+     */
+    @JvmStatic external fun rejectedTier(): String
     @JvmStatic external fun release()
 
     /**

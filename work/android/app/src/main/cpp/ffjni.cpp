@@ -25,6 +25,8 @@ namespace {
 
 std::unique_ptr<ffpipe::Pipeline> g_pipe;
 std::string g_err;
+std::string g_rejectedTier;
+std::vector<std::string> g_skipTiers;
 
 std::string jstr(JNIEnv* env, jstring s) {
   if (!s) return {};
@@ -81,12 +83,48 @@ Java_com_facefusion_mobile_NativePipe_initEx(JNIEnv* env, jclass, jstring jLib, 
       cfg.maskPadding[i] = pad[i] < 0 ? 0 : (pad[i] > 100 ? 100 : (int)pad[i]);
   }
 
-  if (!g_pipe->init(jstr(env, jLib), jstr(env, jSkel), jstr(env, jModels), swapper, cfg)) {
+  // PUSHED, not passed. There are four paths into init -- the preview, runSwap, the
+  // self-test and the API -- and a per-call-site argument is a list you can be absent
+  // from: the fifth one added later would compile, run, and quietly reload the tier this
+  // device has already proved it cannot execute. Same reasoning the content gate is
+  // written down with, for the same reason.
+  cfg.skipVariants = g_skipTiers;
+
+  bool ok = g_pipe->init(jstr(env, jLib), jstr(env, jSkel), jstr(env, jModels), swapper, cfg);
+  // Read BEFORE the reset, and on the success path too. A tier can be rejected and the
+  // next one work -- that device still wants the rejection remembered, or it pays the
+  // failed load again on every launch for the life of the install.
+  g_rejectedTier = g_pipe->rejectedVariant();
+  if (!ok) {
     g_err = g_pipe->error();
     g_pipe.reset();
     return JNI_FALSE;
   }
   return JNI_TRUE;
+}
+
+// The tier that loaded and would not execute, or "". Survives the failed init that
+// produced it, which is the only reason it is a global here rather than read off g_pipe.
+JNIEXPORT jstring JNICALL
+Java_com_facefusion_mobile_NativePipe_rejectedTier(JNIEnv* env, jclass) {
+  return env->NewStringUTF(g_rejectedTier.c_str());
+}
+
+// Comma-separated, because a JNI array of strings costs three more calls and this list is
+// at most three short tokens long. Applied to every subsequent init; "" clears it.
+JNIEXPORT void JNICALL
+Java_com_facefusion_mobile_NativePipe_setSkipTiers(JNIEnv* env, jclass, jstring jTiers) {
+  g_skipTiers.clear();
+  std::string s = jstr(env, jTiers);
+  size_t start = 0;
+  while (start < s.size()) {
+    size_t comma = s.find(',', start);
+    size_t end = comma == std::string::npos ? s.size() : comma;
+    std::string one = s.substr(start, end - start);
+    if (!one.empty()) g_skipTiers.push_back(one);
+    if (comma == std::string::npos) break;
+    start = comma + 1;
+  }
 }
 
 JNIEXPORT void JNICALL

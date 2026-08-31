@@ -90,6 +90,15 @@ bool execute(Handle h, const std::vector<std::string>& names,
 
 std::vector<std::vector<int>> outputShapes(Handle h);
 
+// What this graph WANTS, asked of the graph rather than assumed by the caller.
+//
+// Exists for the tier probe: proving a context executes means feeding it something, and a
+// prober that hardcoded "yoloface is 640x640x3" would be a second copy of every shape in
+// the app, wrong the moment a conversion changes one. Asking the model is the only form
+// that cannot drift.
+std::vector<std::string> inputNames(Handle h);
+std::vector<std::vector<int>> inputShapes(Handle h);
+
 const char* lastError();
 
 // ---------------------------------------------------------------------------

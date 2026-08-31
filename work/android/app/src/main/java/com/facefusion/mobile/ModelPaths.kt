@@ -73,6 +73,55 @@ object ModelPaths {
         apply(ctx)
     }
 
+    // -------------------------------------------------------------- rejected tiers
+
+    private const val KEY_REJECTED = "rejected_tiers"
+    private const val KEY_REJECTED_BUILD = "rejected_tiers_build"
+
+    /**
+     * Tiers THIS DEVICE has loaded and then failed to execute.
+     *
+     * Recorded so the fallback can reach a tier that is not downloaded yet. Before this,
+     * the chain `v81,v73,v68` was filtered to what is on DISK, and the downloader fetches
+     * exactly one tier -- so an 8 Elite Gen 5 whose v81 tier will not run had a candidate
+     * list of exactly `[v81]`, and the fallback added in 0.3.0 correctly detected the
+     * failure and then had nowhere to go. The user got "Could not load the models" and a
+     * CPU-only app. Remembering the rejection is what makes v73 offerable.
+     *
+     * ⚠ Keyed to the BUILD, and cleared when it changes. A rejection is a fact about this
+     * silicon running THIS binary: the next release may be exactly the one that fixes the
+     * tier, and a note this app wrote about itself must never outlive the app that wrote
+     * it and silently hold a device on a slower tier for ever.
+     */
+    fun rejectedTiers(ctx: Context): Set<String> {
+        val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (p.getLong(KEY_REJECTED_BUILD, -1L) != buildCode(ctx)) return emptySet()
+        return p.getStringSet(KEY_REJECTED, emptySet())?.toSet() ?: emptySet()
+    }
+
+    /** Remember [tier] as unrunnable on this device, for this build. No-op for "". */
+    fun rejectTier(ctx: Context, tier: String) {
+        if (tier.isBlank()) return
+        val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val now = rejectedTiers(ctx) + tier
+        p.edit()
+            .putStringSet(KEY_REJECTED, now)
+            .putLong(KEY_REJECTED_BUILD, buildCode(ctx))
+            .apply()
+        // The chain is filtered by this set, so the cached one is now a stale answer to a
+        // question whose inputs just changed, and native needs telling too.
+        chainCache = null
+        NativePipe.setSkipTiers(now.joinToString(","))
+        android.util.Log.i("ffmodels", "tier $tier rejected on this device; chain is now " +
+                                       tierChain(ctx).joinToString(","))
+    }
+
+    private fun buildCode(ctx: Context): Long = runCatching {
+        val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+        if (android.os.Build.VERSION.SDK_INT >= 28) pi.longVersionCode
+        else @Suppress("DEPRECATION") pi.versionCode.toLong()
+    }.getOrDefault(-1L)
+
     /**
      * Push the persisted choice into the native seam and invalidate what it invalidates.
      *
@@ -84,6 +133,11 @@ object ModelPaths {
         chainCache = null
         NativePipe.ensureLoaded()
         NativePipe.setForcedBackend(forcedBackend(ctx))
+        // Native has its own copy of the chain and its own presence check, so filtering
+        // the Kotlin chain alone would only redirect the DOWNLOADER -- init would still
+        // load the rejected tier first, fail its probe, and fall back, paying a full
+        // context load on every launch to re-learn something already written down.
+        NativePipe.setSkipTiers(rejectedTiers(ctx).joinToString(","))
     }
 
     /**
@@ -157,8 +211,18 @@ object ModelPaths {
     fun tierChain(ctx: Context): List<String> {
         chainCache?.let { return it }
         val lib = ctx.applicationInfo.nativeLibraryDir
-        val c = NativePipe.probeTierChain(lib, lib)
+        val probed = NativePipe.probeTierChain(lib, lib)
             .split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        // What the SILICON can load, minus what it has already proved it cannot RUN. This
+        // is the line that redirects the downloader: `tier()` and `missing()` both read the
+        // chain, so dropping v81 here is what makes the overlay offer v73 instead of
+        // reporting a complete v81 download as fine while the app refuses to start.
+        //
+        // Never filtered to empty. A device that rejected everything still has to try
+        // something, and native applies the same rule -- the skip list loses to having
+        // nothing to run.
+        val rejected = rejectedTiers(ctx)
+        val c = probed.filterNot { it in rejected }.ifEmpty { probed }
         // Only a non-empty answer is cached: a failed probe must not be remembered as
         // "this chip can load nothing" for the rest of the process.
         if (c.isNotEmpty()) chainCache = c

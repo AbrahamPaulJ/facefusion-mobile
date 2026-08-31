@@ -40,6 +40,55 @@ constexpr int kNsfwSize = 384;
 // and the enhancer graph does not change with the swapper.
 constexpr int kEnhSize = 256;
 
+/**
+ * Run one loaded graph on synthetic input, purely to find out whether it runs.
+ *
+ * Shapes come from the MODEL, never from a table here: the app already knows every input
+ * size in the code that does the real work, and a second copy in the prober would be wrong
+ * the first time a conversion changed one -- silently, because a probe that feeds the
+ * wrong size and fails looks exactly like a chip that cannot execute.
+ *
+ * 0.5 rather than 0: arcface L2-normalises, and a zero vector normalises to 0/0. Probing
+ * with an input that can produce a legitimate NaN would make the prober's own verdict
+ * indistinguishable from the fault it is looking for.
+ *
+ * ⚠ Only `execute` returning false is a failure. A non-finite output is REPORTED and
+ * tolerated, because this runs on every device at every init and a probe that is stricter
+ * than the pipeline could reject a tier that works -- turning a diagnostic into an outage
+ * on hardware that was fine. The gate is the one exception, and ffpipe checks it
+ * separately, because there a wrong number is the whole failure mode.
+ */
+bool probeExecutes(ffnn::Handle h, std::string* why) {
+  std::vector<std::string> names = ffnn::inputNames(h);
+  std::vector<std::vector<int>> shapes = ffnn::inputShapes(h);
+  if (names.empty() || names.size() != shapes.size()) {
+    *why = "no input metadata";
+    return false;
+  }
+  std::vector<std::vector<float>> bufs(names.size());
+  std::vector<const float*> ptrs;
+  ptrs.reserve(names.size());
+  for (size_t i = 0; i < names.size(); ++i) {
+    size_t n = 1;
+    for (int d : shapes[i]) n *= (size_t)(d > 0 ? d : 1);
+    bufs[i].assign(n, 0.5f);
+    ptrs.push_back(bufs[i].data());
+  }
+  std::vector<std::vector<float>> outs;
+  if (!ffnn::execute(h, names, ptrs, outs)) {
+    *why = ffnn::lastError();
+    return false;
+  }
+  if (outs.empty() || outs[0].empty()) {
+    *why = "executed but produced no output";
+    return false;
+  }
+  for (const std::vector<float>& o : outs)
+    for (float f : o)
+      if (!std::isfinite(f)) { *why = "non-finite output"; return true; }
+  return true;
+}
+
 }  // namespace
 
 struct Pipeline::Impl {
@@ -99,9 +148,20 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
   // never half-present: the downloader writes a `.part` and renames only after the SHA256
   // matches, so yoloface existing means the rest of that tier does too.
   const std::vector<std::string> chain = ffnn::variantChain(ffnn::active());
+  auto skipped = [&](const std::string& t) {
+    return std::find(cfg.skipVariants.begin(), cfg.skipVariants.end(), t) !=
+           cfg.skipVariants.end();
+  };
   std::vector<std::string> candidates;
   for (const std::string& t : chain)
-    if (ffnn::variantPresent(t)) candidates.push_back(t);
+    if (ffnn::variantPresent(t) && !skipped(t)) candidates.push_back(t);
+  // ⚠ The skip list loses to having nothing to run. It is a record of what failed HERE,
+  // and a device that has rejected every tier it holds is better served by trying one and
+  // reporting honestly than by refusing to start with "no tier" -- which would read, to
+  // the user, as the app breaking itself over a note it wrote about their phone.
+  if (candidates.empty())
+    for (const std::string& t : chain)
+      if (ffnn::variantPresent(t)) candidates.push_back(t);
   if (candidates.empty() && !chain.empty()) candidates.push_back(chain.front());
   if (candidates.empty()) { err_ = "no tier: the HTP probe returned nothing"; return false; }
 
@@ -164,14 +224,58 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
     // no way back. Tier selection was by file presence alone, so there was no fallback
     // from a tier the chip would not run.
     //
-    // So prove it: one gate inference on a synthetic frame, ~5 ms, before declaring the
-    // tier good. The gate is the right probe because it is mandatory anyway and it is the
-    // first thing every path executes.
+    // So prove it, by running EVERY model once on synthetic input -- about 50 ms for the
+    // whole set, once per init.
+    //
+    // ⚠ It used to prove only the gate, and that was not enough to act on. The gate is
+    // mandatory and executes first, so it is where a broken tier surfaces -- but bf633ac
+    // had already written down that this makes it the CANARY and not the culprit, and two
+    // releases later nobody could still say whether a v81 part fails at the gate
+    // specifically or at everything. Those have different answers: one is a 6.6 MB gate
+    // from a lower tier, the other is a 310 MB tier download. The probe that cannot tell
+    // them apart is the reason the question stayed open, so it now names every model.
+    struct Probe { std::string name; ffnn::Handle h; };
+    const Probe probes[] = {
+        {"yoloface", p_->n.det},   {"fan2d", p_->n.fan},  {"arcface", p_->n.arc},
+        {swapperName, p_->n.swap}, {"fan685", p_->n.fan685},
+        {"gpen", p_->n.enh},       {"gate", p_->n.nsfw},
+    };
+    std::string report;
+    bool ran = true;
+    for (const Probe& pr : probes) {
+      // fan685 and gpen are optional and absent on most installs. Not loaded is not a
+      // failure, and listing them as one would make every ordinary device look broken.
+      if (!pr.h) continue;
+      if (!report.empty()) report += ", ";
+      report += pr.name;
+      std::string why;
+      if (probeExecutes(pr.h, &why)) {
+        // "ok (non-finite output)" is a real state and it has to reach the report. It is
+        // not fatal here, but it is exactly what an 8 Elite Gen 5 was described as doing
+        // in 0.2.1, so a device that does it must not look identical to one that does not.
+        report += why.empty() ? " ok" : " ok (" + why + ")";
+      } else {
+        report += " FAILED (" + why + ")";
+        ran = false;
+      }
+    }
+    if (!ran) {
+      rejected_ = tier_;
+      err_ = "tier " + tier_ + " loaded but does not execute: " + report;
+      return false;
+    }
+
+    // The gate a second time, through its REAL path. The sweep above proves the context
+    // executes; this proves the thing the gate is actually asked for -- a finite decision
+    // statistic out of checkContent's own preprocessing -- and it is the one model where
+    // a plausible-but-wrong answer blocks or admits real content.
     ffcv::Image probe(64, 64, 3);
     std::fill(probe.data.begin(), probe.data.end(), (uint8_t)128);
     ContentVerdict v = checkContent(probe);
     if (!v.ok || !std::isfinite(v.score)) {
-      err_ = "tier " + tier_ + " loaded but does not execute: " + err_;
+      rejected_ = tier_;
+      err_ = "tier " + tier_ + " loaded but does not execute: " + report +
+             ", gate verdict " + (v.ok ? std::string("not finite") : err_);
       return false;
     }
     return true;
