@@ -29,6 +29,10 @@ CASES = [
      {'input': [1, 3, 256, 256]}),
     ('onnx/yoloface_8n_b1.onnx',       'onnx/yoloface_8n_b1_sim.onnx',
      {'input': [1, 3, 640, 640]}),
+    # The lip syncer takes two inputs: the mel window and the 6-channel target
+    # (masked crop concatenated with the reference crop).
+    ('onnx/wav2lip_gan_96_b1.onnx',    'onnx/wav2lip_gan_96_b1_sim.onnx',
+     {'source': [1, 1, 80, 16], 'target': [1, 6, 96, 96]}),
 ]
 
 

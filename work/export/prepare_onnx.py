@@ -105,6 +105,24 @@ def do_yoloface(cut_head=False):
 	return save(m, 'yoloface_8n_b1')
 
 
+# ------------------------------------------------------------------ wav2lip
+
+def do_wav2lip(name='wav2lip_gan_96'):
+	"""Lip syncer. Batch is dynamic on both inputs and the output; nothing else to do.
+
+	143 nodes, 7 op types (Conv, ConvTranspose, Relu, Add, Concat, BatchNormalization,
+	Sigmoid), every one of which already ships in this project. `wav2lip_96` and
+	`wav2lip_gan_96` are the same architecture to the node -- byte-identical ONNX size --
+	so this handles either; upstream 3.8.2 defaults to the GAN one and so do we.
+	"""
+	m = load(name)
+	changed = pin_batch(m)
+	print('  pinned batch on:', changed)
+	m = shape_inference.infer_shapes(strip_value_info(m), strict_mode=False)
+	checker.check_model(m)
+	return save(m, name + '_b1')
+
+
 # ------------------------------------------------------------------ hyperswap
 
 def drop_broadcast_expands(model):
@@ -1140,6 +1158,8 @@ TASKS = {
 	'gpen': do_gpen,
 	'yoloface_slicefix': do_yoloface_slicefix,
 	'inswapper': do_inswapper,
+	'wav2lip': do_wav2lip,
+	'wav2lip_nogan': lambda: do_wav2lip('wav2lip_96'),
 }
 
 if __name__ == '__main__':
@@ -1148,7 +1168,7 @@ if __name__ == '__main__':
 	args = ap.parse_args()
 	# Experiments, not the shipping set -- ask for these by name.  `hyperswap_fp32` was
 	# here until it was promoted (2026-08-24); it is now what convert.sh reads.
-	EXPERIMENTAL = ('yoloface_slicefix',)
+	EXPERIMENTAL = ('yoloface_slicefix', 'wav2lip_nogan')
 	names = [n for n in TASKS if n not in EXPERIMENTAL] if 'all' in args.models else args.models
 	for n in names:
 		print(n + ':')

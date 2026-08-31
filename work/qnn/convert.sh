@@ -6,7 +6,7 @@
 #                                  # faithful proxy for the quantised build (trap #24)
 #   ./convert.sh <name>            # full W8A16 build -> context binary
 #
-# names: arcface | fan2d | yoloface | hyperswap | inswapper | nsfw
+# names: arcface | fan2d | yoloface | hyperswap | inswapper | nsfw | gpen | wav2lip
 #
 # Every graph here is a conv model, so --preserve_io layout on the image tensors is
 # MANDATORY (trap #7: omitting it measured -0.75 dB with nothing looking broken).
@@ -86,6 +86,17 @@ case "$NAME" in
     ONNX=$FF/work/onnx/gpen_bfr_256_sim.onnx
     DIMS=(--input_dim input 1,3,256,256)
     PRESERVE=(--preserve_io layout input output)
+    ;;
+  wav2lip)
+    # The lip syncer (upstream's default is the GAN variant; the two are the same graph
+    # to the node).  Two inputs: `source` is the 80x16 mel window, `target` is the masked
+    # crop concatenated with the reference crop on the channel axis.
+    #
+    # `source` is rank-4 with C=1, so NCHW and NHWC are the SAME bytes for it -- it is in
+    # preserve_io only so that every tensor the app fills is NCHW, with no special case.
+    ONNX=$FF/work/onnx/wav2lip_gan_96_b1_sim.onnx
+    DIMS=(--input_dim source 1,1,80,16 --input_dim target 1,6,96,96)
+    PRESERVE=(--preserve_io layout source target output)
     ;;
   inswapper)
     ONNX=$FF/work/onnx/inswapper_128_split_sim.onnx
