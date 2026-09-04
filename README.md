@@ -29,20 +29,22 @@ Ruhs. The pipeline, the models, and the option names, defaults and ranges are Fa
 - Shows the target frame and the swapped frame side by side before you commit to a run.
 - Trims the clip, drops the frame rate if you want it faster, and lets you cancel mid run.
 - Saves to your gallery, or hands a still straight out of the preview.
-- Lip sync, optionally: redraws the mouth to match the speech on the clip's own audio
-  track, at about 1 ms per frame on the NPU.
+- Lip sync, optionally: redraws the mouth to match a voice you pick — a dub, a different
+  take, any audio or video file — at about 1-2 ms per frame on the NPU.
 - Speaks English, 简体中文 and 繁體中文.
 - Can be driven from a browser on your PC over the local network, if you turn that on.
 
 Optional extras, each a separate download: a face enhancer (`gpen_bfr_256`, about 2.5 ms
-more per face, 25 MB), a lip syncer (`wav2lip_gan_96`, 44 MB) and pixel boost, which renders
-the swapped face at 512, 768 or 1024 instead of 256 at a proportional cost in time.
+more per face, 25 MB), a lip syncer — either `edtalk_256` (60 MB, sharper, no upscale) or
+`wav2lip_gan_96` (44 MB, the mouth is drawn smaller and scaled up) — and pixel boost, which
+renders the swapped face at 512, 768 or 1024 instead of 256 at a proportional cost in time.
 
-The lip syncer needs a video with sound. It takes a 200 ms window of the audio and redraws
-the mouth to match it, so a photo or a silent clip has nothing to sync to. The model itself
-is about 1 ms per frame; decoding the audio and turning it into a spectrogram costs roughly
-28 ms per second of audio, once per clip. It runs on the speech as recorded, with no attempt
-to separate a voice from a music bed, so it is at its best on clean speech.
+The lip syncer needs a target video and a separate audio or video file to drive the mouth
+from — a photo, a silent clip, or a target with no voice picked has nothing to sync to. It
+takes a 200 ms window of that audio and redraws the mouth to match it. The model itself is
+1-2 ms per frame; decoding the audio and turning it into a spectrogram costs roughly 28 ms
+per second of audio, once per clip. It runs on the speech as recorded, with no attempt to
+separate a voice from a music bed, so it is at its best on clean speech.
 
 **The app running a swap**
 
@@ -75,7 +77,7 @@ nothing extra is downloaded to talk to your chip.
 1. Download the APK (about 66 MB) from
    [Releases](https://github.com/AbrahamPaulJ/facefusion-mobile/releases).
 2. Install it and open the app.
-3. Tap **Download models**. The app fetches the roughly 360 MB set for your chip from
+3. Tap **Download models**. The app fetches the roughly 420 MB set for your chip from
    [Hugging Face](https://huggingface.co/AbrahamPJ/facefusion-mobile-models).
 
 The download resumes if it is interrupted, and every file is checked against a SHA256 hash
