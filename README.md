@@ -22,8 +22,8 @@ Ruhs. The pipeline, the models, and the option names, defaults and ranges are Fa
 ## What it does
 
 - Swaps faces in photos and video, fully offline.
-- Runs every neural network on the phone's Qualcomm Hexagon NPU, at about 19 ms per frame
-  on a Snapdragon 8 Elite. A 10 second 720p clip takes roughly 6 seconds of NPU time.
+- Runs every neural network on the phone's Qualcomm Hexagon NPU. A 10 second 720p clip is
+  processed in about 15 seconds on a Snapdragon 8 Elite.
 - Falls back to the GPU and CPU on phones without a Qualcomm NPU. Same result, about four
   times the time per frame.
 - Shows the target frame and the swapped frame side by side before you commit to a run.
