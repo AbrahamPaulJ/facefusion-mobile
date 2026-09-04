@@ -1145,6 +1145,130 @@ def do_gpen():
 	return save(m, 'gpen_bfr_256_sim')
 
 
+# -------------------------------------------------------------------- edtalk
+
+def do_edtalk():
+	"""`edtalk_256`, the 256x256 lip syncer.  Two surgeries, and the FIRST one is a bug.
+
+	Screened and rejected once on an op census of the RAW graph -- 4772 nodes, 2 `If`,
+	65 `ConstantOfShape` -- which was the wrong screen.  onnxsim with the three input
+	shapes pinned folds it to 1170 nodes and BOTH `If` nodes away, which is the same step
+	that was the entire surgery for `nsfw_2`.  What is left needs two fixes:
+
+	1. ⚠ **onnxsim 0.4.36 mis-lowers one node, and the graph it writes is WRONG.**  Inside
+	   the `If` branch it folds is a `Reshape(conv_out, [-1, 0])` -- torch's `view(-1, 0)`
+	   over the [1,512,1,1] output of `enc.net_app.convs.7`.  onnxsim rewrites it as a
+	   `Squeeze` and REUSES the shape tensor as the axes tensor, so `[-1, 0]` changes
+	   meaning underneath it:
+
+	       Reshape [1,512,1,1] shape=[-1, 0]  ->  [1, 512]   (0 = copy that input dim)
+	       Squeeze [1,512,1,1] axes =[-1, 0]  ->  [512, 1]   (drop axes 3 and 0)
+
+	   Same two numbers, transposed result, and the next `Gemm` then contracts over K=1
+	   instead of K=512.  It is invisible to a node count and to every op census: the
+	   graph still has one `Squeeze` and `Squeeze` is an op we ship.  It shows up only if
+	   something tries to RUN the thing -- onnxruntime refuses to load it, because the
+	   value_info onnxsim wrote alongside says [1, 512] and disagrees with its own node.
+	   Fixed by putting the axes back as [2, 3], which is what the reshape meant.
+
+	2. `EyeLike` is the one op the converter has no translation for, and it is constant:
+	   its input is a `ConstantOfShape` sized from `Shape(pose+lip latents)`, which is
+	   [1, 26] once the inputs are static.  So the whole
+	   `Shape -> Slice -> Squeeze -> Unsqueeze -> Concat -> ConstantOfShape -> EyeLike`
+	   chain is a 26x26 identity matrix, read out of onnxruntime rather than inferred --
+	   shape inference cannot size it (`unk__471`).  Folding it to an initializer is the
+	   same move `do_nsfw` makes wholesale, and it takes the last unconvertible op out.
+
+	Verified by running the result against the RAW graph in onnxruntime: **bit-identical**,
+	max abs 0.0 over three random inputs.  That check is the point of this task -- the
+	rejection this reverses was made without it, and so was the broken graph in fix 1.
+	"""
+	import onnxsim
+
+	EYE = 26          # the pose (6) + lip (20) latent, measured, not inferred
+
+	m = load('edtalk_256')
+	before = len(m.graph.node)
+	s, ok = onnxsim.simplify(m, overwrite_input_shapes={
+		'source': [1, 1, 80, 16], 'target': [1, 3, 256, 256], 'weight': [1]})
+	if not ok:
+		sys.exit('  onnxsim reported failure')
+	print('  simplified %d -> %d nodes' % (before, len(s.graph.node)))
+	for op in ('If', 'Loop', 'Scan'):
+		left = sum(1 for n in s.graph.node if n.op_type == op)
+		if left:
+			sys.exit('  %d %s survived -- control flow does not convert' % (left, op))
+
+	g = s.graph
+	inits = {t.name: t for t in g.initializer}
+
+	# 1. the mis-lowered Squeeze.  Matched on the axes VALUE, not the node name, which
+	#    onnxsim leaves empty; [-1, 0] is never a legal Squeeze anyway -- axis 0 of a
+	#    tensor whose last axis is also being dropped is exactly the reshape idiom.
+	fixed = 0
+	for n in g.node:
+		if n.op_type != 'Squeeze' or len(n.input) < 2:
+			continue
+		axes = inits.get(n.input[1])
+		if axes is None or list(numpy_helper.to_array(axes)) != [-1, 0]:
+			continue
+		g.initializer.append(
+			numpy_helper.from_array(numpy.array([2, 3], numpy.int64), 'edtalk_squeeze_axes'))
+		n.input[1] = 'edtalk_squeeze_axes'
+		fixed += 1
+	print('  Squeeze axes [-1,0] -> [2,3]: %d node(s)' % fixed)
+	if fixed != 1:
+		sys.exit('  expected exactly one mis-lowered Squeeze; onnxsim changed under us')
+
+	# 2. fold the EyeLike chain to a constant identity, then sweep what it fed on.
+	eye = [n for n in g.node if n.op_type == 'EyeLike']
+	if len(eye) != 1:
+		sys.exit('  expected exactly one EyeLike, found %d' % len(eye))
+	g.initializer.append(
+		numpy_helper.from_array(numpy.eye(EYE, dtype=numpy.float32), 'edtalk_eye26'))
+	for n in g.node:
+		for k, i in enumerate(n.input):
+			if i == eye[0].output[0]:
+				n.input[k] = 'edtalk_eye26'
+	g.node.remove(eye[0])
+	while True:
+		used = set(o.name for o in g.output)
+		for n in g.node:
+			used.update(n.input)
+		dead = [n for n in g.node if n.output and not any(o in used for o in n.output)]
+		if not dead:
+			break
+		for n in dead:
+			g.node.remove(n)
+	print('  after the fold: %d nodes' % len(g.node))
+	for op in ('EyeLike', 'ConstantOfShape'):
+		left = sum(1 for n in g.node if n.op_type == op)
+		if left:
+			sys.exit('  %d %s survived the fold' % (left, op))
+
+	s = shape_inference.infer_shapes(strip_value_info(s), strict_mode=False)
+	checker.check_model(s)
+	path = save(s, 'edtalk_256_sim')
+
+	# The check the original screen never made: does it still compute the same thing?
+	import onnxruntime
+	a = onnxruntime.InferenceSession(os.path.join(MODELS, 'edtalk_256.onnx'),
+									 providers=['CPUExecutionProvider'])
+	b = onnxruntime.InferenceSession(path, providers=['CPUExecutionProvider'])
+	rng = numpy.random.default_rng(0)
+	worst = 0.0
+	for _ in range(3):
+		feeds = {'source': rng.standard_normal((1, 1, 80, 16)).astype(numpy.float32),
+				 'target': rng.random((1, 3, 256, 256)).astype(numpy.float32),
+				 'weight': numpy.array([1.0], numpy.float32)}
+		d = numpy.abs(a.run(None, feeds)[0] - b.run(None, feeds)[0]).max()
+		worst = max(worst, float(d))
+	print('  vs the raw graph: max abs %.3e over 3 inputs' % worst)
+	if worst != 0.0:
+		print('  WARNING: not bit-identical -- one of the two surgeries is approximate')
+	return path
+
+
 TASKS = {
 	'arcface': do_arcface,
 	'2dfan4': do_2dfan4,
@@ -1160,6 +1284,7 @@ TASKS = {
 	'inswapper': do_inswapper,
 	'wav2lip': do_wav2lip,
 	'wav2lip_nogan': lambda: do_wav2lip('wav2lip_96'),
+	'edtalk': do_edtalk,
 }
 
 if __name__ == '__main__':
@@ -1168,7 +1293,7 @@ if __name__ == '__main__':
 	args = ap.parse_args()
 	# Experiments, not the shipping set -- ask for these by name.  `hyperswap_fp32` was
 	# here until it was promoted (2026-08-24); it is now what convert.sh reads.
-	EXPERIMENTAL = ('yoloface_slicefix', 'wav2lip_nogan')
+	EXPERIMENTAL = ('yoloface_slicefix', 'wav2lip_nogan', 'edtalk')
 	names = [n for n in TASKS if n not in EXPERIMENTAL] if 'all' in args.models else args.models
 	for n in names:
 		print(n + ':')
