@@ -493,13 +493,16 @@ JNIEXPORT jstring JNICALL
 Java_com_facefusion_mobile_NativePipe_stageMillis(JNIEnv* env, jclass) {
   if (!g_pipe) return env->NewStringUTF("");
   const int n = g_pipe->framesDone > 0 ? g_pipe->framesDone : 1;
-  char buf[256];
+  char buf[384];
   std::snprintf(buf, sizeof(buf),
                 "ms/frame over %d: detect %.2f landmark %.2f recognise %.2f swap %.2f "
-                "enhance %.2f lipsync-graph %.2f geometry %.2f",
+                "enhance %.2f lipsync-graph %.2f geometry %.2f "
+                "[lip crop %.2f mask %.2f prep %.2f paste %.2f]",
                 g_pipe->framesDone, g_pipe->msDetect / n, g_pipe->msLandmark / n,
                 g_pipe->msRecognise / n, g_pipe->msSwap / n, g_pipe->msEnhance / n,
-                g_pipe->msLipSync / n, g_pipe->msGeom / n);
+                g_pipe->msLipSync / n, g_pipe->msGeom / n,
+                g_pipe->msLipCrop / n, g_pipe->msLipMask / n,
+                g_pipe->msLipPrep / n, g_pipe->msLipPaste / n);
   return env->NewStringUTF(buf);
 }
 

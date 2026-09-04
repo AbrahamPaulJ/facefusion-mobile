@@ -112,6 +112,15 @@ MatF gaussianBlur(const MatF& src, double sigma);
 // facefusion/face_helper.py:101 -- paste the swapped crop back through the mask
 void pasteBack(Image& frame, const MatF& crop /*HxWx3, 0..255*/, const MatF& mask,
                const Affine& affine);
+/**
+ * pasteBack whose destination box comes from [rx0,rx1) x [ry0,ry1) of the CROP.
+ *
+ * Only correct when the mask is zero outside that rectangle -- the blend is then the
+ * identity there and the pixels it skips were never going to change. Same sharp tool
+ * as warpAffineRoi: a caller wrong about the rectangle gets an unblended mouth.
+ */
+void pasteBackRoi(Image& frame, const MatF& crop, const MatF& mask, const Affine& affine,
+                  int rx0, int ry0, int rx1, int ry1);
 
 // ---------------------------------------------------------------- lip syncer crop
 

@@ -313,31 +313,65 @@ MatF gaussianBlur(const MatF& src, double sigma) {
   }
   for (double& v : k) v /= sum;
 
+  // ⚠ Both passes below accumulate the SAME products in the SAME order as the obvious
+  // nested loop, in double, so this is exact -- test_ffcv.py holds it to 0.0 against cv2.
+  // What changed is only where the work happens:
+  //
+  //   * the border reflection is hoisted out of the tap loop.  At sigma 5 the kernel is 41
+  //     taps, and every one of them used to cost three branches and a clamp to discover
+  //     that it was nowhere near an edge.  The interior is now a straight dot product.
+  //   * the vertical pass walks ROWS, not columns.  It used to read tmp.row(y+i-rad)[x]
+  //     with i innermost, so each output pixel touched 41 rows -- a stride of w floats per
+  //     tap, which misses cache on every one.  Accumulating one tap row across the whole
+  //     output row instead touches each input row once.
+  //
+  // This function is 42% of the lip syncer's geometry (measured 9.53 ms/frame of 21.9),
+  // because syncLip calls it once per FRAME where the swapper calls it once per face.
   MatF tmp(src.w, src.h, 1), dst(src.w, src.h, 1);
-  for (int y = 0; y < src.h; ++y)                     // horizontal, BORDER_REFLECT_101
-    for (int x = 0; x < src.w; ++x) {
+
+  auto reflect = [](int i, int n) {
+    if (n == 1) return 0;
+    if (i < 0) i = -i;
+    if (i >= n) i = 2 * (n - 1) - i;
+    return iclamp(i, 0, n - 1);
+  };
+
+  // ---- horizontal, BORDER_REFLECT_101
+  const int xlo = std::min(rad, src.w), xhi = std::max(xlo, src.w - rad);
+  for (int y = 0; y < src.h; ++y) {
+    const float* srow = src.row(y);
+    float* trow = tmp.row(y);
+    for (int x = 0; x < xlo; ++x) {                   // left edge
       double a = 0;
-      for (int i = 0; i < ks; ++i) {
-        int xx = x + i - rad;
-        if (xx < 0) xx = -xx;
-        if (xx >= src.w) xx = 2 * (src.w - 1) - xx;
-        xx = iclamp(xx, 0, src.w - 1);
-        a += k[i] * src.row(y)[xx];
-      }
-      tmp.row(y)[x] = (float)a;
+      for (int i = 0; i < ks; ++i) a += k[i] * srow[reflect(x + i - rad, src.w)];
+      trow[x] = (float)a;
     }
-  for (int y = 0; y < src.h; ++y)                     // vertical
-    for (int x = 0; x < src.w; ++x) {
+    for (int x = xlo; x < xhi; ++x) {                 // interior: no edge can be reached
       double a = 0;
-      for (int i = 0; i < ks; ++i) {
-        int yy = y + i - rad;
-        if (yy < 0) yy = -yy;
-        if (yy >= src.h) yy = 2 * (src.h - 1) - yy;
-        yy = iclamp(yy, 0, src.h - 1);
-        a += k[i] * tmp.row(yy)[x];
-      }
-      dst.row(y)[x] = (float)a;
+      const float* p = srow + (x - rad);
+      for (int i = 0; i < ks; ++i) a += k[i] * p[i];
+      trow[x] = (float)a;
     }
+    for (int x = xhi; x < src.w; ++x) {               // right edge
+      double a = 0;
+      for (int i = 0; i < ks; ++i) a += k[i] * srow[reflect(x + i - rad, src.w)];
+      trow[x] = (float)a;
+    }
+  }
+
+  // ---- vertical, one tap row at a time
+  std::vector<double> acc(src.w);
+  for (int y = 0; y < src.h; ++y) {
+    std::fill(acc.begin(), acc.end(), 0.0);
+    for (int i = 0; i < ks; ++i) {
+      const int yy = reflect(y + i - rad, src.h);
+      const float* trow = tmp.row(yy);
+      const double ki = k[i];
+      for (int x = 0; x < src.w; ++x) acc[x] += ki * trow[x];
+    }
+    float* drow = dst.row(y);
+    for (int x = 0; x < src.w; ++x) drow[x] = (float)acc[x];
+  }
   return dst;
 }
 
@@ -365,8 +399,22 @@ MatF createBoxMask(int w, int h, float blur, const int padding[4]) {
 }
 
 void pasteBack(Image& frame, const MatF& crop, const MatF& mask, const Affine& affine) {
+  pasteBackRoi(frame, crop, mask, affine, 0, 0, crop.w, crop.h);
+}
+
+void pasteBackRoi(Image& frame, const MatF& crop, const MatF& mask, const Affine& affine,
+                  int rx0, int ry0, int rx1, int ry1) {
   Affine inv = invertAffine(affine);
-  float corners[8] = {0, 0, (float)crop.w, 0, (float)crop.w, (float)crop.h, 0, (float)crop.h};
+  // The destination box is the projection of the caller's RECTANGLE, not of the whole
+  // crop. The lip syncer's mask is non-zero only over the lower face, so projecting all
+  // 512x512 corners warped roughly five times the area that the blend could touch, and
+  // both warps below are bilinear over every pixel of it. Outside the rectangle the mask
+  // is zero and the blend is the identity, so shrinking the box changes no output pixel.
+  rx0 = iclamp(rx0, 0, crop.w); rx1 = iclamp(rx1, 0, crop.w);
+  ry0 = iclamp(ry0, 0, crop.h); ry1 = iclamp(ry1, 0, crop.h);
+  if (rx1 <= rx0 || ry1 <= ry0) return;
+  float corners[8] = {(float)rx0, (float)ry0, (float)rx1, (float)ry0,
+                      (float)rx1, (float)ry1, (float)rx0, (float)ry1};
   float out[8];
   transformPoints(corners, 4, inv, out);
   float minx = out[0], maxx = out[0], miny = out[1], maxy = out[1];
@@ -568,20 +616,24 @@ MatF createAreaMask(int w, int h, const float* landmark68, FaceMaskArea area) {
   // radius, which is EXACT rather than an approximation: outside the hull the fill is 0,
   // a blur of 0 is 0, and (clip(0, 0.5, 1) - 0.5) * 2 is 0 too. So every pixel this skips
   // was going to be zero.
+  //
+  // The box comes from the HULL, not from scanning the canvas for non-zero pixels. Both
+  // give the same answer and the scan cost 262144 reads per frame to rediscover something
+  // already in hand -- 42% of the lip syncer's geometry was this function (measured,
+  // 9.28 ms/frame of 21.90). It is exact rather than close: the span for a row is swept
+  // along the hull's own edges, so every x it fills lies between two hull vertices, and
+  // the rows are the hull's own y range. A box that is a superset would be fine anyway,
+  // since blurring zeros yields zeros -- but this one is not even a superset, it is equal.
   const int rad = (int)std::lround(5.0 * 4.0 * 2.0 + 1.0) / 2;
-  int bx0 = w, by0 = h, bx1 = -1, by1 = -1;
-  for (int y = 0; y < h; ++y) {
-    const float* row = mask.row(y);
-    for (int x = 0; x < w; ++x) {
-      if (row[x] > 0.f) {
-        if (x < bx0) bx0 = x;
-        if (x > bx1) bx1 = x;
-        if (y < by0) by0 = y;
-        if (y > by1) by1 = y;
-      }
-    }
+  if (hull.size() < 3) return mask;   // nothing filled: an all-zero mask is already correct
+  int bx0 = hull[0][0], by0 = hull[0][1], bx1 = hull[0][0], by1 = hull[0][1];
+  for (const std::array<int, 2>& p : hull) {
+    bx0 = std::min(bx0, p[0]); bx1 = std::max(bx1, p[0]);
+    by0 = std::min(by0, p[1]); by1 = std::max(by1, p[1]);
   }
-  if (bx1 < 0) return mask;   // nothing filled: an all-zero mask is already correct
+  bx0 = std::max(bx0, 0); by0 = std::max(by0, 0);
+  bx1 = std::min(bx1, w - 1); by1 = std::min(by1, h - 1);
+  if (bx1 < bx0 || by1 < by0) return mask;   // hull entirely off-canvas
 
   bx0 = std::max(0, bx0 - 2 * rad); by0 = std::max(0, by0 - 2 * rad);
   bx1 = std::min(w - 1, bx1 + 2 * rad); by1 = std::min(h - 1, by1 + 2 * rad);
@@ -592,7 +644,9 @@ MatF createAreaMask(int w, int h, const float* landmark68, FaceMaskArea area) {
     std::memcpy(window.row(y), mask.row(by0 + y) + bx0, (size_t)rw * sizeof(float));
   window = gaussianBlur(window, 5.0);
 
-  std::fill(mask.data.begin(), mask.data.end(), 0.f);
+  // No second std::fill: the canvas was zeroed on entry, the only pixels written since are
+  // the hull's 1s, and the hull is inside this window by construction -- so everything
+  // outside it is ALREADY zero and the loop below overwrites everything inside.
   for (int y = 0; y < rh; ++y) {
     const float* srow = window.row(y);
     float* drow = mask.row(by0 + y) + bx0;

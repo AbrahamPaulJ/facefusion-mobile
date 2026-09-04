@@ -403,7 +403,7 @@ class MainActivity : ComponentActivity() {
         opts = SwapOptions.load(this)
         ApiService.restore(this)
 
-        // adb: ... --es selftest 1 --es enhance 1 --es lipsync 1
+        // adb: ... --es selftest 1 --es enhance 1 --es lipsync 1   (or `0` to force OFF)
         //
         // The enhancer is opt-in and off by default, so the selftest never touched it --
         // which meant gpen had never run through the APK on EITHER backend, and on ncnn it
@@ -414,11 +414,19 @@ class MainActivity : ComponentActivity() {
         // exercised over adb: the chip needs a target with an audio track and a hand on the
         // screen, and a stage nobody can run from a script is a stage that only breaks in
         // the field.
+        //
+        // ⚠ Both extras are THREE-STATE, and that is not cosmetic. They used to only ever
+        // turn a stage ON, so a run without them inherited `opts` from the user's SAVED
+        // settings -- and a "plain" baseline measured with the enhancer and the lip syncer
+        // still enabled from an earlier run looks exactly like a plain one in the log.
+        // That corrupted a real measurement (roadmap 9, 2026-09-04). `--es lipsync 0`
+        // forces OFF; omitting it still means "whatever is saved".
         if (intent?.getStringExtra("selftest") != null) {
-            if (intent?.getStringExtra("enhance") != null)
-                opts = opts.copy(faceEnhance = true)
-            if (intent?.getStringExtra("lipsync") != null)
-                opts = opts.copy(lipSync = true)
+            fun flag(name: String): Boolean? = intent?.getStringExtra(name)?.let {
+                it != "0" && !it.equals("false", ignoreCase = true)
+            }
+            flag("enhance")?.let { opts = opts.copy(faceEnhance = it) }
+            flag("lipsync")?.let { opts = opts.copy(lipSync = it) }
             selfTest(); return
         }
 

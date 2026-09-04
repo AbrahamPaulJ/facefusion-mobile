@@ -662,6 +662,7 @@ bool Pipeline::setSource(const ffcv::Image& img) {
 
 void Pipeline::resetStats() {
   msDetect = msLandmark = msRecognise = msSwap = msGeom = msEnhance = msLipSync = 0;
+  msLipCrop = msLipMask = msLipPrep = msLipPaste = 0;
   framesDone = facesDone = 0;
 }
 
@@ -705,12 +706,16 @@ bool Pipeline::syncLip(ffcv::Image& frame, const std::vector<Face>& faces,
     const int kBlurMargin = 2 * ((int)std::lround(5.0 * 4.0 * 2.0 + 1.0) / 2);
     const int rx0 = (int)box[0] - kBlurMargin, ry0 = (int)box[1] - kBlurMargin;
     const int rx1 = (int)box[2] + kBlurMargin + 1, ry1 = (int)box[3] + kBlurMargin + 1;
+    double tc = nowMs();
     ffcv::Image crop = ffcv::warpAffineRoi(frame, am, LS, LS, ffcv::BORDER_REPLICATE,
                                            rx0, ry0, rx1, ry1);
+    msLipCrop += nowMs() - tc;
 
+    tc = nowMs();
     ffcv::MatF areaMask = ffcv::createAreaMask(LS, LS, lm, ffcv::AREA_LOWER_FACE);
     ffcv::Affine areaM;
     ffcv::Image area = ffcv::warpFaceByBoundingBox(crop, box, MS, &areaM);
+    msLipMask += nowMs() - tc;
     msGeom += nowMs() - t0;
 
     // prepare_crop_frame: the masked copy CONCATENATED with the reference on the channel
@@ -730,6 +735,7 @@ bool Pipeline::syncLip(ffcv::Image& frame, const std::vector<Face>& faces,
       }
     }
     msGeom += nowMs() - t0;
+    msLipPrep += nowMs() - t0;
 
     t0 = nowMs();
     std::vector<std::vector<float>> out;
@@ -758,14 +764,22 @@ bool Pipeline::syncLip(ffcv::Image& frame, const std::vector<Face>& faces,
     // the crop into the frame through the lower-face mask.
     ffcv::Image back = ffcv::warpAffineRoi(synced, ffcv::invertAffine(areaM), LS, LS,
                                            ffcv::BORDER_REPLICATE, rx0, ry0, rx1, ry1);
+    // Only the rectangle, for the same reason the warp above fills only the rectangle:
+    // `back` is zero outside it and MatF value-initialises, so the two agree pixel for
+    // pixel and pasteBack multiplies the difference by a mask that is zero there anyway.
+    // The full-canvas version converted 786432 pixels to reach a mouth about 300 across,
+    // and this block MEASURED 10.71 ms/frame, 49% of the lip syncer's geometry.
     ffcv::MatF backF(LS, LS, 3);
-    for (int y = 0; y < LS; ++y) {
-      const uint8_t* srow = back.row(y);
-      float* drow = backF.row(y);
-      for (int i = 0; i < LS * 3; ++i) drow[i] = srow[i];
+    const int cy0 = std::max(ry0, 0), cy1 = std::min(ry1, LS);
+    const int cx0 = std::max(rx0, 0), cx1 = std::min(rx1, LS);
+    for (int y = cy0; y < cy1; ++y) {
+      const uint8_t* srow = back.row(y) + (size_t)cx0 * 3;
+      float* drow = backF.row(y) + (size_t)cx0 * 3;
+      for (int i = 0, n = (cx1 - cx0) * 3; i < n; ++i) drow[i] = srow[i];
     }
-    ffcv::pasteBack(frame, backF, areaMask, am);
+    ffcv::pasteBackRoi(frame, backF, areaMask, am, cx0, cy0, cx1, cy1);
     msGeom += nowMs() - t0;
+    msLipPaste += nowMs() - t0;
   }
   return true;
 }

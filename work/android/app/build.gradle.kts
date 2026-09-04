@@ -1,4 +1,4 @@
-import java.util.Properties
+﻿import java.util.Properties
 
 plugins {
     id("com.android.application")
@@ -20,7 +20,7 @@ plugins {
  * That file and the .jks are gitignored. If they are absent the release build is simply
  * UNSIGNED rather than broken, so a clone can still build without the private key.
  *
- * ⚠ The keystore is not recoverable. Losing it means never being able to update an
+ * âš  The keystore is not recoverable. Losing it means never being able to update an
  * installed app again -- Android identifies an app by its signature, so a differently
  * signed build is a different app and forces an uninstall.
  */
@@ -61,7 +61,7 @@ android {
         applicationId = "com.facefusion.mobile$idSuffix"
         minSdk = 31                 // SM8750 / HTP v79 is far above this
         targetSdk = 35
-        // ⚠ 0.1.1 IS SIGNED WITH A DIFFERENT KEY THAN 0.1.0.  The 0.1.0 keystore was lost,
+        // âš  0.1.1 IS SIGNED WITH A DIFFERENT KEY THAN 0.1.0.  The 0.1.0 keystore was lost,
         // and Android identifies an app by its signature, so this is a DIFFERENT app to
         // every device that already has 0.1.0: it cannot be installed as an update, and
         // anyone upgrading has to uninstall first -- which deletes the downloaded context
@@ -70,7 +70,7 @@ android {
         // "0.2.0" ON PURPOSE: archivesBaseName below is derived from it, so the release
         // asset keeps the filename the published download link already points at.
         //
-        // ⚠ The CODE still had to go up.  Android compares versionCode, not versionName:
+        // âš  The CODE still had to go up.  Android compares versionCode, not versionName:
         // reusing 3 would have made the hotfix un-installable over the build it fixes,
         // which is every affected user.  A tag can be reused; a versionCode cannot.
         //
@@ -114,7 +114,7 @@ android {
         //
         // 21 = 0.4.13 (2026-08-31): loading a second target previews it.
         //
-        // ⚠ `targetFile` CANNOT be a state key. Every target is copied to the same path,
+        // âš  `targetFile` CANNOT be a state key. Every target is copied to the same path,
         // File(cacheDir, "target.mp4"), and File.equals compares path strings -- so the
         // File for a new video is EQUAL to the File for the old one, the LaunchedEffect
         // keyed on it never re-fires, and the auto-warm that draws the swapped pane never
@@ -147,7 +147,7 @@ android {
         // becomes an index through the file's own frame count, with OPTION_CLOSEST kept as
         // the fallback for containers that do not publish one.
         //
-        // ⚠ The two fixes in 0.4.9 were aimed at this and MISSED: the log shows not one
+        // âš  The two fixes in 0.4.9 were aimed at this and MISSED: the log shows not one
         // dropped refresh and not one late seek. They stay because both describe real
         // hazards -- a dropped redraw and a MediaMetadataRetriever entered from three
         // coroutines while close() can release it -- but neither was this bug, and neither
@@ -245,7 +245,7 @@ android {
         // embedding in place when it finds no face, so a pipeline that survived a failed
         // source change is one that would swap the PREVIOUS person's face.
         //
-        // ⚠ The code goes up even though 0.4.5 was never released: it went to the phone's
+        // âš  The code goes up even though 0.4.5 was never released: it went to the phone's
         // Downloads, which is where builds leave this machine, and two different binaries
         // calling themselves 0.4.5 is the 0.2.0 ambiguity again.
         //
@@ -262,7 +262,7 @@ android {
         // so a new video could show the PREVIOUS target's swapped face. One helper that
         // clears the frames without touching the pipeline fixes both.
         //
-        // ⚠ The auto-warm effect also required `!previewWarm`, which made a warm pipeline
+        // âš  The auto-warm effect also required `!previewWarm`, which made a warm pipeline
         // the one case it would not redraw for. Both bugs above were hiding that: each path
         // went cold by accident, so the guard was never the thing standing in the way.
         //
@@ -291,14 +291,14 @@ android {
         // switches that were one-way doors -- the runtime card that hid itself once used,
         // and the API's LAN switch that was inert whenever the server was off.
         //
-        // 9 = 0.4.1 (2026-08-30): 简体中文 and 繁體中文, and the bug report button reaching
+        // 9 = 0.4.1 (2026-08-30): ç®€ä½“ä¸­æ–‡ and ç¹é«”ä¸­æ–‡, and the bug report button reaching
         // the place four releases of documentation said it already was. `Settings > Share
         // bug report` did not exist; the only control was on the Swap screen, and only when
         // the status began with "Failed" -- so a swap that finished and looked wrong, which
         // is the report this project most needs from hardware it does not own, had no
         // button at all.
         //
-        // ⚠ The CODE goes up even though 0.4.0 was published hours ago. The published
+        // âš  The CODE goes up even though 0.4.0 was published hours ago. The published
         // 0.4.0 and this build are different binaries, and this repo has already paid once
         // for two APKs calling themselves the same version (0.2.0, versionCodes 3 and 4).
         //
@@ -308,7 +308,7 @@ android {
         // that has a Hexagon -- which is the only kind of phone this project owns, and
         // therefore the difference between "written" and "verified".
         //
-        // ⚠ The APK grows from 48.0 MB to 65.7 MB (+17.7). The static libraries are ~168 MB
+        // âš  The APK grows from 48.0 MB to 65.7 MB (+17.7). The static libraries are ~168 MB
         // and libffnative.so is 78.3 MB unpacked, so the INSTALLED footprint grows far more
         // than the download does -- jniLibs are stored compressed and extracted at install.
         // Measured, not estimated; the ~98 MB the handoff feared was the archive, not the
@@ -329,15 +329,15 @@ android {
         // 5 = 0.2.1 (2026-08-30): the v81 tier, the 9.5x face enhancer, the output-file
         // leak, and "update available" in the model inventory.
         //
-        // ⚠ The NAME moves this time, unlike the hotfix. Reusing "0.2.0" was right for 4:
+        // âš  The NAME moves this time, unlike the hotfix. Reusing "0.2.0" was right for 4:
         // it was the same release, refetched at the same link, by the same users. This is
         // not that -- it publishes a new model tier and replaces a hosted model in every
         // existing one. A third binary called 0.2.0 would have made the download link
         // ambiguous for the 47 people who already took the second one, so v0.2.1 is a NEW
         // tag and a NEW asset name, and v0.2.0 keeps pointing at what it always did.
         // archivesBaseName follows versionName, so the filename moves with it.
-        versionCode = 32
-        versionName = "0.4.24$variantTag"    // "-dev" == NO content gate
+        versionCode = 36
+        versionName = "0.4.28$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }

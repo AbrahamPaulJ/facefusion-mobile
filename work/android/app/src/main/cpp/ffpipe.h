@@ -236,6 +236,13 @@ class Pipeline {
   double msEnhance = 0;
   // Likewise separate: the lip syncer is optional and its cost has to be attributable.
   double msLipSync = 0;
+  // syncLip's GEOMETRY, split, because the first device measurement of it said the
+  // stage is 94% geometry and could not say which part. These four sum to the
+  // msGeom that syncLip contributes; the swapper's own geometry is not in them.
+  double msLipCrop = 0;    // the 960 -> 512 warp
+  double msLipMask = 0;    // createAreaMask + the 512 -> 96 box warp
+  double msLipPrep = 0;    // the 6x96x96 input tensor
+  double msLipPaste = 0;   // 96 -> 512 warp, the float copy, and pasteBack
   int framesDone = 0, facesDone = 0;
   // Zero every counter above.  A run has to call this itself: the accumulators are
   // cumulative across frames by design, and setSource clears only SOME of them --
