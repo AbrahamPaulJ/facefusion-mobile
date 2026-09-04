@@ -30,6 +30,10 @@ double nowMs() {
 struct Nets {
   ffnn::Handle det = nullptr, fan = nullptr, fan685 = nullptr, arc = nullptr, swap = nullptr;
   ffnn::Handle lip = nullptr;   // the lip syncer, optional exactly like the enhancer
+  // WHICH lip syncer. The two are not variants of one graph -- they take different crops
+  // at different sizes and a different number of inputs -- so syncLip branches on this
+  // rather than on a size alone.
+  bool lipIsEdtalk = false;
   ffnn::Handle nsfw = nullptr;
   // Optional, like fan685: absent simply means the enhancer cannot be offered.
   ffnn::Handle enh = nullptr;
@@ -215,7 +219,16 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
 
     // The lip syncer. Same rule as the enhancer: a separate download, absent on every
     // install that has not asked for it, and never an init failure when missing.
-    p_->n.lip = open("wav2lip");
+    //
+    // edtalk FIRST, and wav2lip only if it is absent. Both are supported on purpose: an
+    // install that already has wav2lip keeps working and is not silently downgraded to
+    // "no lip syncer" by an app update, and the two can be compared on one device. edtalk
+    // wins where both are present because it is the reason the other one is still here --
+    // it draws the mouth at 256 where wav2lip draws it at 96, and the measured box is
+    // 274x285, so wav2lip upscales it ~3x and edtalk does not.
+    p_->n.lip = open("edtalk");
+    p_->n.lipIsEdtalk = (p_->n.lip != nullptr);
+    if (!p_->n.lip) p_->n.lip = open("wav2lip");
 
     // The content gate is MANDATORY, because it blocks. A gate that silently does not run
     // is worse than no gate: it reports "checked" to every caller above it.
@@ -255,7 +268,8 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
     struct Probe { std::string name; ffnn::Handle h; };
     const Probe probes[] = {
         {"yoloface", p_->n.det},   {"fan2d", p_->n.fan},  {"arcface", p_->n.arc},
-        {swapperName, p_->n.swap}, {"fan685", p_->n.fan685}, {"wav2lip", p_->n.lip},
+        {swapperName, p_->n.swap}, {"fan685", p_->n.fan685},
+        {p_->n.lipIsEdtalk ? "edtalk" : "wav2lip", p_->n.lip},
         {"gpen", p_->n.enh},       {"gate", p_->n.nsfw},
     };
     std::string report;
@@ -676,7 +690,13 @@ void Pipeline::resetStats() {
 bool Pipeline::syncLip(ffcv::Image& frame, const std::vector<Face>& faces,
                        const float* melWindow) {
   if (!p_ || !p_->n.lip || !melWindow) return true;   // absent is not a failure
-  const int LS = 512, MS = 96;
+  // MS is the size the 68-landmark box is warped to, and it IS the resolution the mouth
+  // gets drawn at. The box measures ~274x285 inside the 512 crop, so wav2lip's 96 upscales
+  // the mouth about 3x on the way back and edtalk's 256 does not. That is the whole
+  // difference the user sees; everything else here is shared.
+  const int LS = 512;
+  const bool ed = p_->n.lipIsEdtalk;
+  const int MS = ed ? 256 : 96;
 
   for (const Face& f : faces) {
     double t0 = nowMs();
@@ -718,19 +738,26 @@ bool Pipeline::syncLip(ffcv::Image& frame, const std::vector<Face>& faces,
     msLipMask += nowMs() - tc;
     msGeom += nowMs() - t0;
 
-    // prepare_crop_frame: the masked copy CONCATENATED with the reference on the channel
-    // axis, masked first. Upstream zeroes rows 48.. of the HWC frame, i.e. the BOTTOM
-    // half -- the mouth is what the model is asked to invent.
+    // prepare_crop_frame.
+    //
+    // wav2lip: the masked copy CONCATENATED with the reference on the channel axis, masked
+    // first. Upstream zeroes rows 48.. of the HWC frame, i.e. the BOTTOM half -- the mouth
+    // is what the model is asked to INVENT, so it must not be shown it.
+    //
+    // edtalk: neither. It is a generator over the whole face driven by a lip latent, not
+    // an inpainter for a hidden mouth, so it takes the crop as it stands in 3 channels.
+    // Masking it would delete the face it is supposed to redraw.
     t0 = nowMs();
-    std::vector<float> in((size_t)6 * MS * MS);
+    const int ch = ed ? 3 : 6;
+    std::vector<float> in((size_t)ch * MS * MS);
     for (int y = 0; y < MS; ++y) {
       const uint8_t* row = area.row(y);
-      const bool masked = y >= MS / 2;
+      const bool masked = !ed && y >= MS / 2;
       for (int x = 0; x < MS; ++x) {
         for (int c = 0; c < 3; ++c) {
           const float v = row[x * 3 + c] / 255.0f;
           in[(size_t)c * MS * MS + (size_t)y * MS + x] = masked ? 0.0f : v;
-          in[(size_t)(c + 3) * MS * MS + (size_t)y * MS + x] = v;
+          if (!ed) in[(size_t)(c + 3) * MS * MS + (size_t)y * MS + x] = v;
         }
       }
     }
@@ -739,8 +766,15 @@ bool Pipeline::syncLip(ffcv::Image& frame, const std::vector<Face>& faces,
 
     t0 = nowMs();
     std::vector<std::vector<float>> out;
-    if (!ffnn::execute(p_->n.lip, {"source", "target"}, {melWindow, in.data()}, out) ||
-        out.empty() || out[0].size() < (size_t)3 * MS * MS) {
+    // edtalk's third input is the lip-direction scale. Upstream drives it at 1.0; it is a
+    // knob for how far the mouth is moved toward what the audio says, and anything else
+    // would be this port inventing a parameter upstream does not expose.
+    static const float kLipWeight = 1.0f;
+    const bool ok = ed
+        ? ffnn::execute(p_->n.lip, {"source", "target", "weight"},
+                        {melWindow, in.data(), &kLipWeight}, out)
+        : ffnn::execute(p_->n.lip, {"source", "target"}, {melWindow, in.data()}, out);
+    if (!ok || out.empty() || out[0].size() < (size_t)3 * MS * MS) {
       err_ = std::string("lip syncer: ") + ffnn::lastError();
       return false;
     }

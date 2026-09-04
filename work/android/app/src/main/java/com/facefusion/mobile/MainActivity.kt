@@ -371,7 +371,13 @@ class MainActivity : ComponentActivity() {
      * at execution time.
      */
     private val hasLipSyncer: Boolean
-        get() = ModelPaths.present(modelDir(), tier, "wav2lip")
+        // EITHER graph satisfies it. ffpipe prefers edtalk and falls back to wav2lip, so
+        // the chip has to be offered whenever one of them is installed -- asking only for
+        // wav2lip would hide the processor from an install that has the BETTER model, and
+        // asking only for edtalk would take the feature away from everyone who already had
+        // the other one.
+        get() = ModelPaths.present(modelDir(), tier, "edtalk") ||
+                ModelPaths.present(modelDir(), tier, "wav2lip")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -990,6 +996,10 @@ class MainActivity : ComponentActivity() {
             // that `row()` reads ModelPaths and `hostedFiles`, so a name added here is
             // enough and a name forgotten is invisible rather than broken.
             "wav2lip" to getString(R.string.model_lip_syncer),
+            // Both lip syncers get a row, because both can be installed and the Settings
+            // screen's job is to say what IS installed -- not what the pipeline would
+            // pick. Which one runs is ffpipe's choice and it prefers edtalk.
+            "edtalk" to getString(R.string.model_lip_syncer_256),
             "fan685" to getString(R.string.model_landmark_refiner),
         )
         // What can be fetched is whatever the MANIFEST publishes for this tier -- asked

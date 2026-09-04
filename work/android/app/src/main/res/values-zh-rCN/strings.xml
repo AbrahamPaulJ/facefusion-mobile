@@ -153,6 +153,7 @@
     <string name="model_content_checker_quantised">内容检查（量化版）</string>
     <string name="model_enhancer">人脸增强</string>
     <string name="model_lip_syncer">口型同步</string>
+    <string name="model_lip_syncer_256">口型同步 256</string>
     <string name="model_landmark_refiner">关键点细化</string>
 
     <string name="set_models_npu">NPU 模型 (%1$s)</string>
