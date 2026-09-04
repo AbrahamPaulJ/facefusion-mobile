@@ -336,8 +336,8 @@ android {
         // ambiguous for the 47 people who already took the second one, so v0.2.1 is a NEW
         // tag and a NEW asset name, and v0.2.0 keeps pointing at what it always did.
         // archivesBaseName follows versionName, so the filename moves with it.
-        versionCode = 37
-        versionName = "0.4.29$variantTag"    // "-dev" == NO content gate
+        versionCode = 43
+        versionName = "0.5.0$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }

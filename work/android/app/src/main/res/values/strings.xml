@@ -47,6 +47,14 @@
     <string name="swap_add_target">Add a target</string>
     <string name="swap_choose_another_target">Choose another target</string>
     <string name="swap_remove_target">Remove target</string>
+    <!-- The lip syncer's driving audio, shown only while Lip Sync is on. Deliberately not
+         called "Source", which is the identity image: a different input entirely. -->
+    <string name="swap_pane_voice">Voice</string>
+    <string name="swap_voice_add">Add audio to drive the lips</string>
+    <!-- Shown when a file is picked but its name could not be read. -->
+    <string name="swap_voice_picked">Audio ready</string>
+    <string name="swap_choose_another_voice">Choose another voice</string>
+    <string name="swap_remove_voice">Remove voice</string>
     <string name="swap_loading_models">Loading models, this takes a few seconds…</string>
     <string name="swap_swapping_frame">Swapping this frame…</string>
     <string name="swap_pick_a_source">Pick a source face</string>
@@ -157,9 +165,11 @@
     <string name="opt_blend">Blend</string>
     <string name="opt_blend_hint_full">the enhancer\'s output alone</string>
     <string name="opt_blend_hint_none">no effect — the swap is left untouched</string>
-    <string name="opt_blend_hint_mixed">mixed with the unenhanced swap (upstream default 0.80)</string>
+    <string name="opt_blend_hint_mixed">mixed with the unenhanced swap (default 0.80)</string>
     <!-- %1$s is the resolution the enhancer runs at, e.g. "512" -->
     <string name="opt_enhancer_note">runs on the swapped face at %1$s, before it is pasted back</string>
+    <!-- Shared by edtalk and wav2lip. -->
+    <string name="opt_lip_sync_weight_hint">how strongly the audio drives the mouth (default 0.50)</string>
 
     <!-- ==================================================== settings: models -->
     <string name="set_models">Models</string>
@@ -299,6 +309,11 @@
     <string name="status_failed">Failed: %1$s</string>
     <!-- %1$d width, %2$d height, %3$s duration -->
     <string name="status_target_ready_video">Target ready: %1$d x %2$d, %3$s</string>
+    <!-- %1$s is a duration like "3.0s" -->
+    <string name="status_voice_ready">Voice audio ready (%1$s)</string>
+    <string name="status_voice_no_audio">no audio track in that file</string>
+    <!-- %1$s is an underlying error message, which is not translated -->
+    <string name="status_cannot_read_audio">Cannot read audio: %1$s</string>
     <!-- %1$d width, %2$d height -->
     <string name="status_target_ready_image">Target ready: %1$d x %2$d</string>
     <!-- %1$s is an underlying error message, which is not translated -->

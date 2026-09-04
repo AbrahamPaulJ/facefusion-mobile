@@ -116,6 +116,16 @@ struct Pipeline::Impl {
   float srcEmbeddingNorm[512]{};
   bool haveSource = false;
   std::vector<float> emap;   // inswapper only: the 512x512 initializer
+
+  // edtalk's box mask depends only on (LS, cfg.maskBlur, cfg.maskPadding) -- constant
+  // across every frame and every face of a run -- but createBoxMask's gaussianBlur at the
+  // default 0.3 blur is a sigma-19 pass over the full 512x512 canvas, 43.93 ms/frame
+  // measured, because a mask that never changes was being rebuilt from scratch every
+  // frame anyway. Memoised on the parameters, not just computed once, so a live
+  // maskBlur/maskPadding change from updateConfig still takes effect.
+  ffcv::MatF lipBoxMask;
+  float lipBoxMaskBlur = -1.f;
+  int lipBoxMaskPadding[4] = {-1, -1, -1, -1};
 };
 
 Pipeline::Pipeline() = default;
@@ -402,6 +412,7 @@ void Pipeline::updateConfig(const Config& c) {
   live.swapLargestOnly   = c.swapLargestOnly;
   live.faceEnhance       = c.faceEnhance;
   live.faceEnhancerBlend = c.faceEnhancerBlend;
+  live.lipSyncWeight     = c.lipSyncWeight;
 }
 
 // ------------------------------------------------------------ content gate
@@ -690,13 +701,9 @@ void Pipeline::resetStats() {
 bool Pipeline::syncLip(ffcv::Image& frame, const std::vector<Face>& faces,
                        const float* melWindow) {
   if (!p_ || !p_->n.lip || !melWindow) return true;   // absent is not a failure
-  // MS is the size the 68-landmark box is warped to, and it IS the resolution the mouth
-  // gets drawn at. The box measures ~274x285 inside the 512 crop, so wav2lip's 96 upscales
-  // the mouth about 3x on the way back and edtalk's 256 does not. That is the whole
-  // difference the user sees; everything else here is shared.
   const int LS = 512;
   const bool ed = p_->n.lipIsEdtalk;
-  const int MS = ed ? 256 : 96;
+  const Config& cfg = p_->cfg;
 
   for (const Face& f : faces) {
     double t0 = nowMs();
@@ -705,6 +712,102 @@ bool Pipeline::syncLip(ffcv::Image& frame, const std::vector<Face>& faces,
     const float* T = ffcv::warpTemplate(2);          // ffhq_512
     for (int i = 0; i < 10; ++i) tmpl[i] = T[i] * LS;
     ffcv::Affine am = ffcv::umeyama(f.landmark5_68, tmpl, 5);
+
+    if (ed) {
+      // edtalk (lip_syncer/core.py, the edtalk branch of sync_lip) is NOT the same shape
+      // as wav2lip and was wrongly ported as if it were -- checked against upstream after
+      // the user reported discoloration and warping, not assumed. It is a full-face
+      // generator, not a mouth-box inpainter:
+      //   * the model sees the WHOLE 512 crop resized to 256 (cv2.resize, not a
+      //     landmark-derived mouth box warped up 256/~280 -- there IS no mouth box);
+      //   * it wants RGB. Every other graph in this file does too and gets the (2-c)
+      //     index swap on the way in and out (swapAll, the enhancer); this branch was the
+      //     one place that swap was missing, feeding a model trained on RGB three BGR
+      //     channels it reads as R and B swapped -- the discoloration was exactly that;
+      //   * the blend mask is create_box_mask (the swapper's own mask, `cfg.maskBlur` /
+      //     `cfg.maskPadding` -- a near-whole-crop feathered rectangle), not the
+      //     lower-face hull. The lower-face mask was wav2lip's inpaint region leaking into
+      //     a model that was never restricted to one -- the visible seam around a smaller
+      //     patch than the model actually redrew was the "warping".
+      double tc = nowMs();
+      ffcv::Image crop = ffcv::warpAffine(frame, am, LS, LS, ffcv::BORDER_REPLICATE);
+      msLipCrop += nowMs() - tc;
+
+      tc = nowMs();
+      if (p_->lipBoxMaskBlur != cfg.maskBlur ||
+          std::memcmp(p_->lipBoxMaskPadding, cfg.maskPadding, sizeof(cfg.maskPadding)) != 0) {
+        p_->lipBoxMask = ffcv::createBoxMask(LS, LS, cfg.maskBlur, cfg.maskPadding);
+        p_->lipBoxMaskBlur = cfg.maskBlur;
+        std::memcpy(p_->lipBoxMaskPadding, cfg.maskPadding, sizeof(cfg.maskPadding));
+      }
+      const ffcv::MatF& mask = p_->lipBoxMask;
+      msLipMask += nowMs() - tc;
+      msGeom += nowMs() - t0;
+
+      t0 = nowMs();
+      const int MS = 256;
+      // cv2.resize(crop, (256,256), INTER_AREA): measured bit-identical to bilinear at
+      // this exact 2x ratio (0 LSB over a blurred random 512x512), so resizeLinear is
+      // exact here -- ffcv has no separate area filter and does not need one.
+      ffcv::Image area = ffcv::resizeLinear(crop, MS, MS);
+      std::vector<float> in((size_t)3 * MS * MS);
+      for (int y = 0; y < MS; ++y) {
+        const uint8_t* row = area.row(y);
+        for (int x = 0; x < MS; ++x)
+          for (int c = 0; c < 3; ++c)
+            in[(size_t)(2 - c) * MS * MS + (size_t)y * MS + x] = row[x * 3 + c] / 255.0f;
+      }
+      msGeom += nowMs() - t0;
+      msLipPrep += nowMs() - t0;
+
+      t0 = nowMs();
+      std::vector<std::vector<float>> out;
+      // The lip-direction scale, `--lip-syncer-weight` -- read directly off `cfg`, not
+      // fixed. Upstream's default is 0.5, not 1.0: driving it at a hardcoded 1.0 was this
+      // port inventing a value, not matching upstream's own default.
+      float lipWeight = cfg.lipSyncWeight;
+      if (!ffnn::execute(p_->n.lip, {"source", "target", "weight"},
+                         {melWindow, in.data(), &lipWeight}, out) ||
+          out.empty() || out[0].size() < (size_t)3 * MS * MS) {
+        err_ = std::string("lip syncer: ") + ffnn::lastError();
+        return false;
+      }
+      msLipSync += nowMs() - t0;
+
+      t0 = nowMs();
+      ffcv::Image synced(MS, MS, 3);
+      for (int y = 0; y < MS; ++y) {
+        uint8_t* row = synced.row(y);
+        for (int x = 0; x < MS; ++x)
+          for (int c = 0; c < 3; ++c) {
+            float v = out[0][(size_t)c * MS * MS + (size_t)y * MS + x];
+            v = v < 0.f ? 0.f : (v > 1.f ? 1.f : v);
+            row[x * 3 + (2 - c)] = (uint8_t)(v * 255.0f);   // RGB -> BGR
+          }
+      }
+      // cv2.resize(.., (512,512), INTER_CUBIC): the one approximation left in this branch.
+      // Measured against bilinear at this ratio: 3 LSB max / 0.4 LSB mean over a blurred
+      // random image -- not exact, but sub-1% of range and a long way under the two bugs
+      // this branch exists to fix. A byte-exact bicubic is future work if that residual
+      // ever shows up in a deploy-SNR number instead of just this comment.
+      ffcv::Image back = ffcv::resizeLinear(synced, LS, LS);
+      ffcv::MatF backF(LS, LS, 3);
+      for (int y = 0; y < LS; ++y) {
+        const uint8_t* srow = back.row(y);
+        float* drow = backF.row(y);
+        for (int i = 0, n = LS * 3; i < n; ++i) drow[i] = srow[i];
+      }
+      ffcv::pasteBack(frame, backF, mask, am);
+      msGeom += nowMs() - t0;
+      msLipPaste += nowMs() - t0;
+      continue;
+    }
+
+    // wav2lip below. MS=96 is the size the 68-landmark mouth box is warped to, and it IS
+    // the resolution the mouth gets drawn at -- the box measures ~274x285 inside the 512
+    // crop, so this upscales the mouth about 3x on the way back. wav2lip stays BGR
+    // in and out (upstream's prepare_crop_frame never flips it for this model).
+    const int MS = 96;
 
     // cv2.transform(landmark_68, affine_matrix) -- the 68 points INTO crop space. Every
     // step below reads these, not the frame-space ones. Taken BEFORE the crop, because
@@ -738,26 +841,19 @@ bool Pipeline::syncLip(ffcv::Image& frame, const std::vector<Face>& faces,
     msLipMask += nowMs() - tc;
     msGeom += nowMs() - t0;
 
-    // prepare_crop_frame.
-    //
-    // wav2lip: the masked copy CONCATENATED with the reference on the channel axis, masked
-    // first. Upstream zeroes rows 48.. of the HWC frame, i.e. the BOTTOM half -- the mouth
-    // is what the model is asked to INVENT, so it must not be shown it.
-    //
-    // edtalk: neither. It is a generator over the whole face driven by a lip latent, not
-    // an inpainter for a hidden mouth, so it takes the crop as it stands in 3 channels.
-    // Masking it would delete the face it is supposed to redraw.
+    // prepare_crop_frame: the masked copy CONCATENATED with the reference on the channel
+    // axis, masked first. Upstream zeroes rows 48.. of the HWC frame, i.e. the BOTTOM
+    // half -- the mouth is what the model is asked to INVENT, so it must not be shown it.
     t0 = nowMs();
-    const int ch = ed ? 3 : 6;
-    std::vector<float> in((size_t)ch * MS * MS);
+    std::vector<float> in((size_t)6 * MS * MS);
     for (int y = 0; y < MS; ++y) {
       const uint8_t* row = area.row(y);
-      const bool masked = !ed && y >= MS / 2;
+      const bool masked = y >= MS / 2;
       for (int x = 0; x < MS; ++x) {
         for (int c = 0; c < 3; ++c) {
           const float v = row[x * 3 + c] / 255.0f;
           in[(size_t)c * MS * MS + (size_t)y * MS + x] = masked ? 0.0f : v;
-          if (!ed) in[(size_t)(c + 3) * MS * MS + (size_t)y * MS + x] = v;
+          in[(size_t)(c + 3) * MS * MS + (size_t)y * MS + x] = v;
         }
       }
     }
@@ -766,15 +862,16 @@ bool Pipeline::syncLip(ffcv::Image& frame, const std::vector<Face>& faces,
 
     t0 = nowMs();
     std::vector<std::vector<float>> out;
-    // edtalk's third input is the lip-direction scale. Upstream drives it at 1.0; it is a
-    // knob for how far the mouth is moved toward what the audio says, and anything else
-    // would be this port inventing a parameter upstream does not expose.
-    static const float kLipWeight = 1.0f;
-    const bool ok = ed
-        ? ffnn::execute(p_->n.lip, {"source", "target", "weight"},
-                        {melWindow, in.data(), &kLipWeight}, out)
-        : ffnn::execute(p_->n.lip, {"source", "target"}, {melWindow, in.data()}, out);
-    if (!ok || out.empty() || out[0].size() < (size_t)3 * MS * MS) {
+    // prepare_audio_frame (wav2lip branch): scale the ALREADY-COMPUTED mel window by
+    // weight*2.0, not the target crop and not the raw audio. `melWindow` is shared, owned
+    // storage read again for other faces/frames, so this copies rather than scaling it in
+    // place. Upstream's default 0.5 makes this a *1.0 no-op, which is why the missing knob
+    // was invisible until it was looked for.
+    std::vector<float> scaledMel(melWindow, melWindow + 80 * 16);
+    const float melScale = cfg.lipSyncWeight * 2.0f;
+    for (float& v : scaledMel) v *= melScale;
+    if (!ffnn::execute(p_->n.lip, {"source", "target"}, {scaledMel.data(), in.data()}, out) ||
+        out.empty() || out[0].size() < (size_t)3 * MS * MS) {
       err_ = std::string("lip syncer: ") + ffnn::lastError();
       return false;
     }

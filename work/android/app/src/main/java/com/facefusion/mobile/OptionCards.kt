@@ -330,47 +330,8 @@ fun FaceDetectorCard(
     }
 }
 
-/**
- * `--face-enhancer`, gpen_bfr_256.
- *
- * Composed ONLY when the context binary is on the device -- same rule the inswapper choice
- * follows. A switch for a model that is not there turns a missing file into a failed run at
- * the one moment the user is least able to do anything about it.
- *
- * Off by default: it is 8.57 GMAC per face on top of the swapper's 31.93, and on video that
- * is a cost the user should opt into rather than discover.
- */
-@Composable
-fun FaceEnhancerCard(
-    opts: SwapOptions,
-    onChange: (SwapOptions) -> Unit,
-    expanded: Boolean,
-    onToggle: () -> Unit,
-) {
-    OptionCard(
-        stringResource(R.string.opt_face_enhancer),
-        if (opts.faceEnhance)
-            stringResource(R.string.opt_enhancer_summary, "%.2f".format(opts.enhanceBlend))
-        else stringResource(R.string.opt_enhancer_off_summary),
-        expanded, onToggle,
-    ) {
-        // The on/off lives in the Processors row on the Swap screen now. Two controls for
-        // one boolean is two places to look and one of them to be surprised by.
-        if (opts.faceEnhance) {
-            OptionSlider(
-                stringResource(R.string.opt_blend), opts.enhanceBlend,
-                { onChange(opts.copy(enhanceBlend = it)) },
-                hint = when {
-                    opts.enhanceBlend >= 0.95f -> stringResource(R.string.opt_blend_hint_full)
-                    opts.enhanceBlend <= 0.05f -> stringResource(R.string.opt_blend_hint_none)
-                    else -> stringResource(R.string.opt_blend_hint_mixed)
-                },
-            )
-            // It runs on the swapper's own crop: gpen_bfr_256 and hyperswap_1a_256 declare
-            // the same template and size, so no second alignment is involved.
-            Text(stringResource(R.string.opt_enhancer_note, opts.pixelBoostLabel),
-                 style = MaterialTheme.typography.bodySmall, fontSize = 11.sp,
-                 modifier = Modifier.padding(top = 8.dp))
-        }
-    }
-}
+// The enhancer's card (`FaceEnhancerCard`) used to live in the Advanced accordion. Its one
+// knob is now inline in SwapScreen, directly under the Processors row -- see the comment
+// there. `opt_face_enhancer`/`opt_enhancer_summary`/`opt_enhancer_off_summary` are unused
+// now that there is no collapsible card to title; `opt_blend`/`opt_blend_hint_*` and
+// `opt_enhancer_note` are still read, by the inline slider.

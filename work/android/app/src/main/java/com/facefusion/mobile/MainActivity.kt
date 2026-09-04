@@ -47,6 +47,15 @@ class MainActivity : ComponentActivity() {
     private var targetName by mutableStateOf<String?>(null)
 
     /**
+     * The DRIVING audio for lip sync -- deliberately independent of [targetFile]. Its own
+     * file, its own timeline, no relation to the target's trim. See [VideoSwapper]'s
+     * `voicePath` doc for why this exists: syncing a clip to its own original audio has no
+     * effect to have, so the UI requires this before Lip Sync can run at all (below).
+     */
+    private var voiceFile by mutableStateOf<File?>(null)
+    private var voiceName by mutableStateOf<String?>(null)
+
+    /**
      * Bumped every time a target is loaded or cleared.
      *
      * ⚠ Exists because `targetFile` CANNOT serve as a state key. Every target is copied to
@@ -259,6 +268,13 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) loadTarget(uri)
     }
+    // Audio or video -- upstream's own `source_paths` takes either and reads whichever
+    // track is there, so a dubbed line saved as a short video should not be rejected for
+    // carrying pixels it will never use.
+    private val pickVoice = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) loadVoice(uri)
+    }
 
     /**
      * The models live in a subdirectory of the app's external files dir.
@@ -433,7 +449,11 @@ class MainActivity : ComponentActivity() {
             }
             flag("enhance")?.let { opts = opts.copy(faceEnhance = it) }
             flag("lipsync")?.let { opts = opts.copy(lipSync = it) }
-            selfTest(); return
+            // `--es voice <name>`: a driving-audio file under the app's own files dir (or
+            // /sdcard/Download), scriptable over adb without going through the SAF picker.
+            // Bench-only wiring for `VideoSwapper.voicePath` -- see `runSwap`'s doc for why
+            // the real UI never lets this stay null while Lip Sync is on.
+            selfTest(intent?.getStringExtra("voice")); return
         }
 
         // adb: am start -n com.facefusion.mobile/.MainActivity --es api start
@@ -596,6 +616,10 @@ class MainActivity : ComponentActivity() {
                                     pickTarget.launch(arrayOf("video/*", "image/*"))
                                 },
                                 onClearTarget = ::clearTarget,
+                                hasVoice = voiceFile != null,
+                                voiceName = voiceName,
+                                onPickVoice = { pickVoice.launch(arrayOf("audio/*", "video/*")) },
+                                onClearVoice = ::clearVoice,
                                 onSwap = { runSwap() },
                                 onCancel = {
                                     cancelRequested = true
@@ -1214,6 +1238,16 @@ class MainActivity : ComponentActivity() {
             // them. No-ops when nothing is loaded or nothing changed; when the swapper
             // changed it does nothing and ensureReady below does the reload instead.
             previews.applyOptions(opts)
+            // Same reasoning, for the lip syncer's driving audio -- decoded once per voice
+            // file (see PreviewEngine.applyVoice), called on every refresh rather than only
+            // at cold warm-up so a voice picked or changed AFTER the preview is already
+            // warm still reaches it. The fps has to match what a real run would index
+            // frames at, or the preview and the eventual output disagree on which mouth
+            // belongs to which timestamp.
+            if (opts.lipSync) {
+                val previewFps = if (opts.outputFps in 1..inputFps) opts.outputFps else inputFps
+                previews.applyVoice(voiceFile?.absolutePath, previewFps.toDouble())
+            }
             try {
                 val frame = originalFrame ?: previews.frameAt(previewAtMs)?.also {
                     originalFrame = it
@@ -1286,7 +1320,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                val out = previews.swap(frame)
+                val out = previews.swap(frame, previewAtMs, voiceFile?.absolutePath)
                 android.util.Log.d("ffpreview", "  swapped faces=" + out.faces +
                                                 " err=" + out.error)
                 when {
@@ -1328,13 +1362,31 @@ class MainActivity : ComponentActivity() {
      * A still short-circuits everything video: there is no duration, so no trim, no frame
      * rate, and nothing to seek. `durationMs == 0` is the mode flag the UI reads.
      */
+    /**
+     * The file's real name, for a `content://` URI.
+     *
+     * `uri.lastPathSegment` is NOT the filename for most SAF providers -- it is the
+     * provider's own document id, which is very often just a number ("118", "msf:42").
+     * `OpenableColumns.DISPLAY_NAME` is the column every provider is required to answer
+     * correctly; the segment is only a fallback for the rare URI a query fails on.
+     */
+    private fun displayName(uri: Uri): String? {
+        val queried = runCatching {
+            contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                                   null, null, null)?.use { c ->
+                if (c.moveToFirst()) c.getString(0) else null
+            }
+        }.getOrNull()
+        return queried ?: uri.lastPathSegment?.substringAfterLast('/')
+    }
+
     private fun loadTarget(uri: Uri) {
         if (contentResolver.getType(uri)?.startsWith("image/") == true) {
             loadTargetImage(uri)
             return
         }
         preparing = true
-        targetName = uri.lastPathSegment?.substringAfterLast('/')
+        targetName = displayName(uri)
         lifecycleScope.launch {
             val ok = withContext(Dispatchers.IO) {
                 runCatching {
@@ -1401,7 +1453,7 @@ class MainActivity : ComponentActivity() {
      */
     private fun loadTargetImage(uri: Uri) {
         preparing = true
-        targetName = uri.lastPathSegment?.substringAfterLast('/')
+        targetName = displayName(uri)
         lifecycleScope.launch {
             val bmp = withContext(Dispatchers.IO) { decodeOriented(uri) }
             if (bmp == null) {
@@ -1424,6 +1476,53 @@ class MainActivity : ComponentActivity() {
             status = getString(R.string.status_target_ready_image, bmp.width, bmp.height)
             preparing = false
         }
+    }
+
+    /**
+     * The lip syncer's DRIVING audio -- a file the user chose deliberately, never the
+     * target's own track. See [voiceFile]'s doc and [VideoSwapper]'s `voicePath`.
+     *
+     * Copied to a real path for the same reason [loadTarget] copies the target: both
+     * [MediaMetadataRetriever] (the `has_audio` check here) and [AudioDecoder] need one,
+     * and SAF only ever hands back a stream.
+     */
+    private fun loadVoice(uri: Uri) {
+        voiceName = displayName(uri)
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val f = File(cacheDir, "voice.audio")
+                    contentResolver.openInputStream(uri).use { i ->
+                        f.outputStream().use { o -> i!!.copyTo(o) }
+                    }
+                    val mmr = MediaMetadataRetriever().apply { setDataSource(f.absolutePath) }
+                    val hasAudio = mmr.extractMetadata(
+                        MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO) == "yes"
+                    val durMs = mmr.extractMetadata(
+                        MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                    mmr.release()
+                    if (!hasAudio) error(getString(R.string.status_voice_no_audio))
+                    Pair(f, durMs)
+                }
+            }
+            result.onSuccess { (f, durMs) ->
+                voiceFile = f
+                status = getString(R.string.status_voice_ready, fmt(durMs.toFloat()))
+            }.onFailure {
+                voiceFile = null
+                status = getString(R.string.status_cannot_read_audio, it.message ?: "")
+            }
+            // Not `opts`, so nothing else asks the swapped pane to redraw for it. Cheap:
+            // the pipeline stays warm, `applyVoice` just decodes the new file on the next
+            // refresh -- no reload, which is what `reloads = false` says.
+            if (opts.lipSync) previewOptionsChanged(reloads = false)
+        }
+    }
+
+    private fun clearVoice() {
+        voiceFile = null
+        voiceName = null
+        if (opts.lipSync) previewOptionsChanged(reloads = false)
     }
 
     /**
@@ -1509,6 +1608,10 @@ class MainActivity : ComponentActivity() {
     private fun runSwap() {
         val src = sourceUri ?: return
         val tgt = targetFile ?: return
+        // Defence in depth: the Swap button in SwapScreen is already disabled without one
+        // when Lip Sync is on, but this is the actual place a no-op run would happen, so it
+        // is checked again here rather than trusted from the UI alone.
+        if (opts.lipSync && voiceFile == null) return
         // The preview holds a loaded pipeline and `g_pipe` is a single global, so the run
         // cannot start until it lets go.
         invalidatePreview()
@@ -1598,6 +1701,7 @@ class MainActivity : ComponentActivity() {
                     VideoSwapper(
                         outputFps = opts.outputFps,
                         lipSync = opts.lipSync,
+                        voicePath = voiceFile?.absolutePath,
                         trimStartUs = (trimStartMs * 1000).toLong(),
                         trimEndUs = if (trimEndMs >= durationMs) Long.MAX_VALUE
                                     else (trimEndMs * 1000).toLong(),
@@ -1797,7 +1901,7 @@ class MainActivity : ComponentActivity() {
      *   adb shell am start -n com.facefusion.mobile/.MainActivity --es selftest 1
      *   adb logcat -s ffselftest
      */
-    private fun selfTest() {
+    private fun selfTest(voiceName: String? = null) {
         val tag = "ffselftest"
         lifecycleScope.launch(Dispatchers.Default) {
             fun say(s: String) = android.util.Log.i(tag, s)
@@ -1848,6 +1952,8 @@ class MainActivity : ComponentActivity() {
                 }
                 val srcFile = asset("ff_source.jpg")
                 val tgtFile = asset("ff_target.mp4")
+                val voiceFile = voiceName?.let(::asset)?.takeIf { it.canRead() }
+                if (voiceName != null && voiceFile == null) say("voice: cannot read $voiceName")
                 // Gate whatever assets are present, and say so per asset: this is the only
                 // way the JNI path gets exercised over adb, and a gate that is never run
                 // is a gate nobody knows is broken.
@@ -1881,10 +1987,12 @@ class MainActivity : ComponentActivity() {
                 }
                 val out = File(getExternalFilesDir(null), "selftest.mp4")
                 val t1 = System.currentTimeMillis()
-                say("lip syncer on device: ${NativePipe.hasLipSyncer()}, asked: ${opts.lipSync}")
+                say("lip syncer on device: ${NativePipe.hasLipSyncer()}, asked: ${opts.lipSync}" +
+                    (voiceFile?.let { ", voice: ${it.name}" } ?: ""))
                 VideoSwapper(onProgress = { d, t -> if (d % 25 == 0) say("frame $d/$t") },
                              onLog = { say(it) },
-                             lipSync = opts.lipSync)
+                             lipSync = opts.lipSync,
+                             voicePath = voiceFile?.absolutePath)
                     .swap(tgtFile.absolutePath, out.absolutePath)
                     .fold({ say("SELFTEST OK -> $it in ${(System.currentTimeMillis() - t1) / 1000.0} s") },
                           { say("SWAP FAILED: ${it.message}") })

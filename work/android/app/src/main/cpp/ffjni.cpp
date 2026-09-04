@@ -52,7 +52,8 @@ inline uint8_t clamp8(int v) { return (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v))
  */
 void tunables(JNIEnv* env, ffpipe::Config& cfg, jfloat weight, jfloat maskBlur,
               jintArray jPadding, jfloat detScore, jfloat lmkScore, jint pixelBoost,
-              jboolean largestOnly, jboolean faceEnhance, jfloat enhanceBlend) {
+              jboolean largestOnly, jboolean faceEnhance, jfloat enhanceBlend,
+              jfloat lipSyncWeight) {
   cfg.swapperWeight = std::fmin(1.f, std::fmax(0.f, weight));
   cfg.maskBlur = std::fmin(1.f, std::fmax(0.f, maskBlur));
   cfg.detectorScore = std::fmin(1.f, std::fmax(0.f, detScore));
@@ -64,6 +65,7 @@ void tunables(JNIEnv* env, ffpipe::Config& cfg, jfloat weight, jfloat maskBlur,
   // from a build that had the model must not become a failed run.
   cfg.faceEnhance = faceEnhance == JNI_TRUE;
   cfg.faceEnhancerBlend = std::fmin(1.f, std::fmax(0.f, enhanceBlend));
+  cfg.lipSyncWeight = std::fmin(1.f, std::fmax(0.f, lipSyncWeight));
   if (jPadding && env->GetArrayLength(jPadding) == 4) {
     jint pad[4];
     env->GetIntArrayRegion(jPadding, 0, 4, pad);
@@ -88,7 +90,8 @@ Java_com_facefusion_mobile_NativePipe_initEx(JNIEnv* env, jclass, jstring jLib, 
                                              jintArray jPadding, jfloat detScore,
                                              jfloat lmkScore, jint pixelBoost,
                                              jboolean largestOnly,
-                                             jboolean faceEnhance, jfloat enhanceBlend) {
+                                             jboolean faceEnhance, jfloat enhanceBlend,
+                                             jfloat lipSyncWeight) {
   g_pipe.reset(new ffpipe::Pipeline());
   ffpipe::Config cfg;
   std::string swapper = jstr(env, jSwapper);
@@ -97,7 +100,7 @@ Java_com_facefusion_mobile_NativePipe_initEx(JNIEnv* env, jclass, jstring jLib, 
     cfg.swapDenorm = false; cfg.swapperIsHyperswap = false;
   }
   tunables(env, cfg, weight, maskBlur, jPadding, detScore, lmkScore, pixelBoost,
-           largestOnly, faceEnhance, enhanceBlend);
+           largestOnly, faceEnhance, enhanceBlend, lipSyncWeight);
 
   // PUSHED, not passed. There are four paths into init -- the preview, runSwap, the
   // self-test and the API -- and a per-call-site argument is a list you can be absent
@@ -136,11 +139,12 @@ Java_com_facefusion_mobile_NativePipe_setOptionsEx(JNIEnv* env, jclass,
                                                    jfloat lmkScore, jint pixelBoost,
                                                    jboolean largestOnly,
                                                    jboolean faceEnhance,
-                                                   jfloat enhanceBlend) {
+                                                   jfloat enhanceBlend,
+                                                   jfloat lipSyncWeight) {
   if (!g_pipe) return JNI_FALSE;
   ffpipe::Config cfg;
   tunables(env, cfg, weight, maskBlur, jPadding, detScore, lmkScore, pixelBoost,
-           largestOnly, faceEnhance, enhanceBlend);
+           largestOnly, faceEnhance, enhanceBlend, lipSyncWeight);
   g_pipe->updateConfig(cfg);
   return JNI_TRUE;
 }

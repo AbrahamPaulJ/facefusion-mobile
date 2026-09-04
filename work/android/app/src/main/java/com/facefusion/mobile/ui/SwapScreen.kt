@@ -28,11 +28,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.facefusion.mobile.FaceDetectorCard
-import com.facefusion.mobile.FaceEnhancerCard
 import com.facefusion.mobile.FaceMaskerCard
 import com.facefusion.mobile.FaceSwapperCard
 import com.facefusion.mobile.ModelDownload
 import com.facefusion.mobile.OptionSegments
+import com.facefusion.mobile.OptionSlider
 import com.facefusion.mobile.OptionSteps
 import com.facefusion.mobile.SwapOptions
 import java.io.File
@@ -131,6 +131,17 @@ fun SwapScreen(
     savedPath: String?,
     onPickSource: () -> Unit,
     onPickTarget: () -> Unit,
+    /** The lip syncer's driving audio -- see [onPickVoice]'s doc, and `VideoSwapper.voicePath`. */
+    hasVoice: Boolean,
+    voiceName: String?,
+    /**
+     * Pick the file that DRIVES the mouth -- deliberately not the target. Only shown once
+     * Lip Sync is on, because syncing a clip to the audio it already has has nothing to
+     * fix: this is upstream's actual use for the feature (dubbing a different voice onto
+     * the target), not a way to verify the target's own performance.
+     */
+    onPickVoice: () -> Unit,
+    onClearVoice: () -> Unit,
     /**
      * Save the frame currently shown in the SWAPPED pane, as an image.
      *
@@ -295,6 +306,63 @@ fun SwapScreen(
                         available = !hasTarget || durationMs > 0,
                         onToggle = { onOptsChange(opts.copy(lipSync = !opts.lipSync)) },
                     )
+                }
+            }
+        }
+
+        // The processors' own knobs, directly under the chip that turns each on -- not
+        // buried two levels down in Advanced, which is for settings almost every run
+        // leaves alone. A stage a user just switched on is not one of those. Each slider
+        // reads and writes the SAME `opts` field the old Advanced card did (or, for lip
+        // sync, the field `syncLip` in `ffpipe.cpp` used to hardcode), so nothing about the
+        // native side changed -- only where the control is drawn.
+        if (hasEnhancer && opts.faceEnhance) {
+            OptionSlider(
+                stringResource(R.string.opt_blend), opts.enhanceBlend,
+                { onOptsChange(opts.copy(enhanceBlend = it)) },
+                hint = when {
+                    opts.enhanceBlend >= 0.95f -> stringResource(R.string.opt_blend_hint_full)
+                    opts.enhanceBlend <= 0.05f -> stringResource(R.string.opt_blend_hint_none)
+                    else -> stringResource(R.string.opt_blend_hint_mixed)
+                },
+            )
+            // It runs on the swapper's own crop: gpen_bfr_256 and hyperswap_1a_256 declare
+            // the same template and size, so no second alignment is involved.
+            Text(stringResource(R.string.opt_enhancer_note, opts.pixelBoostLabel),
+                 style = MaterialTheme.typography.bodySmall, fontSize = 11.sp,
+                 modifier = Modifier.padding(top = 2.dp, bottom = 4.dp))
+        }
+        if (opts.lipSync) {
+            OptionSlider(
+                stringResource(R.string.opt_weight), opts.lipSyncWeight,
+                { onOptsChange(opts.copy(lipSyncWeight = it)) },
+                hint = stringResource(R.string.opt_lip_sync_weight_hint),
+            )
+        }
+
+        // Only while Lip Sync is ON, right under its own weight slider above. It is a
+        // REQUIRED input, not a tuning knob, so it is up here with source/target rather
+        // than in Advanced: the Swap button stays disabled without one (see its `enabled`
+        // below), because syncing a clip to the audio it already has has nothing to fix --
+        // upstream's lip syncer exists to dub a DIFFERENT voice on, and running it on the
+        // target's own track can only cost face quality with no corrective benefit.
+        if (opts.lipSync) PreviewPane(
+            label = stringResource(R.string.swap_pane_voice),
+            height = 64.dp,
+            bitmap = null,
+            placeholder = if (hasVoice) (voiceName ?: stringResource(R.string.swap_voice_picked))
+                          else stringResource(R.string.swap_voice_add),
+            onClick = if (idle && !hasVoice) onPickVoice else null,
+            actionIcon = if (hasVoice) null else Icons.Default.Add,
+        ) {
+            if (hasVoice) {
+                IconButton(onPickVoice, enabled = idle, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.Add, stringResource(R.string.swap_choose_another_voice),
+                         Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClearVoice, enabled = idle, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.Delete, stringResource(R.string.swap_remove_voice),
+                         Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -522,7 +590,8 @@ fun SwapScreen(
         // Save button below is the only thing left to do.
         if (!imageTarget) Button(
             onClick = if (run.busy) onCancel else onSwap,
-            enabled = run.busy || (idle && hasSource && hasTarget && !modelsMissing),
+            enabled = run.busy || (idle && hasSource && hasTarget && !modelsMissing &&
+                                    (!opts.lipSync || hasVoice)),
             modifier = Modifier.fillMaxWidth().height(52.dp),
             // 14.dp everywhere: the stadium default made the two primary buttons the only
             // fully-round things on a screen of 14.dp panes and cards.
@@ -609,16 +678,10 @@ fun SwapScreen(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Spacer(Modifier.height(2.dp))
-                // Enhancer first: it is the newest control and the one being reached
-                // for, and it is also the only one that can be absent -- so when it IS
-                // there it should not be buried under three cards that are always there.
-                // Only while the processor is ON. Its switch lives in the Processors row
-                // above now, so what is left in here is the blend -- a detail of a stage
-                // that is running, and nothing at all when it is not.
-                if (hasEnhancer && opts.faceEnhance) {
-                    FaceEnhancerCard(opts, onOptsChange, openCard == "enhancer",
-                                     { onToggleCard("enhancer") })
-                }
+                // The enhancer's card used to live here. Its one knob (blend) now shows
+                // directly under the Processors row instead, right under the chip that
+                // turns it on -- a stage a user just switched on is not "a setting almost
+                // every run leaves alone", which is what this accordion is for.
                 FaceSwapperCard(opts, onOptsChange, openCard == "swapper",
                                 { onToggleCard("swapper") }, inswapperAvailable = hasInswapper)
                 FaceMaskerCard(opts, onOptsChange, openCard == "masker", { onToggleCard("masker") })

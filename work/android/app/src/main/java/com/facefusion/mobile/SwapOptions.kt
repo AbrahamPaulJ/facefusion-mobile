@@ -78,6 +78,18 @@ data class SwapOptions(
     val lipSync: Boolean = false,
 
     /**
+     * `--lip-syncer-weight`, 0.0-1.0 step 0.05, upstream default 0.5. ONE knob shared by
+     * both models, applied differently per `lip_syncer/core.py`:
+     *
+     *   edtalk    the third model input, `weight` -- a lip-direction scale the generator
+     *             reads directly. This app drove it at a hardcoded 1.0 until now.
+     *   wav2lip   scales the ALREADY-COMPUTED mel window by `weight * 2.0` right before it
+     *             reaches the model (`prepare_audio_frame`) -- not the raw audio, and not
+     *             the target crop. This app applied no scaling at all until now.
+     */
+    val lipSyncWeight: Float = 0.5f,
+
+    /**
      * Output frame rate. **0 means "same as the input"**, which is the default and the only
      * value that cannot be wrong -- every other choice is a resample.
      *
@@ -105,6 +117,7 @@ data class SwapOptions(
             .putBoolean(K_ENHANCE, faceEnhance)
             .putFloat(K_ENHANCE_BLEND, enhanceBlend)
             .putBoolean(K_LIP_SYNC, lipSync)
+            .putFloat(K_LIP_SYNC_WEIGHT, lipSyncWeight)
             .putInt(K_FPS, outputFps)
             .apply()
     }
@@ -122,6 +135,7 @@ data class SwapOptions(
         private const val K_ENHANCE = "face_enhance"
         private const val K_ENHANCE_BLEND = "face_enhance_blend"
         private const val K_LIP_SYNC = "lip_sync"
+        private const val K_LIP_SYNC_WEIGHT = "lip_sync_weight"
         private const val K_FPS = "output_fps"
 
         private fun prefs(context: Context) =
@@ -148,6 +162,7 @@ data class SwapOptions(
                 faceEnhance = p.getBoolean(K_ENHANCE, d.faceEnhance),
                 enhanceBlend = p.getFloat(K_ENHANCE_BLEND, d.enhanceBlend),
                 lipSync = p.getBoolean(K_LIP_SYNC, d.lipSync),
+                lipSyncWeight = p.getFloat(K_LIP_SYNC_WEIGHT, d.lipSyncWeight),
                 outputFps = p.getInt(K_FPS, d.outputFps),
             )
         }

@@ -28,6 +28,7 @@ object NativePipe {
         detectorScore: Float, landmarkerScore: Float,
         pixelBoost: Int, largestOnly: Boolean,
         faceEnhance: Boolean, enhanceBlend: Float,
+        lipSyncWeight: Float,
     ): Boolean
 
     /** Load the pipeline with [opts] applied. */
@@ -37,7 +38,7 @@ object NativePipe {
                opts.weight, opts.maskBlur, opts.maskPadding.toIntArray(),
                opts.detectorScore, opts.landmarkerScore,
                opts.pixelBoost, opts.largestOnly,
-               opts.faceEnhance, opts.enhanceBlend)
+               opts.faceEnhance, opts.enhanceBlend, opts.lipSyncWeight)
 
     /**
      * Tiers to skip at the next [init], comma-separated; "" clears.
@@ -64,6 +65,7 @@ object NativePipe {
         detectorScore: Float, landmarkerScore: Float,
         pixelBoost: Int, largestOnly: Boolean,
         faceEnhance: Boolean, enhanceBlend: Float,
+        lipSyncWeight: Float,
     ): Boolean
 
     /** [setOptionsEx] from a [SwapOptions]. `swapper` and `outputFps` are not sent: the
@@ -72,7 +74,7 @@ object NativePipe {
         setOptionsEx(opts.weight, opts.maskBlur, opts.maskPadding.toIntArray(),
                      opts.detectorScore, opts.landmarkerScore,
                      opts.pixelBoost, opts.largestOnly,
-                     opts.faceEnhance, opts.enhanceBlend)
+                     opts.faceEnhance, opts.enhanceBlend, opts.lipSyncWeight)
 
     /**
      * The tier that LOADED and then would not execute, or "".

@@ -75,6 +75,12 @@ struct Config {
   // 1 = fully enhanced, 0 = the swapper's output untouched.  80 is upstream's default.
   float faceEnhancerBlend = 0.8f;
 
+  // --lip-syncer-weight, 0-1, upstream default 0.5. ONE knob, applied differently per
+  // model (lip_syncer/core.py): edtalk reads it directly as its third input, the
+  // lip-direction scale; wav2lip scales the mel window by `weight * 2.0` right before the
+  // model sees it. See syncLip in ffpipe.cpp for where each is applied.
+  float lipSyncWeight = 0.5f;
+
   // content_analyser.py:detect_with_nsfw_2 -- `logit[0] - logit[1] > 0.25` flags a frame.
   float nsfwThreshold = 0.25f;
 

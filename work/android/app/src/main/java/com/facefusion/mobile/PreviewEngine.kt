@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 /**
  * The two preview panes: the target frame under the trim handle, and that same frame swapped.
@@ -222,6 +223,21 @@ class PreviewEngine {
      */
     private var appliedSource: Any? = null
 
+    /**
+     * The lip syncer's driving audio currently decoded onto the loaded pipeline, or null.
+     *
+     * Mirrors [appliedSource]'s reasoning: decoding a whole clip's PCM and running it
+     * through the mel front end is real work, so it is done once per voice file rather
+     * than once per scrubbed frame. Whether the CURRENT preview actually uses it is a
+     * separate question, answered in [swap] -- toggling Lip Sync off and back on with the
+     * same voice must not re-decode audio that is already sitting on the native side.
+     */
+    private var appliedVoice: String? = null
+
+    /** The fps [appliedVoice]'s mel windows were extracted at -- needed to turn a scrub
+     *  position back into the same frame index a real run would compute. */
+    private var audioFps: Double = 0.0
+
     /** True when a pipeline is loaded AND a source face has been applied to it. */
     val isWarm: Boolean get() = loadedSwapper != null && appliedSource != null
 
@@ -230,6 +246,8 @@ class PreviewEngine {
         loadedSwapper = null
         loadedOpts = null
         appliedSource = null
+        appliedVoice = null
+        audioFps = 0.0
     }
 
     /**
@@ -244,6 +262,30 @@ class PreviewEngine {
         if (loadedSwapper == null || loadedSwapper != opts.swapper) return
         if (loadedOpts == opts) return
         if (NativePipe.setOptions(opts)) loadedOpts = opts
+    }
+
+    /**
+     * Push the lip syncer's driving audio onto a pipeline that is already loaded.
+     *
+     * Deliberately NOT folded into [ensureReady]: that path only runs once, at cold
+     * warm-up (`if (!previewWarm)` in the caller), so a voice picked or changed AFTER the
+     * preview is already warm would never be decoded. This is cheap enough to call on
+     * every refresh instead, like [applyOptions] -- a no-op when nothing is loaded, when
+     * [voicePath] is null, or when this exact file at this exact [fps] is already applied
+     * (see [appliedVoice]). [fps] has to match what a real run would index frames at, or a
+     * scrubbed preview and the eventual output would show different mouths at the same
+     * timestamp.
+     */
+    suspend fun applyVoice(voicePath: String?, fps: Double) {
+        if (loadedSwapper == null || voicePath == null) return
+        if (appliedVoice == voicePath && audioFps == fps) return
+        val pcm = withContext(Dispatchers.IO) {
+            runCatching { AudioDecoder.decode(voicePath) }.getOrNull()
+        }
+        appliedVoice = if (pcm != null && pcm.frames > 0 &&
+                           NativePipe.setAudio(pcm.samples, pcm.channels, pcm.sampleRate, fps))
+            voicePath else null
+        audioFps = fps
     }
 
     /**
@@ -311,14 +353,19 @@ class PreviewEngine {
     }
 
     /**
-     * Swap [frame], which must be a frame from [frameAt].
+     * Swap [frame], which must be a frame from [frameAt] taken at [timeMs] -- and lip sync
+     * it too, when [voicePath] names a file [applyVoice] has already decoded onto this
+     * pipeline for the SAME path. Always goes through `processFrameAt`, never the plain
+     * `processFrame`: a negative frame index (below) falls back to a plain swap inside the
+     * native pipeline itself, so a preview with no lip sync is unaffected byte for byte.
      *
-     * ⚠ `processFrame` writes the result back into the array ONLY when it found a face, so
-     * a zero-face frame comes back byte-identical to the input. Rendering that as "the
+     * ⚠ `processFrameAt` writes the result back into the array ONLY when it found a face,
+     * so a zero-face frame comes back byte-identical to the input. Rendering that as "the
      * swapped frame" would show an unswapped image with no hint why, which is exactly the
      * kind of silent wrongness this preview exists to catch -- hence [Swapped.faces].
      */
-    suspend fun swap(frame: Bitmap): Swapped = withContext(Dispatchers.Default) {
+    suspend fun swap(frame: Bitmap, timeMs: Float = 0f, voicePath: String? = null):
+            Swapped = withContext(Dispatchers.Default) {
         if (!isWarm) return@withContext Swapped(null, 0, "Pipeline is not loaded")
         runCatching {
             val soft = frame.copy(Bitmap.Config.ARGB_8888, false)
@@ -328,7 +375,14 @@ class PreviewEngine {
             soft.getPixels(px, 0, w, 0, 0, w, h)
 
             val bgr = NativePipe.argbToBgr(px, w, h)
-            val faces = NativePipe.processFrame(bgr, w, h)
+            // A real frame index only when THIS voice is the one actually decoded onto the
+            // pipeline -- a stale `appliedVoice` from a file that was since cleared or
+            // swapped for another must not drive the mouth from audio the caller no longer
+            // means. -1 is `processFrameAt`'s own documented "plain swap" fallback.
+            val frameIndex = if (loadedOpts?.lipSync == true && voicePath != null &&
+                                 appliedVoice == voicePath)
+                (timeMs / 1000.0 * audioFps).roundToInt() else -1
+            val faces = NativePipe.processFrameAt(bgr, w, h, frameIndex)
             if (faces < 0) return@runCatching Swapped(null, 0, NativePipe.lastError())
             if (faces == 0) return@runCatching Swapped(null, 0, null)
 

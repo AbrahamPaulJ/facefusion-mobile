@@ -28,6 +28,11 @@
     <string name="swap_add_target">添加目标</string>
     <string name="swap_choose_another_target">更换目标</string>
     <string name="swap_remove_target">移除目标</string>
+    <string name="swap_pane_voice">语音</string>
+    <string name="swap_voice_add">添加音频以驱动口型</string>
+    <string name="swap_voice_picked">音频已就绪</string>
+    <string name="swap_choose_another_voice">更换语音</string>
+    <string name="swap_remove_voice">移除语音</string>
     <string name="swap_loading_models">正在加载模型，需要几秒钟…</string>
     <string name="swap_swapping_frame">正在处理这一帧…</string>
     <string name="swap_pick_a_source">请选择源人脸</string>
@@ -125,8 +130,9 @@
     <string name="opt_blend">混合</string>
     <string name="opt_blend_hint_full">只使用增强后的结果</string>
     <string name="opt_blend_hint_none">无效果 —— 换脸结果保持不变</string>
-    <string name="opt_blend_hint_mixed">与未增强的换脸结果混合（上游默认 0.80）</string>
+    <string name="opt_blend_hint_mixed">与未增强的换脸结果混合（默认 0.80）</string>
     <string name="opt_enhancer_note">在贴回原图之前，以 %1$s 处理换好的人脸</string>
+    <string name="opt_lip_sync_weight_hint">音频驱动口型的强度（默认 0.50）</string>
 
     <string name="set_models">模型</string>
     <string name="set_models_summary">已安装 %1$d / %2$d 个，占用 %3$s</string>
@@ -238,6 +244,9 @@
     <string name="status_done">完成 - %1$d KB</string>
     <string name="status_failed">失败：%1$s</string>
     <string name="status_target_ready_video">目标已就绪：%1$d x %2$d，%3$s</string>
+    <string name="status_voice_ready">语音音频已就绪（%1$s）</string>
+    <string name="status_voice_no_audio">该文件没有音轨</string>
+    <string name="status_cannot_read_audio">无法读取音频：%1$s</string>
     <string name="status_target_ready_image">目标已就绪：%1$d x %2$d</string>
     <string name="status_cannot_read_video">无法读取视频：%1$s</string>
     <string name="status_cannot_read_image">无法读取图片</string>

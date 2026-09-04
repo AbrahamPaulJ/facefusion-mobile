@@ -53,11 +53,37 @@ class VideoSwapper(
      * Both are checked below rather than trusted from here.
      */
     private val lipSync: Boolean = false,
+    /**
+     * The DRIVING audio, from a file separate from [inputPath] -- an audio recording, a
+     * dub, or any video whose voice track should replace the target's own performance.
+     *
+     * Null means "use the target's own audio" (the only mode this ever had before this
+     * parameter existed): syncing a clip's mouth to the audio it was already filmed with
+     * asks the model to reproduce motion that was already correct, which a generated frame
+     * can only match or lose to, never improve. That is still a valid thing to ask for
+     * (benchmarking, the CLI, the API), so it stays the default -- but the main app's UI
+     * requires a real [voicePath] before it will enable Lip Sync at all, because upstream's
+     * own reason for this feature is dubbing onto a DIFFERENT voice, not re-deriving the
+     * one already there.
+     *
+     * Decoded on ITS OWN timeline from sample 0, never the target's [trimStartUs] --
+     * the two clips are unrelated recordings and the target's trim has no meaning against
+     * a file that was never trimmed alongside it.
+     */
+    private val voicePath: String? = null,
 ) {
 
     private var encTrack = -1
 
     fun swap(inputPath: String, outputPath: String): Result<String> = runCatching {
+        // Shadows the constructor property for the rest of this function: `voicePath` means
+        // NOTHING when `lipSync` is off, but a caller that toggled Lip Sync off without also
+        // clearing its own remembered voice file would otherwise still redirect the OUTPUT's
+        // audio track to a file the run never even looked at for the mouth -- reported from
+        // the real app, where the main UI keeps `voiceFile` around across the toggle on
+        // purpose (re-enabling Lip Sync should not force re-picking one). The invariant
+        // belongs HERE, not in every caller: a voice with nothing to drive is not a voice.
+        val voicePath = if (lipSync) voicePath else null
         val extractor = MediaExtractor().apply { setDataSource(inputPath) }
         var videoTrack = -1
         var audioTrack = -1
@@ -69,6 +95,22 @@ class VideoSwapper(
             else if (mime.startsWith("audio/") && audioTrack < 0) audioTrack = i
         }
         val vf = format ?: error("no video track in $inputPath")
+
+        // The OUTPUT's audio track, separately from the target's own: when a driving
+        // [voicePath] was given, the viewer should hear the same performance that drove the
+        // mouth, not the target's original track underneath a face now saying something
+        // else. A different MediaExtractor because it may be a wholly different container
+        // (an audio file has no video track at all, so it cannot share `extractor`).
+        var audioExtractor = extractor
+        if (voicePath != null) {
+            val ve = MediaExtractor().apply { setDataSource(voicePath) }
+            var vTrack = -1
+            for (i in 0 until ve.trackCount) {
+                if (ve.getTrackFormat(i).getString(MediaFormat.KEY_MIME)
+                        ?.startsWith("audio/") == true) { vTrack = i; break }
+            }
+            if (vTrack >= 0) { audioTrack = vTrack; audioExtractor = ve } else ve.release()
+        }
         // STORED dimensions. For a portrait clip these are landscape, with the upright
         // orientation carried separately as a rotation flag.
         val width = vf.getInteger(MediaFormat.KEY_WIDTH)
@@ -124,7 +166,8 @@ class VideoSwapper(
         // so up front instead of half way through.
         var syncing = false
         if (lipSync && NativePipe.hasLipSyncer()) {
-            val pcm = AudioDecoder.decode(inputPath, trimStartUs, trimEndUs)
+            val pcm = if (voicePath != null) AudioDecoder.decode(voicePath)
+                      else AudioDecoder.decode(inputPath, trimStartUs, trimEndUs)
             when {
                 pcm == null || pcm.frames == 0 ->
                     onLog("lip sync: no audio track, skipping")
@@ -212,7 +255,7 @@ class VideoSwapper(
         val addTracks: (MediaFormat) -> Int = { fmt ->
             val v = muxer.addTrack(fmt)
             if (audioTrack >= 0) {
-                val af = extractor.getTrackFormat(audioTrack)
+                val af = audioExtractor.getTrackFormat(audioTrack)
                 val amime = af.getString(MediaFormat.KEY_MIME) ?: "?"
                 muxAudio = runCatching { muxer.addTrack(af) }.getOrElse {
                     onLog("audio: MP4 will not carry $amime, writing video only")
@@ -321,6 +364,7 @@ class VideoSwapper(
             decoder.stop(); decoder.release()
             encoder.stop(); encoder.release()
             extractor.release()
+            if (audioExtractor !== extractor) audioExtractor.release()
             muxer.release()
             File(outputPath).delete()
             error(if (cancelled) "cancelled before any frame was written" else "no frames encoded")
@@ -331,19 +375,26 @@ class VideoSwapper(
         // run's NPU work for a soundtrack.  A partial audio track is still a valid MP4 --
         // writeSampleData has already committed whatever it accepted.
         if (audioTrack >= 0 && muxAudio >= 0) runCatching {
-            val ae = MediaExtractor().apply { setDataSource(inputPath); selectTrack(audioTrack) }
+            // A separate voice file has its OWN timeline, unrelated to the target's trim --
+            // copy it from its own start, capped at the video's post-trim LENGTH so a
+            // longer voice file does not produce an audio track past where the video ends.
+            val copyStartUs = if (voicePath != null) 0L else trimStartUs
+            val copyEndUs = if (voicePath != null) spanUs else trimEndUs
+            val ae = MediaExtractor().apply {
+                setDataSource(voicePath ?: inputPath); selectTrack(audioTrack)
+            }
             try {
-                if (trimStartUs > 0) ae.seekTo(trimStartUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+                if (copyStartUs > 0) ae.seekTo(copyStartUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
                 val buf = ByteBuffer.allocate(512 * 1024)
                 val ai = MediaCodec.BufferInfo()
                 var copied = 0
                 while (true) {
                     val n = ae.readSampleData(buf, 0)
                     val pts = ae.sampleTime
-                    if (n < 0 || pts > trimEndUs) break
-                    if (pts >= trimStartUs) {
+                    if (n < 0 || pts > copyEndUs) break
+                    if (pts >= copyStartUs) {
                         ai.offset = 0; ai.size = n
-                        ai.presentationTimeUs = pts - trimStartUs
+                        ai.presentationTimeUs = pts - copyStartUs
                         ai.flags = if (ae.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0)
                             MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
                         muxer.writeSampleData(muxAudio, buf, ai)
@@ -351,7 +402,8 @@ class VideoSwapper(
                     }
                     ae.advance()
                 }
-                onLog("audio: $copied packets copied")
+                onLog("audio: $copied packets copied" +
+                      (if (voicePath != null) " (from the voice track)" else ""))
             } finally {
                 // finally, not a trailing call: on a throw the extractor would otherwise
                 // leak a codec handle for the life of the process.
@@ -363,6 +415,7 @@ class VideoSwapper(
         encoder.stop(); encoder.release()
         muxer.stop(); muxer.release()
         extractor.release()
+        if (audioExtractor !== extractor) audioExtractor.release()
         onLog((if (cancelled) "partial: " else "") +
               "wrote ${File(outputPath).length() / 1024} KB, $swapped frames")
         NativePipe.stageMillis().takeIf { it.isNotEmpty() }?.let(onLog)
