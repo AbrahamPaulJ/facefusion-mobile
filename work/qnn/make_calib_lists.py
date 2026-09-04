@@ -36,6 +36,16 @@ SPECS = {
 	# the wrong distribution to quantise against (trap #4).
 	'wav2lip':   [('source', 'lipsync_source', 1 * 1 * 80 * 16),
 				  ('target', 'lipsync_target', 1 * 6 * 96 * 96)],
+	# The 256x256 lip syncer. Three inputs, and `target` is the WHOLE face crop rather
+	# than wav2lip's masked/reference 96 pair -- 256x256 IS the crop, which is the point
+	# of converting it. `weight` is the lip-direction scale, driven at 1.0.
+	# ⚠ Same trap #4 warning as wav2lip's: make_edtalk_calib.py's fan2d stand-ins verify
+	# that the CONTEXT BINARY computes what onnxruntime does. Quantising against them
+	# would be quantising against the wrong distribution -- the real set has to come
+	# through edtalk's own crop chain, the way capture_lipsync_calib.py does for wav2lip.
+	'edtalk':    [('source', 'edtalk_source', 1 * 1 * 80 * 16),
+				  ('target', 'edtalk_target', 1 * 3 * 256 * 256),
+				  ('weight', 'edtalk_weight', 1)],
 }
 
 

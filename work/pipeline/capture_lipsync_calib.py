@@ -37,8 +37,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mel_reference as mel
 import run_reference as ref
 
-MODEL_SIZE = 96
 CROP_SIZE = 512
+# name -> (the size create_bounding_box's box is warped to, the tensor's channel count,
+#          the calib subdir stem)
+MODELS = {
+	'wav2lip': (96, 6, 'lipsync'),
+	'edtalk': (256, 3, 'edtalk'),
+}
 
 
 def create_bounding_box(landmark_68):
@@ -63,21 +68,28 @@ def warp_face_by_bounding_box(frame, bounding_box, crop_size):
 	return cv2.warpAffine(frame, affine, (crop_size, crop_size), flags=method), affine
 
 
-def prepare_crop_frame(area_frame):
-	"""lip_syncer/core.py:prepare_crop_frame, the wav2lip branch.
+def prepare_crop_frame(area_frame, model):
+	"""lip_syncer/core.py:prepare_crop_frame.
 
-	The masked copy comes FIRST and the reference second, and the mask is the BOTTOM half
-	-- upstream zeroes `prepare_vision_frame[:, 48:]` on an HWC array.
+	wav2lip: the masked copy comes FIRST and the reference second, and the mask is the
+	BOTTOM half -- upstream zeroes `prepare_vision_frame[:, 48:]` on an HWC array.
+
+	edtalk: no mask and no concatenation. It is a generator over the WHOLE face, not an
+	inpainter for a hidden mouth, so it takes the crop as it stands -- which is also why
+	its crop is 256 and its mouth is not upscaled 3x from 96.
 	"""
+	size, _, _ = MODELS[model]
 	frame = numpy.expand_dims(area_frame, axis=0)
-	masked = frame.copy()
-	masked[:, MODEL_SIZE // 2:] = 0
-	both = numpy.concatenate((masked, frame), axis=3)
-	return both.transpose(0, 3, 1, 2).astype(numpy.float32) / 255.0
+	if model == 'wav2lip':
+		masked = frame.copy()
+		masked[:, size // 2:] = 0
+		frame = numpy.concatenate((masked, frame), axis=3)
+	return frame.transpose(0, 3, 1, 2).astype(numpy.float32) / 255.0
 
 
 def main():
 	ap = argparse.ArgumentParser()
+	ap.add_argument('--model', choices=sorted(MODELS), default='wav2lip')
 	ap.add_argument('--target', required=True)
 	ap.add_argument('--tw', type=int, required=True)
 	ap.add_argument('--th', type=int, required=True)
@@ -86,6 +98,7 @@ def main():
 	ap.add_argument('--fps', type=float, default=24.0)
 	ap.add_argument('--out', required=True)
 	args = ap.parse_args()
+	size, _, stem = MODELS[args.model]
 
 	models = ref.Models('hyperswap_1a_256')
 	raw = numpy.fromfile(args.target, numpy.uint8)
@@ -109,8 +122,8 @@ def main():
 		# cv2.transform(landmark_68, affine_matrix): the 68 points INTO crop space.
 		lm = cv2.transform(face.landmark_68.reshape(1, -1, 2), affine).reshape(-1, 2)
 		box = create_bounding_box(lm)
-		area, _ = warp_face_by_bounding_box(crop, box, MODEL_SIZE)
-		targets.append(prepare_crop_frame(area))
+		area, _ = warp_face_by_bounding_box(crop, box, size)
+		targets.append(prepare_crop_frame(area, args.model))
 		print('  frame %2d: box %.0f,%.0f %.0fx%.0f' %
 		      (i + 1, box[0], box[1], box[2] - box[0], box[3] - box[1]))
 
@@ -136,27 +149,31 @@ def main():
 	# sequence. Consecutive video frames are correlated and this is still a friendly test,
 	# but it is at least not the set that trained the encodings.
 	n = len(targets)
-	for sub in ('lipsync_source', 'lipsync_target',
-	            'lipsync_source_heldout', 'lipsync_target_heldout'):
+	# edtalk takes a third input, the lip-direction scale, which upstream drives at 1.0.
+	# It is written per case rather than once because --input_list wants one path per
+	# input per line, and a shared file would make a case's inputs no longer self-describing.
+	names = ['source', 'target'] + (['weight'] if args.model == 'edtalk' else [])
+	subs = ['%s_%s%s' % (stem, k, h) for k in names for h in ('', '_heldout')]
+	for sub in subs:
 		os.makedirs(os.path.join(args.out, sub), exist_ok=True)
-	kept = {'lipsync_target': 0, 'lipsync_target_heldout': 0}
+	kept = {'': 0, '_heldout': 0}
 	for i in range(n):
 		w = mel.prepare_audio_frame(windows[(i * len(windows)) // n])
 		suffix = '_heldout' if i % 2 else ''
 		# The index in the filename stays the CAPTURE index, so a held-out file still
 		# says which frame it came from.
-		numpy.ascontiguousarray(targets[i], numpy.float32).tofile(
-			os.path.join(args.out, 'lipsync_target' + suffix,
-			             'lipsync_target_%03d.raw' % i))
-		numpy.ascontiguousarray(w, numpy.float32).tofile(
-			os.path.join(args.out, 'lipsync_source' + suffix,
-			             'lipsync_source_%03d.raw' % i))
-		kept['lipsync_target' + suffix] += 1
-	print('calibration %d, held out %d'
-	      % (kept['lipsync_target'], kept['lipsync_target_heldout']))
+		def out(kind):
+			return os.path.join(args.out, '%s_%s%s' % (stem, kind, suffix),
+			                    '%s_%s_%03d.raw' % (stem, kind, i))
+		numpy.ascontiguousarray(targets[i], numpy.float32).tofile(out('target'))
+		numpy.ascontiguousarray(w, numpy.float32).tofile(out('source'))
+		if args.model == 'edtalk':
+			numpy.array([1.0], numpy.float32).tofile(out('weight'))
+		kept[suffix] += 1
+	print('calibration %d, held out %d' % (kept[''], kept['_heldout']))
 
 	stack = numpy.concatenate(targets, axis=0)
-	print('%d cases -> %s/lipsync_{source,target}/' % (n, args.out))
+	print('%d cases -> %s/%s_{%s}/' % (n, args.out, stem, ','.join(names)))
 	print('target  min %.4f max %.4f mean %.4f' % (stack.min(), stack.max(), stack.mean()))
 	print('source  %d mel windows available, %d used' % (len(windows), n))
 
