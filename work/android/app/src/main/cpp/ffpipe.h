@@ -268,6 +268,14 @@ class Pipeline {
   double msLipMask = 0;    // createAreaMask + the 512 -> 96 box warp
   double msLipPrep = 0;    // the 6x96x96 input tensor
   double msLipPaste = 0;   // 96 -> 512 warp, the float copy, and pasteBack
+  // The SWAP path's geometry, split the same way and for the same reason: msGeom is one
+  // bucket over four different kinds of work, and 41% of a plain swap's compute is in it.
+  // These four are a SUBSET of msGeom, not additional to it -- they say where it went.
+  double msGeomDetPrep = 0;  // detector letterbox resize + the 3x640x640 CHW conversion
+  double msGeomWarp = 0;     // warpAffine crops: landmarker, recogniser, swapper
+  double msGeomTensor = 0;   // uint8 crop <-> float CHW tensor conversions
+  double msGeomMask = 0;     // createBoxMask alone -- frame-invariant, so suspect
+  double msGeomPaste = 0;    // pasteBack alone
   int framesDone = 0, facesDone = 0;
   // Zero every counter above.  A run has to call this itself: the accumulators are
   // cumulative across frames by design, and setSource clears only SOME of them --

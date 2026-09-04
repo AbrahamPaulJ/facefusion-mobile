@@ -83,6 +83,25 @@ Image warpAffineRoi(const Image& src, const Affine& M, int dw, int dh, Border bo
 // cv2.resize(src, (dw,dh), interpolation=INTER_LINEAR)
 Image resizeLinear(const Image& src, int dw, int dh);
 
+/**
+ * The detector's whole input preparation in one pass: resize `src` to dw x dh exactly as
+ * `resizeLinear` does, then write it into `dst` as CHW planes of side `S`, divided by 255
+ * and left-top aligned. `dst` must already hold 3*S*S floats and be zeroed -- the padding
+ * to S is the caller's zeros, untouched here.
+ *
+ * Split out because as two steps it was 6.07 ms/frame, the second largest item in the CPU
+ * geometry: a 640x337 resize through the generic per-pixel sampler, then a separate
+ * 647 K-element scatter over an intermediate image that existed only to be read once.
+ * As one pass the intermediate is gone, and because this resize is a pure SCALE the
+ * bilinear taps and weights depend on x and y alone, so they are computed 640 + 337 times
+ * instead of 215 680.
+ *
+ * ⚠ Still rounds to uint8 between the resize and the divide. That quantisation is
+ * observable in the tensor the detector sees, so removing it would be a different graph
+ * input, not a faster path to the same one.
+ */
+void resizeToCHW(const Image& src, int dw, int dh, int S, float* dst);
+
 // ---------------------------------------------------------------- detection
 
 // cv2.dnn.NMSBoxes over [x1,y1,x2,y2] boxes; returns kept indices, score-sorted.

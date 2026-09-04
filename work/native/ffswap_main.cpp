@@ -348,6 +348,22 @@ int main(int argc, char** argv) {
   if (pipe.msEnhance > 0)
     printf("  %-12s %8.1f ms\n", "enhancer", pipe.msEnhance);
   printf("  %-12s %8.1f ms  <- CPU geometry\n", "geometry", pipe.msGeom);
+  // Itemised, because "geometry" is four unrelated pieces of work and optimising it
+  // blind is how 0.4.26 removed a 786432-pixel conversion and moved nothing. Per FRAME,
+  // unlike the totals above, since that is the number a target is set against.
+  {
+    const double n = std::max(1, frames);
+    printf("    %-10s %8.2f ms/frame  detector letterbox + CHW\n",
+           "detprep", pipe.msGeomDetPrep / n);
+    printf("    %-10s %8.2f ms/frame  warpAffine to the crop\n",
+           "warp", pipe.msGeomWarp / n);
+    printf("    %-10s %8.2f ms/frame  crop -> model tensor\n",
+           "tensor", pipe.msGeomTensor / n);
+    printf("    %-10s %8.2f ms/frame  createBoxMask (cached)\n",
+           "mask", pipe.msGeomMask / n);
+    printf("    %-10s %8.2f ms/frame  pasteBack\n",
+           "paste", pipe.msGeomPaste / n);
+  }
   double npu = pipe.msDetect + pipe.msLandmark + pipe.msRecognise + pipe.msSwap +
                pipe.msEnhance;
   // "NPU" was hardcoded and printed over an ncnn run as `NPU 996.6 ms (94%)`, which is

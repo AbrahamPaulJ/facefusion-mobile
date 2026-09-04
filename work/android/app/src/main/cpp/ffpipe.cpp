@@ -16,6 +16,12 @@
 #include <cstdlib>
 static bool ffdebug() { static bool v = getenv("FFDEBUG") != nullptr; return v; }
 
+// FFNOMASKCACHE=1 forces the box-mask memo to miss on every frame, so ONE binary can
+// measure cached against uncached by alternating runs inside a single thermal session --
+// which is the only way an A/B on this device means anything (running one build first
+// every time biases the other by ~20%, larger than most effects worth measuring).
+static bool ffNoMaskCache() { static bool v = getenv("FFNOMASKCACHE") != nullptr; return v; }
+
 namespace ffpipe {
 namespace {
 
@@ -117,15 +123,34 @@ struct Pipeline::Impl {
   bool haveSource = false;
   std::vector<float> emap;   // inswapper only: the 512x512 initializer
 
-  // edtalk's box mask depends only on (LS, cfg.maskBlur, cfg.maskPadding) -- constant
-  // across every frame and every face of a run -- but createBoxMask's gaussianBlur at the
-  // default 0.3 blur is a sigma-19 pass over the full 512x512 canvas, 43.93 ms/frame
-  // measured, because a mask that never changes was being rebuilt from scratch every
-  // frame anyway. Memoised on the parameters, not just computed once, so a live
-  // maskBlur/maskPadding change from updateConfig still takes effect.
-  ffcv::MatF lipBoxMask;
-  float lipBoxMaskBlur = -1.f;
-  int lipBoxMaskPadding[4] = {-1, -1, -1, -1};
+  // A box mask depends only on (size, cfg.maskBlur, cfg.maskPadding) -- constant across
+  // every frame and every face of a run -- but createBoxMask's gaussianBlur at the default
+  // 0.3 blur is a 79-tap separable pass in double precision, so rebuilding it per frame
+  // cost 43.93 ms on the lip syncer's 512 canvas and 10.4 M MACs on the swapper's 256 crop.
+  //
+  // Memoised on the PARAMETERS rather than merely computed once, so a live maskBlur,
+  // maskPadding or pixelBoost change through updateConfig still takes effect on the very
+  // next frame. `size` is in the key because the swap path's crop is swapSize*pixelBoost
+  // and pixel boost is one of the sliders.
+  struct BoxMaskCache {
+    ffcv::MatF m;
+    int size = -1;
+    float blur = -1.f;
+    int padding[4] = {-1, -1, -1, -1};
+
+    const ffcv::MatF& get(int size_, float blur_, const int padding_[4]) {
+      if (ffNoMaskCache() || size != size_ || blur != blur_ ||
+          std::memcmp(padding, padding_, sizeof(padding)) != 0) {
+        m = ffcv::createBoxMask(size_, size_, blur_, padding_);
+        size = size_;
+        blur = blur_;
+        std::memcpy(padding, padding_, sizeof(padding));
+      }
+      return m;
+    }
+  };
+  BoxMaskCache lipBoxMask;    // at LS, for syncLip
+  BoxMaskCache swapBoxMask;   // at swapSize*pixelBoost, for swapAll
 };
 
 Pipeline::Pipeline() = default;
@@ -481,17 +506,24 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame) {
   if (frame.h > S || frame.w > S)
     scale = std::min((double)S / frame.h, (double)S / frame.w);
   int tw = (int)(frame.w * scale), th = (int)(frame.h * scale);
-  ffcv::Image temp = (scale < 1.0) ? ffcv::resizeLinear(frame, tw, th) : frame;
-  double ratioW = (double)frame.w / temp.w, ratioH = (double)frame.h / temp.h;
+  if (scale >= 1.0) { tw = frame.w; th = frame.h; }
+  double ratioW = (double)frame.w / tw, ratioH = (double)frame.h / th;
 
   std::vector<float> in((size_t)3 * S * S, 0.f);   // CHW, /255, zero-padded
-  for (int y = 0; y < temp.h; ++y) {
-    const uint8_t* row = temp.row(y);
-    for (int x = 0; x < temp.w; ++x)
-      for (int c = 0; c < 3; ++c)
-        in[(size_t)c * S * S + (size_t)y * S + x] = row[x * 3 + c] / 255.0f;
+  if (getenv("FFDETPREPLEGACY")) {
+    // The two-step version, kept for the A/B only. See resizeToCHW's header note.
+    ffcv::Image temp = (scale < 1.0) ? ffcv::resizeLinear(frame, tw, th) : frame;
+    for (int y = 0; y < temp.h; ++y) {
+      const uint8_t* row = temp.row(y);
+      for (int x = 0; x < temp.w; ++x)
+        for (int c = 0; c < 3; ++c)
+          in[(size_t)c * S * S + (size_t)y * S + x] = row[x * 3 + c] / 255.0f;
+    }
+  } else {
+    ffcv::resizeToCHW(frame, tw, th, S, in.data());
   }
   msGeom += nowMs() - t0;
+  msGeomDetPrep += nowMs() - t0;
 
   t0 = nowMs();
   std::vector<std::vector<float>> out;
@@ -516,7 +548,7 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame) {
     }
     fprintf(stderr, "[dbg] best score as [20,8400]=%.4f   as [8400,20]=%.4f\n", bestC, bestI);
     fprintf(stderr, "[dbg] frame %dx%d temp %dx%d ratio %.3f/%.3f\n",
-            frame.w, frame.h, temp.w, temp.h, ratioW, ratioH);
+            frame.w, frame.h, tw, th, ratioW, ratioH);
   }
 
   // [1,20,8400] -> per-anchor (cx,cy,w,h, score, 5x(x,y,vis))
@@ -585,7 +617,9 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame) {
     int rw = MS, rh = MS;
     if (angle % 180 != 0) { rw = MS; rh = MS; }   // square crop: rotation size is unchanged
     if (angle != 0) crop = ffcv::warpAffine(crop, rot, rw, rh, ffcv::BORDER_CONSTANT);
+    msGeomWarp += nowMs() - t0;
 
+    double tt = nowMs();
     std::vector<float> fin((size_t)3 * MS * MS);
     for (int y = 0; y < MS; ++y) {
       const uint8_t* row = crop.row(y);
@@ -593,6 +627,7 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame) {
         for (int c = 0; c < 3; ++c)
           fin[(size_t)c * MS * MS + (size_t)y * MS + x] = row[x * 3 + c] / 255.0f;
     }
+    msGeomTensor += nowMs() - tt;
     msGeom += nowMs() - t0;
 
     t0 = nowMs();
@@ -629,7 +664,10 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame) {
     const float* T = ffcv::warpTemplate(0);
     for (int i = 0; i < 10; ++i) tmpl[i] = T[i] * RS;
     ffcv::Affine am = ffcv::umeyama(f.landmark5_68, tmpl, 5);
+    double tw2 = nowMs();
     ffcv::Image rc = ffcv::warpAffine(frame, am, RS, RS, ffcv::BORDER_REPLICATE);
+    msGeomWarp += nowMs() - tw2;
+    tw2 = nowMs();
     std::vector<float> rin((size_t)3 * RS * RS);
     for (int y = 0; y < RS; ++y) {
       const uint8_t* row = rc.row(y);
@@ -637,6 +675,7 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame) {
         for (int c = 0; c < 3; ++c)     // BGR -> RGB is the [:, :, ::-1]
           rin[(size_t)(2 - c) * RS * RS + (size_t)y * RS + x] = row[x * 3 + c] / 127.5f - 1.0f;
     }
+    msGeomTensor += nowMs() - tw2;
     msGeom += nowMs() - t0;
 
     t0 = nowMs();
@@ -688,6 +727,7 @@ bool Pipeline::setSource(const ffcv::Image& img) {
 void Pipeline::resetStats() {
   msDetect = msLandmark = msRecognise = msSwap = msGeom = msEnhance = msLipSync = 0;
   msLipCrop = msLipMask = msLipPrep = msLipPaste = 0;
+  msGeomDetPrep = msGeomWarp = msGeomTensor = msGeomMask = msGeomPaste = 0;
   framesDone = facesDone = 0;
 }
 
@@ -734,13 +774,7 @@ bool Pipeline::syncLip(ffcv::Image& frame, const std::vector<Face>& faces,
       msLipCrop += nowMs() - tc;
 
       tc = nowMs();
-      if (p_->lipBoxMaskBlur != cfg.maskBlur ||
-          std::memcmp(p_->lipBoxMaskPadding, cfg.maskPadding, sizeof(cfg.maskPadding)) != 0) {
-        p_->lipBoxMask = ffcv::createBoxMask(LS, LS, cfg.maskBlur, cfg.maskPadding);
-        p_->lipBoxMaskBlur = cfg.maskBlur;
-        std::memcpy(p_->lipBoxMaskPadding, cfg.maskPadding, sizeof(cfg.maskPadding));
-      }
-      const ffcv::MatF& mask = p_->lipBoxMask;
+      const ffcv::MatF& mask = p_->lipBoxMask.get(LS, cfg.maskBlur, cfg.maskPadding);
       msLipMask += nowMs() - tc;
       msGeom += nowMs() - t0;
 
@@ -927,8 +961,12 @@ bool Pipeline::swapAll(ffcv::Image& frame, const std::vector<Face>& faces) {
   for (int i = 0; i < 10; ++i) tmpl[i] = T[i] * CS;
 
   // The mask is built at the crop size, not the model size: with pixel boost the crop is
-  // larger than the graph and paste_back works on the crop.
-  ffcv::MatF mask = ffcv::createBoxMask(CS, CS, cfg.maskBlur, cfg.maskPadding);
+  // larger than the graph and paste_back works on the crop. Cached, because CS, maskBlur
+  // and maskPadding are identical on every frame of a run and this is a 79-tap blur.
+  double tm = nowMs();
+  const ffcv::MatF& mask = p_->swapBoxMask.get(CS, cfg.maskBlur, cfg.maskPadding);
+  msGeom += nowMs() - tm;
+  msGeomMask += nowMs() - tm;
 
   // face_selector_mode `one`: the largest detected face by box area.
   const Face* only = nullptr;
@@ -945,7 +983,9 @@ bool Pipeline::swapAll(ffcv::Image& frame, const std::vector<Face>& faces) {
 
     double t0 = nowMs();
     ffcv::Affine am = ffcv::umeyama(f.landmark5_68, tmpl, 5);
+    double tw3 = nowMs();
     ffcv::Image crop = ffcv::warpAffine(frame, am, CS, CS, ffcv::BORDER_REPLICATE);
+    msGeomWarp += nowMs() - tw3;
 
     // balance_source_embedding (face_swapper/core.py:715). Identity-space, so it is
     // computed once per face and shared by every pixel-boost sub-image.
@@ -977,6 +1017,7 @@ bool Pipeline::swapAll(ffcv::Image& frame, const std::vector<Face>& faces) {
                 ((row[(x * PB + tx) * 3 + c] / 255.0f) - cfg.swapMean) / cfg.swapStd;
       }
       msGeom += nowMs() - t0;
+      msGeomTensor += nowMs() - t0;
 
       t0 = nowMs();
       std::vector<std::vector<float>> so;
@@ -999,6 +1040,7 @@ bool Pipeline::swapAll(ffcv::Image& frame, const std::vector<Face>& faces) {
           }
       }
       msGeom += nowMs() - t0;
+      msGeomTensor += nowMs() - t0;
     }
 
     // The enhancer used to run HERE, fused into the swap crop. It no longer does -- see
@@ -1009,6 +1051,7 @@ bool Pipeline::swapAll(ffcv::Image& frame, const std::vector<Face>& faces) {
     t0 = nowMs();
     ffcv::pasteBack(frame, outCrop, mask, am);
     msGeom += nowMs() - t0;
+    msGeomPaste += nowMs() - t0;
   }
   return true;
 }

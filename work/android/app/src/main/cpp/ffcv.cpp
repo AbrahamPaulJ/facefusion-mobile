@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <numeric>
 
@@ -191,6 +192,66 @@ Image resizeLinear(const Image& src, int dw, int dh) {
     }
   }
   return dst;
+}
+
+void resizeToCHW(const Image& src, int dw, int dh, int S, float* dst) {
+  if (dw <= 0 || dh <= 0) return;
+  const int sw = src.w, sh = src.h;
+  const uint8_t* sdata = src.data.data();
+  const double fx = (double)sw / dw, fy = (double)sh / dh;
+
+  // The taps and weights for a pure scale are a function of the destination COLUMN alone,
+  // so they are built once per row of the output rather than once per pixel of it. Same
+  // expressions cv2 uses -- centres mapped back, then BORDER_REPLICATE clamping the taps.
+  std::vector<int> xs0(dw), xs1(dw);
+  std::vector<float> axs(dw);
+  for (int x = 0; x < dw; ++x) {
+    const float sx = (float)((x + 0.5) * fx - 0.5);
+    const int x0 = (int)std::floor(sx);
+    axs[x] = sx - x0;
+    xs0[x] = iclamp(x0, 0, sw - 1);
+    xs1[x] = iclamp(x0 + 1, 0, sw - 1);
+  }
+
+  // The value is a uint8 by the time it is scaled, so /255 has 256 possible answers.
+  // A table is both EXACT -- `v * (1.f/255.f)` is not `v / 255.0f`, since 1/255 has no
+  // exact float -- and cheaper than 647 K divides.
+  static const float* kInv255 = [] {
+    static float t[256];
+    for (int i = 0; i < 256; ++i) t[i] = i / 255.0f;
+    return t;
+  }();
+  const size_t plane = (size_t)S * S;
+  for (int y = 0; y < dh; ++y) {
+    const float sy = (float)((y + 0.5) * fy - 0.5);
+    const int y0 = (int)std::floor(sy);
+    const float ay = sy - y0, omay = 1.f - ay;
+    const uint8_t* r0 = sdata + (size_t)iclamp(y0, 0, sh - 1) * sw * 3;
+    const uint8_t* r1 = sdata + (size_t)iclamp(y0 + 1, 0, sh - 1) * sw * 3;
+
+    float* o0 = dst + (size_t)y * S;
+    float* o1 = o0 + plane;
+    float* o2 = o1 + plane;
+    for (int x = 0; x < dw; ++x) {
+      const float ax = axs[x], omax = 1.f - ax;
+      // The four weights in the order the shared sampler accumulated them, so the sum is
+      // bit-for-bit the one resizeLinear produced.
+      const float w00 = omax * omay, w10 = ax * omay;
+      const float w01 = omax * ay,   w11 = ax * ay;
+      const uint8_t* p00 = r0 + (size_t)xs0[x] * 3;
+      const uint8_t* p10 = r0 + (size_t)xs1[x] * 3;
+      const uint8_t* p01 = r1 + (size_t)xs0[x] * 3;
+      const uint8_t* p11 = r1 + (size_t)xs1[x] * 3;
+
+      const float b = w00 * p00[0] + w10 * p10[0] + w01 * p01[0] + w11 * p11[0];
+      const float g = w00 * p00[1] + w10 * p10[1] + w01 * p01[1] + w11 * p11[1];
+      const float r = w00 * p00[2] + w10 * p10[2] + w01 * p01[2] + w11 * p11[2];
+      // uint8 first, exactly as the two-step version did -- see the header note.
+      o0[x] = kInv255[iclamp((int)std::lround(b), 0, 255)];
+      o1[x] = kInv255[iclamp((int)std::lround(g), 0, 255)];
+      o2[x] = kInv255[iclamp((int)std::lround(r), 0, 255)];
+    }
+  }
 }
 
 // ---------------------------------------------------------------- detection
@@ -402,8 +463,13 @@ void pasteBack(Image& frame, const MatF& crop, const MatF& mask, const Affine& a
   pasteBackRoi(frame, crop, mask, affine, 0, 0, crop.w, crop.h);
 }
 
-void pasteBackRoi(Image& frame, const MatF& crop, const MatF& mask, const Affine& affine,
-                  int rx0, int ry0, int rx1, int ry1) {
+// The pre-0.5.2 paste: two full bilinear warps into two float buffers, then a blend pass
+// over them. Kept ONLY as the A/B reference for the fused version below, selected by
+// FFPASTELEGACY=1, so one binary can measure both inside a single thermal session --
+// which is the only kind of comparison this device gives a trustworthy answer to.
+// Delete once the fused path has been exact and faster across a release.
+static void pasteBackRoiLegacy(Image& frame, const MatF& crop, const MatF& mask,
+                               const Affine& affine, int rx0, int ry0, int rx1, int ry1) {
   Affine inv = invertAffine(affine);
   // The destination box is the projection of the caller's RECTANGLE, not of the whole
   // crop. The lip syncer's mask is non-zero only over the lower face, so projecting all
@@ -445,6 +511,127 @@ void pasteBackRoi(Image& frame, const MatF& crop, const MatF& mask, const Affine
       for (int ch = 0; ch < 3; ++ch) {
         float v = dst[x * 3 + ch] * (1.f - a) + crow[x * 3 + ch] * a;
         dst[x * 3 + ch] = (uint8_t)iclamp((int)v, 0, 255);   // numpy astype = truncate
+      }
+    }
+  }
+}
+
+/**
+ * paste_back, fused: sample the mask, sample the crop and blend in ONE pass.
+ *
+ * The three-pass version above measured 11.02 ms/frame on a 1366x720 clip -- the largest
+ * single item in the CPU geometry -- and almost none of it was arithmetic. Per destination
+ * pixel it called a templated `sampleBilinear` twice through a runtime border argument, so
+ * every pixel re-ran a 2x2 validity array, two `std::floor`s and four branches it could not
+ * hoist, and it wrote 2.5 MB of float intermediates only to read them straight back.
+ *
+ * Fusing removes all of that at once:
+ *
+ *   - ONE inverse affine instead of two (warpAffineF inverted its argument internally, so
+ *     the same matrix was inverted on both calls),
+ *   - no `im`/`ic` buffers, so no allocation, no zero-fill, and no 2.5 MB round trip to
+ *     memory between producing a value and consuming it,
+ *   - the border policy resolved per CALL SITE rather than per pixel: the mask is
+ *     BORDER_CONSTANT and the crop BORDER_REPLICATE, both known here,
+ *   - and an early-out on a zero mask sample, which is the algorithmic part. The box is the
+ *     axis-aligned bound of a ROTATED crop, so a third of it maps outside the mask entirely
+ *     and a further ring falls in the mask's zero padding; a == 0 makes the blend the exact
+ *     identity, so those pixels can skip the 3-channel sampler without changing a byte.
+ *
+ * ⚠ Bit-exactness is deliberate, not incidental. Weights are accumulated in the same
+ * w00, w10, w01, w11 order the templated sampler used, and taps that the border rejects
+ * contribute a zero term rather than being skipped, because `+= 0.f` is an identity on
+ * floats and reordering the sum is not. The one liberty taken is hoisting `W(0,1)*y +
+ * W(0,2)` out of the x loop, which re-associates one double add -- worth a last bit far
+ * below the test's 2 LSB bound, and it removes two multiplies per pixel.
+ */
+void pasteBackRoi(Image& frame, const MatF& crop, const MatF& mask, const Affine& affine,
+                  int rx0, int ry0, int rx1, int ry1) {
+  if (getenv("FFPASTELEGACY"))
+    return pasteBackRoiLegacy(frame, crop, mask, affine, rx0, ry0, rx1, ry1);
+
+  Affine inv = invertAffine(affine);
+  rx0 = iclamp(rx0, 0, crop.w); rx1 = iclamp(rx1, 0, crop.w);
+  ry0 = iclamp(ry0, 0, crop.h); ry1 = iclamp(ry1, 0, crop.h);
+  if (rx1 <= rx0 || ry1 <= ry0) return;
+  float corners[8] = {(float)rx0, (float)ry0, (float)rx1, (float)ry0,
+                      (float)rx1, (float)ry1, (float)rx0, (float)ry1};
+  float out[8];
+  transformPoints(corners, 4, inv, out);
+  float minx = out[0], maxx = out[0], miny = out[1], maxy = out[1];
+  for (int i = 1; i < 4; ++i) {
+    minx = std::min(minx, out[2 * i]);   maxx = std::max(maxx, out[2 * i]);
+    miny = std::min(miny, out[2 * i + 1]); maxy = std::max(maxy, out[2 * i + 1]);
+  }
+  int x1 = iclamp((int)std::floor(minx), 0, frame.w);
+  int y1 = iclamp((int)std::floor(miny), 0, frame.h);
+  int x2 = iclamp((int)std::ceil(maxx), 0, frame.w);
+  int y2 = iclamp((int)std::ceil(maxy), 0, frame.h);
+  int pw = x2 - x1, ph = y2 - y1;
+  if (pw <= 0 || ph <= 0) return;
+
+  Affine paste = inv;
+  paste(0, 2) -= x1;
+  paste(1, 2) -= y1;
+  // What warpAffineF computed twice, internally: box pixel -> crop/mask coordinates.
+  Affine W = invertAffine(paste);
+
+  const int mw = mask.w, mh = mask.h, cw = crop.w, ch_ = crop.h;
+  const float* mdata = mask.data.data();
+  const float* cdata = crop.data.data();
+
+  for (int y = 0; y < ph; ++y) {
+    uint8_t* dst = frame.row(y1 + y) + (size_t)x1 * 3;
+    const double bx = W(0, 1) * y + W(0, 2);
+    const double by = W(1, 1) * y + W(1, 2);
+    for (int x = 0; x < pw; ++x) {
+      const float sxf = (float)(W(0, 0) * x + bx);
+      const float syf = (float)(W(1, 0) * x + by);
+      const int px0 = (int)std::floor(sxf), py0 = (int)std::floor(syf);
+
+      // Wholly outside the mask: alpha is 0 and the blend is the identity.
+      if (px0 + 1 < 0 || px0 >= mw || py0 + 1 < 0 || py0 >= mh) continue;
+
+      const float ax = sxf - px0, ay = syf - py0;
+      const float w00 = (1 - ax) * (1 - ay), w10 = ax * (1 - ay);
+      const float w01 = (1 - ax) * ay,       w11 = ax * ay;
+      const int px1 = px0 + 1, py1 = py0 + 1;
+
+      // BORDER_CONSTANT: a rejected tap contributes a zero term, in the original order.
+      float a = 0.f;
+      const bool mx0ok = (unsigned)px0 < (unsigned)mw, mx1ok = (unsigned)px1 < (unsigned)mw;
+      if ((unsigned)py0 < (unsigned)mh) {
+        const float* r = mdata + (size_t)py0 * mw;
+        a += (mx0ok ? w00 * r[px0] : 0.f);
+        a += (mx1ok ? w10 * r[px1] : 0.f);
+      } else {
+        a += 0.f; a += 0.f;
+      }
+      if ((unsigned)py1 < (unsigned)mh) {
+        const float* r = mdata + (size_t)py1 * mw;
+        a += (mx0ok ? w01 * r[px0] : 0.f);
+        a += (mx1ok ? w11 * r[px1] : 0.f);
+      } else {
+        a += 0.f; a += 0.f;
+      }
+      a = clampf(a, 0.f, 1.f);
+      if (a == 0.f) continue;      // exact identity, so the crop sampler is skipped
+
+      // BORDER_REPLICATE: clamp the taps, which is what cv2 does and what the templated
+      // sampler did for this border.
+      const int ix0 = iclamp(px0, 0, cw - 1), ix1 = iclamp(px1, 0, cw - 1);
+      const int iy0 = iclamp(py0, 0, ch_ - 1), iy1 = iclamp(py1, 0, ch_ - 1);
+      const float* p00 = cdata + ((size_t)iy0 * cw + ix0) * 3;
+      const float* p10 = cdata + ((size_t)iy0 * cw + ix1) * 3;
+      const float* p01 = cdata + ((size_t)iy1 * cw + ix0) * 3;
+      const float* p11 = cdata + ((size_t)iy1 * cw + ix1) * 3;
+
+      const float ia = 1.f - a;
+      uint8_t* d = dst + x * 3;
+      for (int c = 0; c < 3; ++c) {
+        const float cv = w00 * p00[c] + w10 * p10[c] + w01 * p01[c] + w11 * p11[c];
+        const float v = d[c] * ia + cv * a;
+        d[c] = (uint8_t)iclamp((int)v, 0, 255);   // numpy astype = truncate
       }
     }
   }

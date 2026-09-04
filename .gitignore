@@ -30,6 +30,14 @@ work/device/ncnn_run
 # *.mnn). Same class as ncnn_run: build output and derived weights, never sources.
 work/device/mnn_stage/
 work/device/ncnn_upload/
+# Session artefacts: pulled frames, A/B clips and UI screenshots from device runs. They
+# are evidence for one comparison, never inputs to a build, and a `git add -A` swept 40 of
+# them into the index once.
+work/device/**/*.png
+work/device/**/*.mp4
+work/device/**/*.jpg
+work/device/ab_compare/
+work/device/frames_*/
 work/output/
 
 # Qualcomm QAIRT SDK runtime -- proprietary, redistributed only with the SDK licence.
