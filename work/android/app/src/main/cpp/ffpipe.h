@@ -237,6 +237,11 @@ class Pipeline {
   // Likewise separate: the lip syncer is optional and its cost has to be attributable.
   double msLipSync = 0;
   int framesDone = 0, facesDone = 0;
+  // Zero every counter above.  A run has to call this itself: the accumulators are
+  // cumulative across frames by design, and setSource clears only SOME of them --
+  // msSwap and msLipSync survive it, so a second run without this reports the first
+  // run's time added to its own.
+  void resetStats();
 
  private:
   struct Impl;

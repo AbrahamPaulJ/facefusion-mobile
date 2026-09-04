@@ -10,6 +10,7 @@
 #include <jni.h>
 
 #include <cmath>
+#include <cstdio>    // snprintf, for stageMillis
 #include <cstdlib>   // setenv/unsetenv, for setForcedBackend
 #include <cstring>
 #include <memory>
@@ -478,6 +479,34 @@ Java_com_facefusion_mobile_NativePipe_processFrameAt(JNIEnv* env, jclass, jbyteA
     env->SetByteArrayRegion(jBgr, 0, (jsize)img.data.size(), (const jbyte*)img.data.data());
   }
   return (jint)faces.size();
+}
+
+/**
+ * The per-stage millisecond counters, as one line, and zero them.
+ *
+ * These have been accumulated since the lip syncer was written and reported NOWHERE:
+ * ffpipe.h calls them "for the CLI's report" and the app never asked. So the first
+ * device measurement of syncLip was a stopwatch around the whole run, which said the
+ * stage costs 26.4 ms/frame and could not say what of.
+ */
+JNIEXPORT jstring JNICALL
+Java_com_facefusion_mobile_NativePipe_stageMillis(JNIEnv* env, jclass) {
+  if (!g_pipe) return env->NewStringUTF("");
+  const int n = g_pipe->framesDone > 0 ? g_pipe->framesDone : 1;
+  char buf[256];
+  std::snprintf(buf, sizeof(buf),
+                "ms/frame over %d: detect %.2f landmark %.2f recognise %.2f swap %.2f "
+                "enhance %.2f lipsync-graph %.2f geometry %.2f",
+                g_pipe->framesDone, g_pipe->msDetect / n, g_pipe->msLandmark / n,
+                g_pipe->msRecognise / n, g_pipe->msSwap / n, g_pipe->msEnhance / n,
+                g_pipe->msLipSync / n, g_pipe->msGeom / n);
+  return env->NewStringUTF(buf);
+}
+
+/** Zero the counters, so a run reports its own time and not the previous run's too. */
+JNIEXPORT void JNICALL
+Java_com_facefusion_mobile_NativePipe_resetStats(JNIEnv*, jclass) {
+  if (g_pipe) g_pipe->resetStats();
 }
 
 /** Bitmap ARGB_8888 ints -> packed BGR bytes. */

@@ -660,6 +660,11 @@ bool Pipeline::setSource(const ffcv::Image& img) {
   return true;
 }
 
+void Pipeline::resetStats() {
+  msDetect = msLandmark = msRecognise = msSwap = msGeom = msEnhance = msLipSync = 0;
+  framesDone = facesDone = 0;
+}
+
 // ---------------------------------------------------- lip syncer (wav2lip_gan_96)
 //
 // lip_syncer/core.py:sync_lip, the wav2lip branch, in order. The one thing to keep in

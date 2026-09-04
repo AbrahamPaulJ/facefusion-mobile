@@ -227,6 +227,9 @@ class VideoSwapper(
         var sawInputEOS = false
         var sawDecodeEOS = false
         var swapped = 0
+        // Zero the native counters so the line below is THIS run, not this run plus
+        // every earlier one -- they accumulate for the life of the pipeline.
+        NativePipe.resetStats()
         var cancelled = false
         // The last output slot already written, for rate conversion. -1 so slot 0 is free.
         var lastSlot = -1L
@@ -362,6 +365,7 @@ class VideoSwapper(
         extractor.release()
         onLog((if (cancelled) "partial: " else "") +
               "wrote ${File(outputPath).length() / 1024} KB, $swapped frames")
+        NativePipe.stageMillis().takeIf { it.isNotEmpty() }?.let(onLog)
         outputPath
     }
 

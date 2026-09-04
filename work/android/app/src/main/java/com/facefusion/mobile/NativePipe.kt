@@ -220,6 +220,18 @@ object NativePipe {
     @JvmStatic external fun processFrameAt(bgr: ByteArray, w: Int, h: Int,
                                            frameIndex: Int): Int
 
+    /**
+     * Per-stage ms/frame for the run so far, as one line for the log.
+     *
+     * The counters behind it are as old as the pipeline and were never surfaced, which
+     * is why the lip syncer's cost was known as one number for a whole session. Every
+     * later question about where a frame goes is answered here rather than by a build.
+     */
+    @JvmStatic external fun stageMillis(): String
+
+    /** Zero those counters. Call before a run, or it reports the previous one too. */
+    @JvmStatic external fun resetStats()
+
     @JvmStatic external fun argbToBgr(argb: IntArray, w: Int, h: Int): ByteArray
     @JvmStatic external fun yuvToBgr(
         y: ByteArray, yRow: Int,
