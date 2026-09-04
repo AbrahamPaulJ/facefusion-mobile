@@ -965,56 +965,24 @@ def collapse_blur_blocks(m, expect=None, dims_hint=None):
 	return n_blur
 
 
-# ---------------------------------------------------------------------- gpen
+# ---------------------------------------------------------------- modulated convs
 
-def do_gpen():
-	"""`gpen_bfr_256`, the face enhancer: make every modulated conv kernel STATIC.
+def rewrite_modulated_convs(m, expect_total=None):
+	"""Make every StyleGAN2 modulated conv kernel STATIC, in place on `m`.
 
-	GPEN is a StyleGAN2 generator, and StyleGAN2 modulates its convolution weights with the
-	style vector at RUNTIME.  As exported, 20 of the 45 convs take a computed kernel:
-
-	    style -> Mul(W) -> Pow/ReduceSum/Sqrt/Div (demodulate) -> Reshape -> Conv
-
-	HTP maps Conv only when the kernel is a static parameter, and those 20 carry 7.44 of
-	the graph's 8.57 GMAC -- 87% of the model would not lower.  The chain also builds 97
-	rank>=5 activations (12 at rank 6, e.g. [1,256,256,3,3]), where the converter's
-	elementwise broadcast path is `max_rank <= 5` and the arch linter's MAX_RANK is 4.
-
-	The refactor is exact algebra, not an approximation.  Modulation scales per INPUT
-	channel, demodulation per OUTPUT channel, and batch is 1 (hence group 1), so
+	Shared by `do_gpen` and `do_edtalk` -- see `do_gpen`'s docstring for the algebra:
 
 	    Conv(x, W[o,i,..] * s[i])[o] * d[o]  ==  Conv(x * s[i], W)[o] * d[o]
+	    d[o] = 1/sqrt( sum_i s[i]^2 * A[o,i] + eps ),  A[o,i] = sum_kh,kw W[o,i,kh,kw]^2
 
-	and the demodulator itself drops out of rank 5, because
+	gpen's 13 demodulated convs happen to carry no bias, so the original version of this
+	bailed rather than fold one. Here a demodulated conv's bias, when it has one, is added
+	AFTER the demodulation scale (a bias rides on the true output, never on the scale
+	itself) instead of assumed absent -- edtalk is not expected to split the same way gpen
+	does.
 
-	    d[o] = 1/sqrt( sum_{i,kh,kw} (W[o,i,kh,kw] * s[i])^2 + eps )
-	         = 1/sqrt( sum_i s[i]^2 * A[o,i] + eps ),  A[o,i] = sum_{kh,kw} W[o,i,kh,kw]^2
-
-	A is CONSTANT, so the whole demodulator becomes one [1,I]x[I,O] MatMul.  Every kernel
-	ends up static, every rank-5/6 tensor disappears, and the Pow/ReduceSum over a 5-D
-	weight goes with it.
-
-	The 20 split cleanly and the code asserts it: 13 demodulated convs (7 Conv 3x3 + 6
-	ConvTranspose 3x3 s2) that carry NO bias, and 7 `to_rgb` 1x1 convs that carry a bias
-	and are modulated but NOT demodulated.  That matters -- a bias must be added AFTER the
-	demodulation scale, never folded through it, so a demodulated conv that also had a bias
-	would need a code path this does not have.  It bails instead of guessing.
-
-	NOT bit-exact: the two sums reassociate.  verify_surgery.py measures the cost.
+	Returns (n_demod, n_plain, n_bias_folded).
 	"""
-	import onnxsim
-
-	m = load('gpen_bfr_256')
-
-	# Fold FIRST.  The export declares 128 initialisers as graph inputs as well (the old
-	# PyTorch pattern onnxsim warns about), and every blur kernel reaches its Conv through a
-	# Reshape, which makes 18 more convs look dynamic than are.  Folding takes dynamic
-	# kernels 38 -> 20 and leaves exactly the modulated ones, so the matcher sees a clean
-	# pattern instead of having to tell the two apart.
-	s, ok = onnxsim.simplify(m, overwrite_input_shapes={'input': [1, 3, 256, 256]})
-	if not ok:
-		sys.exit('  onnxsim reported failure (pre-pass)')
-	m = s
 	g = m.graph
 	init = {t.name: t for t in g.initializer}
 	prod = {o: n for n in g.node for o in n.output}
@@ -1033,7 +1001,7 @@ def do_gpen():
 
 	new_inits = []
 	out_nodes = []
-	n_demod = n_plain = 0
+	n_demod = n_plain = n_bias_folded = 0
 
 	def shape_init(dims, tag):
 		name = tag
@@ -1107,18 +1075,16 @@ def do_gpen():
 		out_nodes.append(helper.make_node('Mul', [node.input[0], s4], [xs], name=b + '/ff_xscale'))
 
 		has_bias = len(node.input) > 2
+		bias_name = node.input[2] if has_bias else None
 		conv_ins = [xs, wn]
 		if demod_t is None:
 			# No demodulation: the bias rides along inside the conv, exactly as before.
 			if has_bias:
-				conv_ins.append(node.input[2])
+				conv_ins.append(bias_name)
 			out_nodes.append(helper.make_node(
 				node.op_type, conv_ins, [node.output[0]], name=b, **attrs))
 			n_plain += 1
 			continue
-
-		# A demodulated conv must not carry a bias: the scale below would multiply it.
-		expect(not has_bias, node, 'demodulated conv has a bias; would need folding after the scale')
 
 		# ---- rebuild the demodulator at rank 2
 		dr = prod.get(demod_t)
@@ -1153,7 +1119,7 @@ def do_gpen():
 		on = b + '/ff_one'
 		new_inits.append(numpy_helper.from_array(numpy.asarray(one, numpy.float32), on))
 
-		s2, t, t2, r, d, d4 = (b + '/ff_' + k for k in ('s2', 't', 't2', 'r', 'd', 'd4'))
+		s2, t2, r, d, d4 = (b + '/ff_' + k for k in ('s2', 't2', 'r', 'd', 'd4'))
 		conv_out = b + '/ff_conv'
 		out_nodes += [
 			helper.make_node('Mul', [style, style], [s2], name=b + '/ff_s2'),
@@ -1164,17 +1130,221 @@ def do_gpen():
 			helper.make_node('Reshape', [d, shape_init([1, O, 1, 1], b + '/ff_d_shape')], [d4],
 							 name=b + '/ff_demod_reshape'),
 			helper.make_node(node.op_type, conv_ins, [conv_out], name=b, **attrs),
-			helper.make_node('Mul', [conv_out, d4], [node.output[0]], name=b + '/ff_demod_scale'),
 		]
+		if has_bias:
+			# The bias rides on the true output, added AFTER the demod scale -- gpen's 13
+			# demodulated convs carry none, so this path is untested by gpen.
+			scaled = b + '/ff_demod_scaled'
+			out_nodes.append(helper.make_node(
+				'Mul', [conv_out, d4], [scaled], name=b + '/ff_demod_scale'))
+			b4 = b + '/ff_bias4'
+			out_nodes.append(helper.make_node(
+				'Reshape', [bias_name, shape_init([1, O, 1, 1], b + '/ff_bias_shape')], [b4],
+				name=b + '/ff_bias_reshape'))
+			out_nodes.append(helper.make_node(
+				'Add', [scaled, b4], [node.output[0]], name=b + '/ff_bias_add'))
+			n_bias_folded += 1
+		else:
+			out_nodes.append(helper.make_node(
+				'Mul', [conv_out, d4], [node.output[0]], name=b + '/ff_demod_scale'))
 		n_demod += 1
 
-	print('  rewrote %d demodulated + %d modulated-only convs' % (n_demod, n_plain))
-	if n_demod + n_plain != 20:
-		print('  WARNING: expected 20 modulated convs, matched %d' % (n_demod + n_plain))
+	print('  rewrote %d demodulated (%d with a folded bias) + %d modulated-only convs'
+		  % (n_demod, n_bias_folded, n_plain))
+	if expect_total is not None and n_demod + n_plain != expect_total:
+		print('  WARNING: expected %d modulated convs, matched %d' % (expect_total, n_demod + n_plain))
 
 	del g.node[:]
 	g.node.extend(out_nodes)
 	g.initializer.extend(new_inits)
+	return n_demod, n_plain, n_bias_folded
+
+
+def rewrite_demod_factor(m, expect_total=None):
+	"""The SAME identity as `rewrite_modulated_convs`, for an export that already applies
+	it halfway.
+
+	Assumed, per HANDOFF, that edtalk's raw graph matches gpen's -- Conv fed a kernel
+	computed at runtime from `Reshape(Mul(W5, style))`. It measures 63.32 ms/frame and the
+	same profiling that found the shape (`work/device/prof_by_optype.py`) named the culprit,
+	so this was checked before believing it: **it does not match.** edtalk's export already
+	modulates the ACTIVATION and feeds Conv a STATIC weight --
+
+	    Conv(x * s[i] * eq_lr, W)[o] * d[o]
+
+	-- `rewrite_modulated_convs` finds zero dynamic kernels here because there are none: the
+	Conv's own weight input folds to a plain initializer under onnxsim once shapes are
+	pinned. The 90.4%-of-cycles tensor HANDOFF found is not feeding a Conv at all -- it is
+	built ONLY to compute `d[o]`, in a chain that ends in a Mul applied AFTER the conv:
+
+	    Div(1, Sqrt(Add(ReduceSum(Pow(Mul(W5, style_reshaped), 2)), eps)))
+
+	Same algebra, same fix -- `d[o] = 1/sqrt(sum_i s[i]^2 A[o,i] + eps)`, A constant -- but
+	the REWIRE differs: the Conv and its activation-side Mul are already correct and are left
+	completely alone. Only the Div node's producer chain is replaced, and the replacement's
+	last node reuses the ORIGINAL Div's output name, so the Reshape and Mul that consume
+	`d[o]` downstream (unchanged, applying it after the conv) need no rewiring at all. The
+	orphaned Mul/Pow/ReduceSum/Add/Sqrt chain and the big weight initializer it held are left
+	in place for the next onnxsim pass to drop, exactly as `do_gpen`'s old kernel chains are.
+
+	Returns n_rewritten.
+	"""
+	g = m.graph
+	init = {t.name: t for t in g.initializer}
+	prod = {o: n for n in g.node for o in n.output}
+
+	def const_val(name):
+		if name in init:
+			return numpy_helper.to_array(init[name])
+		n = prod.get(name)
+		if n is not None and n.op_type == 'Constant':
+			return numpy_helper.to_array(n.attribute[0].t)
+		return None
+
+	def expect(cond, node, what):
+		if not cond:
+			sys.exit('  %s: %s' % (node.name, what))
+
+	new_inits = []
+	out_nodes = []
+	n_rewritten = 0
+
+	for node in g.node:
+		if node.op_type != 'Div':
+			out_nodes.append(node)
+			continue
+
+		one = const_val(node.input[0])
+		sq = prod.get(node.input[1])
+		if sq is None or sq.op_type != 'Sqrt':
+			out_nodes.append(node)
+			continue
+		ad = prod.get(sq.input[0])
+		if ad is None or ad.op_type != 'Add':
+			out_nodes.append(node)
+			continue
+		eps, rs = const_val(ad.input[1]), prod.get(ad.input[0])
+		if eps is None:
+			eps, rs = const_val(ad.input[0]), prod.get(ad.input[1])
+		if rs is None or rs.op_type != 'ReduceSum':
+			out_nodes.append(node)
+			continue
+		pw = prod.get(rs.input[0])
+		if pw is None or pw.op_type != 'Pow':
+			out_nodes.append(node)
+			continue
+		mul = prod.get(pw.input[0])
+		if mul is None or mul.op_type != 'Mul':
+			out_nodes.append(node)
+			continue
+		W5, style_r = const_val(mul.input[0]), mul.input[1]
+		if W5 is None or W5.ndim != 5:
+			W5, style_r = const_val(mul.input[1]), mul.input[0]
+		if W5 is None or W5.ndim != 5:
+			out_nodes.append(node)
+			continue
+
+		# Past this point the shape is confirmed: bail loudly rather than skip, exactly as
+		# rewrite_modulated_convs does once IT has committed to a match.
+		expect(one is not None and eps is not None, node, 'demod eps/numerator not constant')
+		sr = prod.get(style_r)
+		expect(sr is not None and sr.op_type == 'Reshape', node, 'style is not reshaped')
+		style = sr.input[0]
+
+		_, O, I, kh, kw = W5.shape
+		b = node.name
+
+		# A[o,i] = sum over the kernel window of W^2 -- W5 here already carries whatever
+		# export-time constant (edtalk's equalized-LR scale) the raw Mul used, so this
+		# reproduces the ORIGINAL demod factor exactly, not a rescaled one.
+		A = (W5[0].astype(numpy.float64) ** 2).sum(axis=(2, 3))          # [O, I]
+		an = b + '/ff_A'
+		new_inits.append(numpy_helper.from_array(
+			numpy.ascontiguousarray(A.T.astype(numpy.float32)), an))     # [I, O]
+		en = b + '/ff_eps'
+		new_inits.append(numpy_helper.from_array(
+			numpy.full((O,), float(numpy.asarray(eps).ravel()[0]), numpy.float32), en))
+		on = b + '/ff_one'
+		new_inits.append(numpy_helper.from_array(numpy.asarray(one, numpy.float32), on))
+
+		s2, t2, r = (b + '/ff_' + k for k in ('s2', 't2', 'r'))
+		out_nodes += [
+			helper.make_node('Mul', [style, style], [s2], name=b + '/ff_s2'),
+			helper.make_node('Gemm', [s2, an, en], [t2], name=b + '/ff_demod',
+							 alpha=1.0, beta=1.0, transA=0, transB=0),
+			helper.make_node('Sqrt', [t2], [r], name=b + '/ff_demod_sqrt'),
+			# same output name as the node being replaced: nothing downstream changes.
+			helper.make_node('Div', [on, r], [node.output[0]], name=b + '/ff_demod_div'),
+		]
+		n_rewritten += 1
+
+	print('  rewrote %d demodulation factors to a static-A Gemm' % n_rewritten)
+	if expect_total is not None and n_rewritten != expect_total:
+		print('  WARNING: expected %d demod factors, matched %d' % (expect_total, n_rewritten))
+
+	del g.node[:]
+	g.node.extend(out_nodes)
+	g.initializer.extend(new_inits)
+	return n_rewritten
+
+
+# ---------------------------------------------------------------------- gpen
+
+def do_gpen():
+	"""`gpen_bfr_256`, the face enhancer: make every modulated conv kernel STATIC.
+
+	GPEN is a StyleGAN2 generator, and StyleGAN2 modulates its convolution weights with the
+	style vector at RUNTIME.  As exported, 20 of the 45 convs take a computed kernel:
+
+	    style -> Mul(W) -> Pow/ReduceSum/Sqrt/Div (demodulate) -> Reshape -> Conv
+
+	HTP maps Conv only when the kernel is a static parameter, and those 20 carry 7.44 of
+	the graph's 8.57 GMAC -- 87% of the model would not lower.  The chain also builds 97
+	rank>=5 activations (12 at rank 6, e.g. [1,256,256,3,3]), where the converter's
+	elementwise broadcast path is `max_rank <= 5` and the arch linter's MAX_RANK is 4.
+
+	The refactor is exact algebra, not an approximation.  Modulation scales per INPUT
+	channel, demodulation per OUTPUT channel, and batch is 1 (hence group 1), so
+
+	    Conv(x, W[o,i,..] * s[i])[o] * d[o]  ==  Conv(x * s[i], W)[o] * d[o]
+
+	and the demodulator itself drops out of rank 5, because
+
+	    d[o] = 1/sqrt( sum_{i,kh,kw} (W[o,i,kh,kw] * s[i])^2 + eps )
+	         = 1/sqrt( sum_i s[i]^2 * A[o,i] + eps ),  A[o,i] = sum_{kh,kw} W[o,i,kh,kw]^2
+
+	A is CONSTANT, so the whole demodulator becomes one [1,I]x[I,O] MatMul.  Every kernel
+	ends up static, every rank-5/6 tensor disappears, and the Pow/ReduceSum over a 5-D
+	weight goes with it.
+
+	The 20 split cleanly and the code asserts it: 13 demodulated convs (7 Conv 3x3 + 6
+	ConvTranspose 3x3 s2) that carry NO bias, and 7 `to_rgb` 1x1 convs that carry a bias
+	and are modulated but NOT demodulated.  That matters -- a bias must be added AFTER the
+	demodulation scale, never folded through it, so a demodulated conv that also had a bias
+	would need a code path this does not have.  It bails instead of guessing.
+
+	NOT bit-exact: the two sums reassociate.  verify_surgery.py measures the cost.
+	"""
+	import onnxsim
+
+	m = load('gpen_bfr_256')
+
+	# Fold FIRST.  The export declares 128 initialisers as graph inputs as well (the old
+	# PyTorch pattern onnxsim warns about), and every blur kernel reaches its Conv through a
+	# Reshape, which makes 18 more convs look dynamic than are.  Folding takes dynamic
+	# kernels 38 -> 20 and leaves exactly the modulated ones, so the matcher sees a clean
+	# pattern instead of having to tell the two apart.
+	s, ok = onnxsim.simplify(m, overwrite_input_shapes={'input': [1, 3, 256, 256]})
+	if not ok:
+		sys.exit('  onnxsim reported failure (pre-pass)')
+	m = s
+
+	# ---- first pass: every modulated conv kernel becomes static (shared with do_edtalk)
+	n_demod, n_plain, n_bias_folded = rewrite_modulated_convs(m, expect_total=20)
+	if n_bias_folded:
+		sys.exit('  gpen: %d demodulated conv(s) carried a bias -- previously unseen, check '
+				 'the fold' % n_bias_folded)
+	g = m.graph
 
 	# ---- second pass: the six `to_rgbs.N/upsample` blocks, the last rank-6 tensors
 	#
@@ -1340,12 +1510,12 @@ def do_gpen():
 # -------------------------------------------------------------------- edtalk
 
 def do_edtalk():
-	"""`edtalk_256`, the 256x256 lip syncer.  Two surgeries, and the FIRST one is a bug.
+	"""`edtalk_256`, the 256x256 lip syncer.  Two BUG fixes, then two reassociating surgeries.
 
 	Screened and rejected once on an op census of the RAW graph -- 4772 nodes, 2 `If`,
 	65 `ConstantOfShape` -- which was the wrong screen.  onnxsim with the three input
 	shapes pinned folds it to 1170 nodes and BOTH `If` nodes away, which is the same step
-	that was the entire surgery for `nsfw_2`.  What is left needs two fixes:
+	that was the entire surgery for `nsfw_2`.  What is left needs two correctness fixes:
 
 	1. ⚠ **onnxsim 0.4.36 mis-lowers one node, and the graph it writes is WRONG.**  Inside
 	   the `If` branch it folds is a `Reshape(conv_out, [-1, 0])` -- torch's `view(-1, 0)`
@@ -1371,9 +1541,32 @@ def do_edtalk():
 	   shape inference cannot size it (`unk__471`).  Folding it to an initializer is the
 	   same move `do_nsfw` makes wholesale, and it takes the last unconvertible op out.
 
-	Verified by running the result against the RAW graph in onnxruntime: **bit-identical**,
-	max abs 0.0 over three random inputs.  That check is the point of this task -- the
-	rejection this reverses was made without it, and so was the broken graph in fix 1.
+	Both are exact -- the code checks it, `worst_snr`/`worst` at the bottom read 0.0 / 347 dB
+	with the two surgeries below disabled. Then two reassociating surgeries that are NOT
+	exact, each measured and each sharing the ALGEBRA with `do_gpen` even where the graph
+	shape does not:
+
+	3. **The demodulation-factor surgery** (`rewrite_demod_factor`). `do_gpen`'s defect --
+	   90.4% of cycles were `Eltwise_Binary` ops rebuilding a `[1,512,512,3,3]` modulated
+	   weight tensor per conv per frame, which is why edtalk measured 63.32 ms/frame on
+	   device where GMAC alone predicted ~14.7 -- but NOT `do_gpen`'s graph shape, checked
+	   before assumed: `rewrite_modulated_convs` matches zero nodes on this export, because
+	   this export already modulates the ACTIVATION and hands Conv a plain static weight
+	   (onnxsim folds that reshape once shapes are pinned -- there is no dynamic Conv kernel
+	   here to rewrite). The `[1,512,512,3,3]` tensor exists only to be squared and reduced
+	   into the demod factor `d[o]`, in a chain applied AFTER the conv rather than baked into
+	   its kernel. Same identity, `d[o] = 1/sqrt(sum_i s[i]^2 A[o,i] + eps)` with A constant,
+	   collapsing to one static `[1,I]x[I,O]` MatMul -- but the rewire only replaces the Div
+	   node's producer chain, in place, under the SAME output name, and leaves the Conv and
+	   its activation-side Mul untouched because they were already correct.
+	4. `collapse_blur_blocks`, gpen's 28-block surgery re-run here. edtalk's blocks carry NO
+	   transposes, so its `Pad` speaks NCHW where gpen's speaks NHWC -- the layout is decided
+	   by what was matched, not assumed.
+
+	Both cost real, measured dB (float32 reassociation -- the same products summed in a
+	different order), and the check at the bottom is exactly the one the original screen
+	never made: run the surgery's OUTPUT against the raw graph in onnxruntime, not just count
+	nodes.
 	"""
 	import onnxsim
 
@@ -1438,7 +1631,21 @@ def do_edtalk():
 		if left:
 			sys.exit('  %d %s survived the fold' % (left, op))
 
-	# 3. the StyleGAN2 blur blocks, the same surgery gpen needed and for the same reason.
+	# 3. the demodulation factor becomes a static-A Gemm instead of a per-frame
+	#    [1,512,512,3,3] tensor -- measured at 63.32 ms/frame on device without it, 90.4% of
+	#    cycles on Eltwise_Binary ops building and squaring that tensor.
+	#    ⚠ `rewrite_modulated_convs` (do_gpen's fix, verbatim) matches ZERO nodes here --
+	#    checked, not assumed. edtalk's export already modulates the ACTIVATION and feeds
+	#    Conv a plain static weight (onnxsim folds that reshape once shapes are pinned), so
+	#    there is no dynamic Conv kernel to rewrite. The expensive tensor exists only to feed
+	#    the demod factor; see rewrite_demod_factor's docstring for the graph shape and why
+	#    it needed its own matcher rather than reusing gpen's.
+	n_rewritten = rewrite_demod_factor(s, expect_total=13)
+	if n_rewritten == 0:
+		sys.exit('  edtalk: matched no demod factors -- did the export change shape?')
+	g = s.graph
+
+	# 4. the StyleGAN2 blur blocks, the same surgery gpen needed and for the same reason.
 	#    The FLOAT build without this measured transpose/compute 1.92 against the 0.25
 	#    defect line (trap #9) with spill_bytes 2.7 GB on an 8 MB VTCM, and its ten largest
 	#    transposes were all named `..._conv_blur_Reshape_6` -- gpen's symptom exactly.
@@ -1476,12 +1683,13 @@ def do_edtalk():
 		worst_snr = min(worst_snr, float(
 			10 * numpy.log10((ra ** 2).sum() / max((d ** 2).sum(), 1e-30))))
 	print('  vs the raw graph: %.2f dB, max abs %.3e over 3 inputs' % (worst_snr, worst))
-	# The first three surgeries are EXACT and measured so: without the blur collapse this
-	# same check reads 0.0 / 347 dB.  The collapse then costs ~121 dB, which is float32
-	# reassociation -- a grouped conv sums the same products in a different order -- and is
-	# the same family as do_gpen's 107.9 dB modulated-conv rewrite.  Anything materially
-	# below that is a bug, not rounding: the deploy targets here are 30-45 dB and would
-	# hide one completely.
+	# The two bug fixes are EXACT: with both reassociating surgeries disabled this same
+	# check reads 0.0 / 347 dB. The modulated-conv rewrite and the blur collapse EACH
+	# reassociate a float32 sum, gpen's alone costing 107.9 dB and 121 dB respectively, and
+	# stacked here they do not simply add -- the combined floor is set by whichever error is
+	# larger, so ~100+ dB is still the expectation, not half of it. Anything materially below
+	# that is a bug, not rounding: the deploy targets here are 30-45 dB and would hide one
+	# completely.
 	if worst_snr < 100.0:
 		print('  WARNING: %.2f dB is too low for reassociation -- a surgery is WRONG'
 			  % worst_snr)

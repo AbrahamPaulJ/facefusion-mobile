@@ -6,12 +6,17 @@ mouth boxes. Those are fine for asking "does the context binary compute onnxrunt
 function" and useless for quantisation, where the encodings are fitted to the input
 distribution and a wrong distribution is a wrong graph (trap #4).
 
-This produces the REAL thing:
+This produces the REAL thing, and the two models take a DIFFERENT crop -- checked against
+lip_syncer/core.py, not assumed, after a wrong assumption here fed a wrong distribution to
+edtalk's W8A16 calibration for two sessions running (2026-09-04):
 
-  target  the frame -> ffhq_512 by landmark-5 -> the 68 points transformed INTO that crop
-          -> create_bounding_box -> warp to 96x96 -> masked half concatenated with the
-          reference half, exactly as lip_syncer/core.py:prepare_crop_frame does
-  source  the mel windows mel_reference.py produces, which are upstream's own arithmetic
+  wav2lip  frame -> ffhq_512 by landmark-5 -> the 68 points transformed INTO that crop ->
+           create_bounding_box -> warp to 96x96 -> masked half concatenated with the
+           reference half, BGR throughout
+  edtalk   frame -> ffhq_512 by landmark-5 -> the WHOLE 512 crop resized (not warped) to
+           256x256 -> RGB, no mask, no concatenation -- upstream's `sync_lip` never
+           computes a bounding box for this model at all
+  source   the mel windows mel_reference.py produces, which are upstream's own arithmetic
 
 Everything about the face comes from `run_reference`, which is the golden host path -- this
 file must never reimplement a stage of it. What it does add is the three upstream helpers
@@ -72,13 +77,19 @@ def prepare_crop_frame(area_frame, model):
 	"""lip_syncer/core.py:prepare_crop_frame.
 
 	wav2lip: the masked copy comes FIRST and the reference second, and the mask is the
-	BOTTOM half -- upstream zeroes `prepare_vision_frame[:, 48:]` on an HWC array.
+	BOTTOM half -- upstream zeroes `prepare_vision_frame[:, 48:]` on an HWC array. BGR
+	throughout -- upstream never flips it for this model.
 
 	edtalk: no mask and no concatenation. It is a generator over the WHOLE face, not an
-	inpainter for a hidden mouth, so it takes the crop as it stands -- which is also why
-	its crop is 256 and its mouth is not upscaled 3x from 96.
+	inpainter for a hidden mouth. ⚠ RGB, not BGR -- `crop_vision_frame[:, :, ::-1] / 255.0`
+	in the real lip_syncer/core.py. A session that ported this without checking upstream
+	fed it BGR for two sessions and calibrated THIS SCRIPT the same wrong way; both are
+	fixed together here, since a calibration set in the wrong channel order fits the W8A16
+	encodings to a distribution the corrected app never sends it.
 	"""
 	size, _, _ = MODELS[model]
+	if model == 'edtalk':
+		area_frame = area_frame[:, :, ::-1]
 	frame = numpy.expand_dims(area_frame, axis=0)
 	if model == 'wav2lip':
 		masked = frame.copy()
@@ -119,13 +130,19 @@ def main():
 		                                (f.bounding_box[3] - f.bounding_box[1]))
 		crop, affine = ref.warp_face_by_face_landmark_5(
 			frame, face.landmark_5_68, 'ffhq_512', (CROP_SIZE, CROP_SIZE))
-		# cv2.transform(landmark_68, affine_matrix): the 68 points INTO crop space.
-		lm = cv2.transform(face.landmark_68.reshape(1, -1, 2), affine).reshape(-1, 2)
-		box = create_bounding_box(lm)
-		area, _ = warp_face_by_bounding_box(crop, box, size)
-		targets.append(prepare_crop_frame(area, args.model))
-		print('  frame %2d: box %.0f,%.0f %.0fx%.0f' %
-		      (i + 1, box[0], box[1], box[2] - box[0], box[3] - box[1]))
+		if args.model == 'edtalk':
+			# No bounding box for this model -- upstream resizes the WHOLE 512 crop.
+			area = cv2.resize(crop, (size, size), interpolation=cv2.INTER_AREA)
+			targets.append(prepare_crop_frame(area, args.model))
+			print('  frame %2d: whole crop -> %dx%d' % (i + 1, size, size))
+		else:
+			# cv2.transform(landmark_68, affine_matrix): the 68 points INTO crop space.
+			lm = cv2.transform(face.landmark_68.reshape(1, -1, 2), affine).reshape(-1, 2)
+			box = create_bounding_box(lm)
+			area, _ = warp_face_by_bounding_box(crop, box, size)
+			targets.append(prepare_crop_frame(area, args.model))
+			print('  frame %2d: box %.0f,%.0f %.0fx%.0f' %
+			      (i + 1, box[0], box[1], box[2] - box[0], box[3] - box[1]))
 
 	if not targets:
 		sys.exit('captured nothing -- no faces in any frame')
