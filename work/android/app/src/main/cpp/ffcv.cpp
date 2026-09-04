@@ -53,6 +53,61 @@ inline void sampleBilinear(const T* src, int sw, int sh, float x, float y, Borde
     }
 }
 
+#ifdef FFCV_NEON
+// A zero pixel for BORDER_CONSTANT's rejected taps. They are given a weight of ZERO rather
+// than being skipped, so the sum keeps the order the scalar sampler used; the pointer only
+// has to be four readable bytes.
+const uint8_t kZeroPx[4] = {0, 0, 0, 0};
+
+/**
+ * The four bilinear taps of a 3-channel uint8 image, accumulated into b, g, r in lanes 0-2.
+ *
+ * This is the shape of nearly all the remaining CPU geometry: warpAffine into the three
+ * model crops and resizeToCHW into the detector's input are the same twelve scattered byte
+ * loads, twelve multiplies and nine adds per pixel, differing only in how they arrive at
+ * the taps. One lane per channel collapses that to four widening loads and four
+ * multiply-accumulates.
+ *
+ * ⚠ Reads FOUR bytes from a THREE-byte pixel. In bounds everywhere except the image's
+ * final pixel, so every caller must test for that tap and fall back to scalar -- the check
+ * is on p11 alone, which is the largest index of the four.
+ */
+inline float32x4_t tapsU8x3(const uint8_t* p00, const uint8_t* p10,
+                            const uint8_t* p01, const uint8_t* p11,
+                            float w00, float w10, float w01, float w11) {
+  uint32_t a, b, c, d;
+  std::memcpy(&a, p00, 4);
+  std::memcpy(&b, p10, 4);
+  std::memcpy(&c, p01, 4);
+  std::memcpy(&d, p11, 4);
+  const uint32x4_t packed = {a, b, c, d};
+  const uint8x16_t bytes = vreinterpretq_u8_u32(packed);
+  const uint16x8_t lo = vmovl_u8(vget_low_u8(bytes));    // taps 00, 10
+  const uint16x8_t hi = vmovl_u8(vget_high_u8(bytes));   // taps 01, 11
+  float32x4_t acc = vmulq_n_f32(vcvtq_f32_u32(vmovl_u16(vget_low_u16(lo))), w00);
+  acc = vfmaq_n_f32(acc, vcvtq_f32_u32(vmovl_u16(vget_high_u16(lo))), w10);
+  acc = vfmaq_n_f32(acc, vcvtq_f32_u32(vmovl_u16(vget_low_u16(hi))), w01);
+  acc = vfmaq_n_f32(acc, vcvtq_f32_u32(vmovl_u16(vget_high_u16(hi))), w11);
+  return acc;
+}
+
+// vcvtaq_s32_f32 rounds to nearest with ties away from zero, which is exactly std::lround
+// -- the rounding every uint8 output in this file uses. Clamped to 0..255 in the vector.
+inline void storeU8x3(uint8_t* out, float32x4_t v) {
+  int32x4_t i = vcvtaq_s32_f32(v);
+  i = vminq_s32(vmaxq_s32(i, vdupq_n_s32(0)), vdupq_n_s32(255));
+  out[0] = (uint8_t)vgetq_lane_s32(i, 0);
+  out[1] = (uint8_t)vgetq_lane_s32(i, 1);
+  out[2] = (uint8_t)vgetq_lane_s32(i, 2);
+}
+
+// FFCVSCALAR=1 disables every NEON path in this file at once, for the A/B.
+inline bool neonDisabled() {
+  static const bool v = getenv("FFCVSCALAR") != nullptr;
+  return v;
+}
+#endif  // FFCV_NEON
+
 }  // namespace
 
 // ---------------------------------------------------------------- transforms
@@ -129,6 +184,54 @@ Affine umeyama(const float* src, const float* dst, int n) {
 Image warpAffine(const Image& src, const Affine& M, int dw, int dh, Border border) {
   Image dst(dw, dh, src.c);
   Affine inv = invertAffine(M);
+#ifdef FFCV_NEON
+  // The sample COORDINATES stay in double and keep the exact expression the scalar path
+  // uses -- deliberately not hoisted per row. Only the accumulate is vectorised, so the
+  // only arithmetic difference is vfma rounding a multiply-add once where a scalar pair
+  // rounds twice, and these crops feed three graphs whose inputs are worth not drifting.
+  if (src.c == 3 && !neonDisabled()) {
+    const int sw = src.w, sh = src.h;
+    const uint8_t* s = src.data.data();
+    const size_t nbytes = (size_t)sw * sh * 3;
+    for (int y = 0; y < dh; ++y) {
+      uint8_t* out = dst.row(y);
+      for (int x = 0; x < dw; ++x) {
+        const float sxf = (float)(inv(0, 0) * x + inv(0, 1) * y + inv(0, 2));
+        const float syf = (float)(inv(1, 0) * x + inv(1, 1) * y + inv(1, 2));
+        const int x0 = (int)std::floor(sxf), y0 = (int)std::floor(syf);
+        const float ax = sxf - x0, ay = syf - y0;
+        float w00 = (1 - ax) * (1 - ay), w10 = ax * (1 - ay);
+        float w01 = (1 - ax) * ay,       w11 = ax * ay;
+        const uint8_t *p00, *p10, *p01, *p11;
+        if (border == BORDER_REPLICATE) {
+          const int ix0 = iclamp(x0, 0, sw - 1), ix1 = iclamp(x0 + 1, 0, sw - 1);
+          const int iy0 = iclamp(y0, 0, sh - 1), iy1 = iclamp(y0 + 1, 0, sh - 1);
+          p00 = s + ((size_t)iy0 * sw + ix0) * 3;
+          p10 = s + ((size_t)iy0 * sw + ix1) * 3;
+          p01 = s + ((size_t)iy1 * sw + ix0) * 3;
+          p11 = s + ((size_t)iy1 * sw + ix1) * 3;
+        } else {
+          const bool x0ok = (unsigned)x0 < (unsigned)sw, x1ok = (unsigned)(x0 + 1) < (unsigned)sw;
+          const bool y0ok = (unsigned)y0 < (unsigned)sh, y1ok = (unsigned)(y0 + 1) < (unsigned)sh;
+          p00 = (x0ok && y0ok) ? s + ((size_t)y0 * sw + x0) * 3 : (w00 = 0.f, kZeroPx);
+          p10 = (x1ok && y0ok) ? s + ((size_t)y0 * sw + x0 + 1) * 3 : (w10 = 0.f, kZeroPx);
+          p01 = (x0ok && y1ok) ? s + ((size_t)(y0 + 1) * sw + x0) * 3 : (w01 = 0.f, kZeroPx);
+          p11 = (x1ok && y1ok) ? s + ((size_t)(y0 + 1) * sw + x0 + 1) * 3 : (w11 = 0.f, kZeroPx);
+        }
+        // The four-byte read must not run past the buffer; only p11 can reach its end.
+        if (p11 != kZeroPx && (size_t)(p11 - s) + 4 > nbytes) {
+          float px[4];
+          sampleBilinear<uint8_t, 3>(s, sw, sh, sxf, syf, border, px);
+          for (int ch = 0; ch < 3; ++ch)
+            out[x * 3 + ch] = (uint8_t)iclamp((int)std::lround(px[ch]), 0, 255);
+          continue;
+        }
+        storeU8x3(out + x * 3, tapsU8x3(p00, p10, p01, p11, w00, w10, w01, w11));
+      }
+    }
+    return dst;
+  }
+#endif
   for (int y = 0; y < dh; ++y) {
     uint8_t* out = dst.row(y);
     for (int x = 0; x < dw; ++x) {
@@ -249,6 +352,18 @@ void resizeToCHW(const Image& src, int dw, int dh, int S, float* dst) {
       const uint8_t* p01 = r1 + (size_t)xs0[x] * 3;
       const uint8_t* p11 = r1 + (size_t)xs1[x] * 3;
 
+#ifdef FFCV_NEON
+      // Same four taps, same order, one lane per channel. The tail guard is the last
+      // pixel of the source, exactly as in warpAffine.
+      if (!neonDisabled() && (size_t)(p11 - sdata) + 4 <= (size_t)sw * sh * 3) {
+        int32x4_t vi = vcvtaq_s32_f32(tapsU8x3(p00, p10, p01, p11, w00, w10, w01, w11));
+        vi = vminq_s32(vmaxq_s32(vi, vdupq_n_s32(0)), vdupq_n_s32(255));
+        o0[x] = kInv255[vgetq_lane_s32(vi, 0)];
+        o1[x] = kInv255[vgetq_lane_s32(vi, 1)];
+        o2[x] = kInv255[vgetq_lane_s32(vi, 2)];
+        continue;
+      }
+#endif
       const float b = w00 * p00[0] + w10 * p10[0] + w01 * p01[0] + w11 * p11[0];
       const float g = w00 * p00[1] + w10 * p10[1] + w01 * p01[1] + w11 * p11[1];
       const float r = w00 * p00[2] + w10 * p10[2] + w01 * p01[2] + w11 * p11[2];
