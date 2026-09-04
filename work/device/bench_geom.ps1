@@ -77,13 +77,23 @@ for ($r = 1; $r -le $Rounds; $r++) {
 }
 
 Write-Output ""
-Write-Output "== min-of-$Rounds, ms/frame =="
-Write-Output ("{0,-10} {1,10} {2,10} {3,10}" -f "bucket", $LabelA, $LabelB, "delta")
+Write-Output "== $Rounds rounds, ms/frame =="
+Write-Output "PAIRED is the headline: the mean of (B - A) taken WITHIN each round, which"
+Write-Output "cancels the monotone thermal drift across the run. min-of-N does not --"
+Write-Output "the coolest slot is always round 1's first run, so it flatters whichever"
+Write-Output "label goes first, and it once reported 3.24 where the paired estimate was 1.65."
+Write-Output ("{0,-10} {1,10} {2,10} {3,10} {4,10}" -f "bucket", $LabelA, $LabelB, "min-delta", "PAIRED")
 foreach ($k in @('detprep','warp','tensor','mask','paste','TOTAL')) {
     if (-not $res.ContainsKey($k)) { continue }
     $a = if ($res[$k].ContainsKey($LabelA)) { ($res[$k][$LabelA] | Measure-Object -Minimum).Minimum } else { [double]::NaN }
     $b = if ($res[$k].ContainsKey($LabelB)) { ($res[$k][$LabelB] | Measure-Object -Minimum).Minimum } else { [double]::NaN }
     $ra = if ($res[$k].ContainsKey($LabelA)) { ($res[$k][$LabelA] | ForEach-Object { "{0:F2}" -f $_ }) -join "/" } else { "" }
     $rb = if ($res[$k].ContainsKey($LabelB)) { ($res[$k][$LabelB] | ForEach-Object { "{0:F2}" -f $_ }) -join "/" } else { "" }
-    Write-Output ("{0,-10} {1,10:F2} {2,10:F2} {3,10:F2}   {4}  vs  {5}" -f $k, $a, $b, ($b - $a), $ra, $rb)
+    # Pair the two runs of each round -- they sit adjacent in time, so a drift that is
+    # linear over the round cancels when both orders are averaged together.
+    $pairs = @()
+    $na = $res[$k][$LabelA].Count; $nb = $res[$k][$LabelB].Count
+    for ($i = 0; $i -lt [Math]::Min($na, $nb); $i++) { $pairs += ($res[$k][$LabelB][$i] - $res[$k][$LabelA][$i]) }
+    $paired = if ($pairs.Count) { ($pairs | Measure-Object -Average).Average } else { [double]::NaN }
+    Write-Output ("{0,-10} {1,10:F2} {2,10:F2} {3,10:F2} {4,10:F2}   {5}  vs  {6}" -f $k, $a, $b, ($b - $a), $paired, $ra, $rb)
 }

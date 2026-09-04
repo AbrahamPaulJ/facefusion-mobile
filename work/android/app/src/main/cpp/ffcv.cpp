@@ -3,9 +3,15 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <numeric>
+
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
+#define FFCV_NEON 1
+#endif
 
 namespace ffcv {
 namespace {
@@ -580,17 +586,52 @@ void pasteBackRoi(Image& frame, const MatF& crop, const MatF& mask, const Affine
   const float* mdata = mask.data.data();
   const float* cdata = crop.data.data();
 
-  for (int y = 0; y < ph; ++y) {
+  // TILED, and this is where the time actually was. The affine is a rotation, so walking
+  // the destination in raster order walks the crop DIAGONALLY: a destination row touches a
+  // new crop row every few pixels, uses one or two of the five pixels in each 64-byte line,
+  // and by the time the next destination row wants that line it has been evicted. Measured
+  // at ~300 cycles per pixel for about 30 flops and 16 loads -- the arithmetic was never
+  // the cost, and no amount of SIMD would have found that out.
+  //
+  // A 64x64 destination tile touches roughly 64x64 of the crop, ~49 KB of float RGB, which
+  // stays resident while the tile is worked. Every pixel's computation is UNCHANGED and
+  // independent of every other, so this reorders nothing arithmetically: the output is
+  // bit-identical to the untiled loop, not merely within tolerance.
+  //
+  // FFPASTETILE overrides the size, 0 disabling tiling, so the sweep that chose 64 can be
+  // rerun on other silicon without a rebuild.
+  static const int kTile = [] {
+    const char* e = getenv("FFPASTETILE");
+    return e ? atoi(e) : 64;
+  }();
+  const int tile = kTile > 0 ? kTile : (pw > ph ? pw : ph);
+
+  // FFPASTESCALAR=1 keeps the scalar blend, so the NEON path is A/B-able in one binary.
+  static const bool neonOff = getenv("FFPASTESCALAR") != nullptr;
+
+  // FFPASTEDBG reports the box actually being blended. Guessing at it produced two wrong
+  // hypotheses in a row -- a working set that would thrash the cache, then a tile size to
+  // fix it -- and the tiling measured as nothing at all.
+  static const bool kDbg = getenv("FFPASTEDBG") != nullptr;
+  static int dbgLeft = 3;
+  const bool dbg = kDbg && dbgLeft > 0;
+  long nOutside = 0, nZero = 0, nBlend = 0;
+
+  for (int ty = 0; ty < ph; ty += tile) {
+  const int tyEnd = ty + tile < ph ? ty + tile : ph;
+  for (int tx = 0; tx < pw; tx += tile) {
+  const int txEnd = tx + tile < pw ? tx + tile : pw;
+  for (int y = ty; y < tyEnd; ++y) {
     uint8_t* dst = frame.row(y1 + y) + (size_t)x1 * 3;
     const double bx = W(0, 1) * y + W(0, 2);
     const double by = W(1, 1) * y + W(1, 2);
-    for (int x = 0; x < pw; ++x) {
+    for (int x = tx; x < txEnd; ++x) {
       const float sxf = (float)(W(0, 0) * x + bx);
       const float syf = (float)(W(1, 0) * x + by);
       const int px0 = (int)std::floor(sxf), py0 = (int)std::floor(syf);
 
       // Wholly outside the mask: alpha is 0 and the blend is the identity.
-      if (px0 + 1 < 0 || px0 >= mw || py0 + 1 < 0 || py0 >= mh) continue;
+      if (px0 + 1 < 0 || px0 >= mw || py0 + 1 < 0 || py0 >= mh) { if (dbg) ++nOutside; continue; }
 
       const float ax = sxf - px0, ay = syf - py0;
       const float w00 = (1 - ax) * (1 - ay), w10 = ax * (1 - ay);
@@ -615,7 +656,8 @@ void pasteBackRoi(Image& frame, const MatF& crop, const MatF& mask, const Affine
         a += 0.f; a += 0.f;
       }
       a = clampf(a, 0.f, 1.f);
-      if (a == 0.f) continue;      // exact identity, so the crop sampler is skipped
+      if (a == 0.f) { if (dbg) ++nZero; continue; }   // exact identity: skip the crop sampler
+      if (dbg) ++nBlend;
 
       // BORDER_REPLICATE: clamp the taps, which is what cv2 does and what the templated
       // sampler did for this border.
@@ -628,12 +670,50 @@ void pasteBackRoi(Image& frame, const MatF& crop, const MatF& mask, const Affine
 
       const float ia = 1.f - a;
       uint8_t* d = dst + x * 3;
+#ifdef FFCV_NEON
+      // The three channels ARE the vector. A destination pixel needs 12 loads, 12
+      // multiplies and 9 adds to gather its four taps, and every one of them is the same
+      // operation on b, g and r -- so one lane per channel turns that into four loads and
+      // four multiply-accumulates, with the fourth lane simply carried and discarded.
+      //
+      // ⚠ `vld1q_f32` reads FOUR floats from a three-float pixel. That is deliberate and
+      // in bounds everywhere except the final pixel of the crop, where it would run one
+      // float past the vector's storage -- so that one case falls back to scalar. It is
+      // reached only by a sample landing on the extreme bottom-right corner.
+      if (!neonOff && (size_t)iy1 * cw + ix1 + 1 < (size_t)cw * ch_) {
+        float32x4_t acc = vmulq_n_f32(vld1q_f32(p00), w00);
+        acc = vfmaq_n_f32(acc, vld1q_f32(p10), w10);
+        acc = vfmaq_n_f32(acc, vld1q_f32(p01), w01);
+        acc = vfmaq_n_f32(acc, vld1q_f32(p11), w11);
+        float32x4_t dv = {(float)d[0], (float)d[1], (float)d[2], 0.f};
+        float32x4_t res = vmulq_n_f32(dv, ia);
+        res = vfmaq_n_f32(res, acc, a);
+        // vcvtq_s32_f32 truncates toward zero, which is the numpy astype this mirrors.
+        int32x4_t vi = vcvtq_s32_f32(res);
+        vi = vminq_s32(vmaxq_s32(vi, vdupq_n_s32(0)), vdupq_n_s32(255));
+        d[0] = (uint8_t)vgetq_lane_s32(vi, 0);
+        d[1] = (uint8_t)vgetq_lane_s32(vi, 1);
+        d[2] = (uint8_t)vgetq_lane_s32(vi, 2);
+      } else
+#endif
       for (int c = 0; c < 3; ++c) {
         const float cv = w00 * p00[c] + w10 * p10[c] + w01 * p01[c] + w11 * p11[c];
         const float v = d[c] * ia + cv * a;
         d[c] = (uint8_t)iclamp((int)v, 0, 255);   // numpy astype = truncate
       }
     }
+  }
+  }
+  }
+  if (dbg) {
+    --dbgLeft;
+    const long tot = (long)pw * ph;
+    fprintf(stderr,
+            "[paste] box %dx%d = %ld px  crop %dx%d  |  outside %ld (%.1f%%)  "
+            "zero-alpha %ld (%.1f%%)  blended %ld (%.1f%%)\n",
+            pw, ph, tot, cw, ch_,
+            nOutside, 100.0 * nOutside / tot, nZero, 100.0 * nZero / tot,
+            nBlend, 100.0 * nBlend / tot);
   }
 }
 
