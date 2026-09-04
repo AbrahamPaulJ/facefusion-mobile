@@ -415,9 +415,13 @@ Java_com_facefusion_mobile_NativePipe_processFrame(JNIEnv* env, jclass, jbyteArr
   ffcv::Image img(w, h, 3);
   env->GetByteArrayRegion(jBgr, 0, (jsize)img.data.size(), (jbyte*)img.data.data());
   auto faces = g_pipe->analyse(img);
-  if (!faces.empty() && !g_pipe->swapAll(img, faces)) { g_err = g_pipe->error(); return -1; }
-  if (!faces.empty())
+  if (!faces.empty()) {
+    if (!g_pipe->swapAll(img, faces)) { g_err = g_pipe->error(); return -1; }
+    // No lip sync on this path (see processFrameAt), so this is straight after the swap
+    // -- still its own pass, never fused; see Pipeline::enhance's doc.
+    if (!g_pipe->enhance(img, faces)) { g_err = g_pipe->error(); return -1; }
     env->SetByteArrayRegion(jBgr, 0, (jsize)img.data.size(), (const jbyte*)img.data.data());
+  }
   return (jint)faces.size();
 }
 
@@ -480,6 +484,10 @@ Java_com_facefusion_mobile_NativePipe_processFrameAt(JNIEnv* env, jclass, jbyteA
         return -1;
       }
     }
+    // Always LAST: after lip sync when there was one, so the enhancer gets the final
+    // word on a face edtalk's whole-face regeneration may have softened. A no-op when
+    // the enhancer is off or not loaded -- see Pipeline::enhance's doc.
+    if (!g_pipe->enhance(img, faces)) { g_err = g_pipe->error(); return -1; }
     env->SetByteArrayRegion(jBgr, 0, (jsize)img.data.size(), (const jbyte*)img.data.data());
   }
   return (jint)faces.size();

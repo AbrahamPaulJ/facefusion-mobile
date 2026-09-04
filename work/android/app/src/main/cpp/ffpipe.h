@@ -231,8 +231,27 @@ class Pipeline {
    */
   bool syncLip(ffcv::Image& frame, const std::vector<Face>& faces, const float* melWindow);
 
-  // Swap every face in `frame`, in place.
+  // Swap every face in `frame`, in place. Never enhances -- see `enhance()`, always
+  // called separately now, after `syncLip` when the caller has one.
   bool swapAll(ffcv::Image& frame, const std::vector<Face>& faces);
+
+  /**
+   * The enhancer, as its OWN pass -- ALWAYS called separately, never fused into
+   * `swapAll`, so it runs LAST: after `syncLip` when the caller has one, otherwise
+   * straight after `swapAll`. Re-warps `frame` (whatever is in it NOW) from the target
+   * landmarks, enhances, pastes back a second time. This is what upstream's own
+   * face_enhancer actually does -- a genuinely separate processor pass, not a shortcut
+   * fused into the swap crop the way an earlier version of this file had it.
+   *
+   * Measured, not assumed: fusing enhance before lip sync meant edtalk's whole-face
+   * regeneration overwrote nearly everything the enhancer had just sharpened, visibly --
+   * a side-by-side comparison showed noticeably softer skin texture, eyes and eyebrows
+   * with the fused order against the same frame enhanced after lip sync instead.
+   *
+   * A no-op returning true when `cfg.faceEnhance` is off or the model is not loaded --
+   * same "absent is not a failure" convention as `syncLip`.
+   */
+  bool enhance(ffcv::Image& frame, const std::vector<Face>& faces);
 
   const std::string& error() const { return err_; }
   // Cumulative per-stage milliseconds, for the CLI's report.

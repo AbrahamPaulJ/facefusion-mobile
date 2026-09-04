@@ -1001,78 +1001,108 @@ bool Pipeline::swapAll(ffcv::Image& frame, const std::vector<Face>& faces) {
       msGeom += nowMs() - t0;
     }
 
-    // ---------------------------------------------------- face enhancer (gpen_bfr_256)
-    //
-    // Upstream runs this as a SEPARATE processor pass: it re-warps the already-pasted
-    // frame from the target landmarks, enhances, and pastes a second time.  We run it on
-    // the swapped crop instead, because gpen_bfr_256 and hyperswap_1a_256 declare the SAME
-    // template and size -- `arcface_128` at 256x256 (face_enhancer/core.py:163,
-    // face_swapper/core.py:252) -- so the crop the swapper just produced already IS the
-    // crop the enhancer wants.  That saves a warp round trip and a second paste_back, and
-    // it is strictly the more faithful of the two: upstream re-derives its crop from a
-    // frame it has already blended, and enhances the blend along with the face.
-    //
-    // Pixel boost carries over unchanged: gpen is a fixed 256x256 graph exactly like the
-    // swapper, so the same polyphase split applies and the crop keeps its full resolution.
-    // Resizing down to 256 to enhance would throw the boost away.
-    if (cfg.faceEnhance && p_->n.enh && CS % kEnhSize == 0) {
-      const int ES = kEnhSize, EPB = CS / ES;
-      ffcv::MatF enhCrop(CS, CS, 3);
-      std::vector<float> ein((size_t)3 * ES * ES);
-      for (int k = 0; k < EPB * EPB; ++k) {
-        const int ty = k / EPB, tx = k % EPB;
+    // The enhancer used to run HERE, fused into the swap crop. It no longer does -- see
+    // `enhance()`, always called as its own pass now, after this and after `syncLip`
+    // when the caller has one. Measured: fusing it here meant edtalk's whole-face
+    // regeneration overwrote nearly everything it had just sharpened.
 
-        t0 = nowMs();
-        // prepare_crop_frame -- BGR->RGB, /255, then (x - 0.5) / 0.5 into [-1, 1].
-        for (int y = 0; y < ES; ++y) {
-          const float* row = outCrop.row(y * EPB + ty);
-          for (int x = 0; x < ES; ++x)
-            for (int c = 0; c < 3; ++c)
-              ein[(size_t)(2 - c) * ES * ES + (size_t)y * ES + x] =
-                  ((row[(x * EPB + tx) * 3 + c] / 255.0f) - 0.5f) / 0.5f;
-        }
-        msGeom += nowMs() - t0;
+    t0 = nowMs();
+    ffcv::pasteBack(frame, outCrop, mask, am);
+    msGeom += nowMs() - t0;
+  }
+  return true;
+}
 
-        t0 = nowMs();
-        std::vector<std::vector<float>> eo;
-        if (!ffnn::execute(p_->n.enh, {"input"}, {ein.data()}, eo)) {
-          err_ = std::string("enhancer: ") + ffnn::lastError();
-          return false;
-        }
-        msEnhance += nowMs() - t0;
+bool Pipeline::enhance(ffcv::Image& frame, const std::vector<Face>& faces) {
+  if (!p_ || !p_->n.enh) return true;   // absent is not a failure, matches syncLip
+  const Config& cfg = p_->cfg;
+  if (!cfg.faceEnhance) return true;
+  const int SS = cfg.swapSize;
+  const int PB = cfg.pixelBoost < 1 ? 1 : cfg.pixelBoost;
+  const int CS = SS * PB;
+  if (CS % kEnhSize != 0) return true;
 
-        t0 = nowMs();
-        // normalize_crop_frame -- clip to [-1, 1], (x + 1) / 2, *255, RGB->BGR.
-        const float* e = eo[0].data();
-        for (int y = 0; y < ES; ++y) {
-          float* erow = enhCrop.row(y * EPB + ty);
-          for (int x = 0; x < ES; ++x)
-            for (int c = 0; c < 3; ++c) {
-              float v = e[(size_t)c * ES * ES + (size_t)y * ES + x];
-              v = v < -1.f ? -1.f : (v > 1.f ? 1.f : v);
-              erow[(x * EPB + tx) * 3 + (2 - c)] = (v + 1.f) * 0.5f * 255.f;
-            }
-        }
-        msGeom += nowMs() - t0;
-      }
+  float tmpl[10];
+  const float* T = ffcv::warpTemplate(1);            // arcface_128, same as swapAll
+  for (int i = 0; i < 10; ++i) tmpl[i] = T[i] * CS;
 
-      // blend_paste_frame -- upstream blends the enhanced PASTED frame against the frame
-      // it started from, weighted by face_enhancer_blend.  In the crop it is the same
-      // convex combination one step earlier, and it touches only pixels the mask was
-      // going to write anyway.
+  ffcv::MatF mask = ffcv::createBoxMask(CS, CS, cfg.maskBlur, cfg.maskPadding);
+
+  const Face* only = nullptr;
+  if (cfg.swapLargestOnly) {
+    float best = -1.f;
+    for (const Face& f : faces) {
+      float a = (f.box[2] - f.box[0]) * (f.box[3] - f.box[1]);
+      if (a > best) { best = a; only = &f; }
+    }
+  }
+
+  const int ES = kEnhSize, EPB = CS / ES;
+  for (const Face& f : faces) {
+    if (only && &f != only) continue;
+
+    double t0 = nowMs();
+    ffcv::Affine am = ffcv::umeyama(f.landmark5_68, tmpl, 5);
+    // Re-warp whatever is in `frame` NOW -- this IS upstream's actual face_enhancer pass
+    // (see swapAll's comment on the fused version being the approximation of this), just
+    // called at a different POINT in the pipeline than the old fused call was.
+    ffcv::Image crop = ffcv::warpAffine(frame, am, CS, CS, ffcv::BORDER_REPLICATE);
+    msGeom += nowMs() - t0;
+
+    ffcv::MatF enhCrop(CS, CS, 3);
+    std::vector<float> ein((size_t)3 * ES * ES);
+    for (int k = 0; k < EPB * EPB; ++k) {
+      const int ty = k / EPB, tx = k % EPB;
+
       t0 = nowMs();
-      const float b = cfg.faceEnhancerBlend < 0.f ? 0.f
-                    : (cfg.faceEnhancerBlend > 1.f ? 1.f : cfg.faceEnhancerBlend);
-      for (int y = 0; y < CS; ++y) {
-        float* o = outCrop.row(y);
-        const float* e = enhCrop.row(y);
-        for (int i = 0; i < CS * 3; ++i) o[i] = o[i] * (1.f - b) + e[i] * b;
+      for (int y = 0; y < ES; ++y) {
+        const uint8_t* row = crop.row(y * EPB + ty);
+        for (int x = 0; x < ES; ++x)
+          for (int c = 0; c < 3; ++c)
+            ein[(size_t)(2 - c) * ES * ES + (size_t)y * ES + x] =
+                ((row[(x * EPB + tx) * 3 + c] / 255.0f) - 0.5f) / 0.5f;
+      }
+      msGeom += nowMs() - t0;
+
+      t0 = nowMs();
+      std::vector<std::vector<float>> eo;
+      if (!ffnn::execute(p_->n.enh, {"input"}, {ein.data()}, eo)) {
+        err_ = std::string("enhancer: ") + ffnn::lastError();
+        return false;
+      }
+      msEnhance += nowMs() - t0;
+
+      t0 = nowMs();
+      const float* e = eo[0].data();
+      for (int y = 0; y < ES; ++y) {
+        float* erow = enhCrop.row(y * EPB + ty);
+        for (int x = 0; x < ES; ++x)
+          for (int c = 0; c < 3; ++c) {
+            float v = e[(size_t)c * ES * ES + (size_t)y * ES + x];
+            v = v < -1.f ? -1.f : (v > 1.f ? 1.f : v);
+            erow[(x * EPB + tx) * 3 + (2 - c)] = (v + 1.f) * 0.5f * 255.f;
+          }
       }
       msGeom += nowMs() - t0;
     }
 
+    // blend_paste_frame, against `crop` -- the frame this pass started from -- since
+    // there is no separate "un-enhanced swap output" once syncLip has already run.
     t0 = nowMs();
-    ffcv::pasteBack(frame, outCrop, mask, am);
+    const float b = cfg.faceEnhancerBlend < 0.f ? 0.f
+                  : (cfg.faceEnhancerBlend > 1.f ? 1.f : cfg.faceEnhancerBlend);
+    ffcv::MatF outF(CS, CS, 3);
+    for (int y = 0; y < CS; ++y) {
+      const uint8_t* srow = crop.row(y);
+      const float* erow = enhCrop.row(y);
+      float* orow = outF.row(y);
+      for (int i = 0, n = CS * 3; i < n; ++i)
+        orow[i] = (float)srow[i] * (1.f - b) + erow[i] * b;
+    }
+    msGeom += nowMs() - t0;
+
+    t0 = nowMs();
+    ffcv::pasteBack(frame, outF, mask, am);
     msGeom += nowMs() - t0;
   }
   return true;
