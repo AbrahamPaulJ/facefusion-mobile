@@ -1059,7 +1059,16 @@ class MainActivity : ComponentActivity() {
         }
         return (required.map { (n, l) -> row(n, l, true) } +
             gate.map { (n, l) -> row(n, l, !gateOk) }.filter { it.present || it.downloadable } +
-            optional.map { (n, l) -> row(n, l, false) }.filter { it.present || it.downloadable })
+            optional.mapNotNull { (n, l) ->
+                val r = row(n, l, false)
+                // wav2lip cannot RUN while edtalk is installed: ffpipe opens edtalk first
+                // and only falls back, so offering it as a fresh download offers a 43.7 MB
+                // file the pipeline is guaranteed to ignore. It is still listed once it IS
+                // on the device -- that row is how it gets deleted, and an install that has
+                // only wav2lip genuinely uses it.
+                if (n == "wav2lip" && !r.present &&
+                    ModelPaths.present(modelDir(), tier, "edtalk")) null else r
+            }.filter { it.present || it.downloadable })
             // One row per FILE SET, not per logical name. The two gate names resolve to two
             // different context binaries on QNN and to the SAME `nsfw_2_sim` pair on ncnn --
             // the quantised build exists because a QNN tier below v79 cannot finalize the
