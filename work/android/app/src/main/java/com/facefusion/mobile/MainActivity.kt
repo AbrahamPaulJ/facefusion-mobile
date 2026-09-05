@@ -1533,10 +1533,26 @@ class MainActivity : ComponentActivity() {
                     val mmr = MediaMetadataRetriever().apply { setDataSource(f.absolutePath) }
                     val d = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                         ?.toLongOrNull() ?: 0L
-                    val w = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
-                        ?.toIntOrNull() ?: 0
-                    val h = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
-                        ?.toIntOrNull() ?: 0
+                    val storedW = mmr.extractMetadata(
+                        MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+                    val storedH = mmr.extractMetadata(
+                        MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+                    // ⚠ ROTATION-CORRECTED, and it has to be. VIDEO_WIDTH/HEIGHT are the
+                    // STORED dimensions: a phone films portrait by recording 1920x1080 and
+                    // setting a 90 degree flag, so this reports 16:9 for a clip every other
+                    // part of the app treats as 9:16.
+                    //
+                    // FrameSeeker already decodes AND rotates (see its outWidth/outHeight),
+                    // so the pane was being sized 16:9 for a 9:16 bitmap and ContentScale.Fit
+                    // did the only thing it could -- letterbox it into grey side bars. It
+                    // also chose the stacked layout over the side-by-side one, which exists
+                    // precisely for portrait footage. Output was never affected: VideoSwapper
+                    // reads the same flag itself.
+                    val rot = mmr.extractMetadata(
+                        MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+                    val swap = rot == 90 || rot == 270
+                    val w = if (swap) storedH else storedW
+                    val h = if (swap) storedW else storedH
                     // CAPTURE_FRAMERATE is absent on plenty of files (it is a camera tag,
                     // not a container one), so fall back to counting frames over the
                     // duration rather than assuming 30.
