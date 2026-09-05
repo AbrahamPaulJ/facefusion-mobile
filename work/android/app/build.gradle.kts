@@ -59,6 +59,7 @@ android {
 
     defaultConfig {
         applicationId = "com.facefusion.mobile$idSuffix"
+        buildConfigField("boolean", "DEV_BUILD", (!hasContentGate).toString())
         minSdk = 31                 // SM8750 / HTP v79 is far above this
         targetSdk = 35
         // âš  0.1.1 IS SIGNED WITH A DIFFERENT KEY THAN 0.1.0.  The 0.1.0 keystore was lost,
@@ -400,7 +401,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    // buildConfig, so the Live tab can be derived from the SAME signal as the app id and
+    // the label -- ContentGate.kt's presence -- instead of a hand-set flag that can drift
+    // out of step with which line actually built. The Live code compiles into both APKs;
+    // only the destination is hidden, which keeps `git diff main dev` exactly the gate.
+    buildFeatures { compose = true; buildConfig = true }
 }
 
 dependencies {
@@ -412,4 +417,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui-tooling-preview")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    implementation("androidx.camera:camera-core:1.3.4")
+    implementation("androidx.camera:camera-camera2:1.3.4")
+    implementation("androidx.camera:camera-lifecycle:1.3.4")
 }

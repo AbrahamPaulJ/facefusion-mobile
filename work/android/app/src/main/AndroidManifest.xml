@@ -14,7 +14,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <application
+        <!-- Live tab (dev builds only). Not `required`: the app is a file-in/file-out
+         face swapper on every other screen and must install on a device with no
+         camera at all. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+
+<application
         android:label="${appLabel}"
         android:localeConfig="@xml/locales_config"
         android:icon="@mipmap/ic_launcher"

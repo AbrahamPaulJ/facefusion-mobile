@@ -143,6 +143,22 @@ class MainActivity : ComponentActivity() {
 
     // ---- UI shell
     private var screen by mutableStateOf(Screen.Swap)
+
+    // ---- Live (dev builds only; the tab does not exist otherwise) ----
+    private val live = LiveEngine()
+    private var liveFrame by mutableStateOf<Bitmap?>(null)
+    private var liveFps by mutableStateOf(0.0)
+    private var liveFaces by mutableStateOf(0)
+    private var liveNote by mutableStateOf<String?>(null)
+    // Off = the forced fast preset. Kept out of SwapOptions on purpose: it is a property of
+    // this screen, not of a swap, and persisting it would let a Live choice change what a
+    // file run does.
+    private var liveUseMySettings by mutableStateOf(false)
+    private val askCamera = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) startLive()
+        else liveNote = "Camera permission denied"
+    }
     private var advancedOpen by mutableStateOf(false)
     private var modelsVersion by mutableStateOf(0)
     private var deviceUi by mutableStateOf(DeviceUi())
@@ -538,7 +554,7 @@ class MainActivity : ComponentActivity() {
                         refreshSwapped(force = true)
                     }
                 }
-                AppScaffold(screen, { screen = it }) { pad ->
+                AppScaffold(screen, { screen = it }, showLive = BuildConfig.DEV_BUILD) { pad ->
                     Box(Modifier.padding(pad)) {
                         when (screen) {
                             Screen.Swap -> SwapScreen(
@@ -633,6 +649,19 @@ class MainActivity : ComponentActivity() {
                                 onShare = { shareResult() },
                             )
 
+                            Screen.Live -> LiveScreen(
+                                sourceThumb = sourceThumb,
+                                onPickSource = { pickSource.launch("image/*") },
+                                frame = liveFrame,
+                                running = live.isRunning,
+                                onToggleRun = { toggleLive() },
+                                fps = liveFps,
+                                faces = liveFaces,
+                                useMySettings = liveUseMySettings,
+                                onUseMySettings = { liveUseMySettings = it },
+                                note = liveNote,
+                                modelsReady = !modelsMissing,
+                            )
                             Screen.Settings -> SettingsScreen(
                                 sections = modelSections(),
                                 modelDirPath = modelDir().absolutePath,
@@ -1602,6 +1631,80 @@ class MainActivity : ComponentActivity() {
      * of what was on screen. An unreachable branch that processes pixels is exactly the
      * kind of thing a content-gate audit has to keep re-proving, so it is not left behind.
      */
+    /**
+     * Start or stop the live feed.
+     *
+     * Live owns the pipeline for as long as it runs, through the same [PipeGuard] the API
+     * and the screen contend for -- a camera pump and a preview refresh both calling
+     * processFrame on one global is exactly what that guard exists to prevent.
+     */
+    private fun toggleLive() {
+        if (live.isRunning) { stopLive(); return }
+        liveNote = null
+        if (checkSelfPermission(android.Manifest.permission.CAMERA) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            askCamera.launch(android.Manifest.permission.CAMERA)
+            return
+        }
+        startLive()
+    }
+
+    private fun startLive() {
+        val src = sourceUri ?: return
+        lifecycleScope.launch {
+            if (!PipeGuard.acquire("live", 5000)) {
+                liveNote = getString(R.string.status_api_busy); return@launch
+            }
+            // The preview holds a warm pipeline configured for the Swap screen. Live needs
+            // its own configuration, so the preview's is dropped rather than mutated --
+            // sharing it would leave the Swap screen warm for options Live had changed.
+            previews.invalidate()
+            previewWarm = false
+
+            val base = SwapOptions.load(this@MainActivity)
+            // The forced preset. Tracking ON is the whole reason this is watchable; the
+            // enhancer and pixel boost are the two settings that most easily turn 25 fps
+            // into single digits, so they are pinned unless the override says otherwise.
+            val opts = if (liveUseMySettings) base else base.copy(
+                faceEnhance = false, pixelBoost = 1, lipSync = false, trackPeriod = 4,
+            )
+            val ok = withContext(Dispatchers.Default) {
+                val models = modelDir()
+                val libDir = applicationInfo.nativeLibraryDir
+                if (!NativePipe.init(libDir, libDir, models.absolutePath, opts)) return@withContext false
+                NativePipe.setTrackPeriod(opts.trackPeriod)
+                val bmp = decodeOriented(src) ?: return@withContext false
+                val soft = bmp.copy(Bitmap.Config.ARGB_8888, false)
+                val px = IntArray(soft.width * soft.height)
+                soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
+                NativePipe.setSource(NativePipe.argbToBgr(px, soft.width, soft.height),
+                                     soft.width, soft.height)
+            }
+            if (!ok) {
+                liveNote = "cannot start: ${NativePipe.lastError()}"
+                NativePipe.release(); PipeGuard.release(); return@launch
+            }
+            live.start(this@MainActivity, this@MainActivity) { shot ->
+                // The analyzer thread hands the result straight to Compose state, which is
+                // safe for snapshot state and avoids a per-frame main-thread post.
+                if (shot.error != null) liveNote = shot.error
+                if (shot.bitmap != null) {
+                    liveFrame = shot.bitmap
+                    liveFaces = shot.faces
+                    liveFps = shot.fps
+                }
+            }
+        }
+    }
+
+    private fun stopLive() {
+        live.stop()
+        NativePipe.setTrackPeriod(0)
+        NativePipe.release()
+        PipeGuard.release()
+        liveFrame = null; liveFps = 0.0; liveFaces = 0
+    }
+
     private fun runSwap() {
         val src = sourceUri ?: return
         val tgt = targetFile ?: return
