@@ -28,12 +28,17 @@ Ruhs. The pipeline, the models, and the option names, defaults and ranges are Fa
   times the time per frame.
 - Shows the target frame and the swapped frame side by side before you commit to a run.
 - Trims the clip, drops the frame rate if you want it faster, and lets you cancel mid run.
-- **Fast video** (Advanced → Face detector): tracks the face between frames instead of
-  finding it again every frame, for about 15% more speed. Off by default.
+- **Fast video** (the gear on the `face_swapper` chip → Face detector): tracks the face
+  between frames instead of finding it again every frame, for about 15% more speed. Off by
+  default.
+- **Live**: the front camera, swapped, in real time. Fast mode forces the settings a camera
+  can keep up with; turning it off is experimental and asks first.
+- Takes its inputs from the camera and microphone as well as your files — shoot a source
+  face, film a target, or record the voice that drives the lip syncer.
 - Saves to your gallery, or hands a still straight out of the preview.
 - Lip sync, optionally: redraws the mouth to match a voice you pick — a dub, a different
   take, any audio or video file — at about 1-2 ms per frame on the NPU.
-- Speaks English, 简体中文 and 繁體中文.
+- Speaks English, Русский, 简体中文 and 繁體中文.
 - Can be driven from a browser on your PC over the local network, if you turn that on.
 
 Optional extras, each a separate download: a face enhancer (`gpen_bfr_256`, about 2.5 ms
@@ -123,8 +128,10 @@ you say otherwise.
 ## Content policy
 
 The app includes FaceFusion's content checker and it blocks. Flagged material is refused,
-with no output file and nothing shown. If the checker cannot run, for instance if its model
-is missing, the app refuses to process anything rather than continuing unchecked.
+with no output file and nothing shown. Every path that processes an image is checked: the
+source face, the target photo or video, the preview, the Live camera and the remote API. If
+the checker cannot run, for instance if its model is missing, the app refuses to process
+anything rather than continuing unchecked.
 
 **Do not use this on real people without their consent.** That is the main way software of
 this kind causes harm, and it is prohibited by the upstream licence.
@@ -143,8 +150,8 @@ which carries use restrictions. Read
 using, modifying or redistributing this.
 
 The models are converted from FaceFusion's and are not uniformly permissive.
-`yoloface_8n` is GPL-3.0, `arcface_w600k_r50`, `inswapper_128` and `wav2lip_gan_96` are
-Non-Commercial, and `hyperswap_1a_256` is ResearchRAIL. See the
+`yoloface_8n` is GPL-3.0, `arcface_w600k_r50` and `inswapper_128` are Non-Commercial, and
+`hyperswap_1a_256` is ResearchRAIL. See the
 [model repository](https://huggingface.co/AbrahamPJ/facefusion-mobile-models) for details.
 
 The app icon is FaceFusion's, used with permission.

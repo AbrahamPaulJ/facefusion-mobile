@@ -64,7 +64,7 @@ can quietly open the port to the network.
 
 Bodies are raw bytes, not multipart — the client is `curl --data-binary @file`.
 
-Options default to whatever the app's Advanced panel is set to, per-request overrides in the
+Options default to whatever the app's processor settings are set to, per-request overrides in the
 query string: `weight`, `blur`, `detector`, `boost` (1-4), `largest`, `enhancer`,
 `enhance_blend`, `fps`, `swapper`, `lip_sync`.
 

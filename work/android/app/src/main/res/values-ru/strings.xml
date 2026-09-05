@@ -240,7 +240,6 @@
     <string name="set_bug_report_button">Отправить отчёт об ошибке</string>
     <string name="status_share_failed">Не удалось отправить отчёт: %1$s</string>
 
-    <string name="status_source_set">Исходное лицо выбрано</string>
     <string name="status_cancelling">Отмена…</string>
     <string name="status_cancelled">Отменено</string>
     <string name="status_loading_models">Загрузка моделей…</string>

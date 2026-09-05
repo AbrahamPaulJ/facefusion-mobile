@@ -18,7 +18,10 @@
 set -uo pipefail
 
 CONV="$HOME/MNN/build_host/MNNConvert"
-WIN="/mnt/c/Users/abrah/Desktop/CC/facefusion-mobile/work/onnx"
+# The ONNX directory, derived from this script's own location rather than hardcoded:
+# work/<backend>/convert_*.sh -> work/onnx. A literal /mnt/c/Users/<name>/... path both
+# leaks a username into a public repo and only ever worked on one machine.
+WIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/../onnx" && pwd)"
 DST="$HOME/ffmnn"
 mkdir -p "$DST"
 cd "$DST"

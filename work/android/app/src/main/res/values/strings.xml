@@ -313,7 +313,6 @@
     <!-- ==================================================== status line -->
     <!-- %1$s is a system error, which is not translated -->
     <string name="status_share_failed">Could not share the report: %1$s</string>
-    <string name="status_source_set">Source set</string>
     <string name="status_cancelling">Cancelling…</string>
     <string name="status_cancelled">Cancelled</string>
     <string name="status_loading_models">Loading models…</string>

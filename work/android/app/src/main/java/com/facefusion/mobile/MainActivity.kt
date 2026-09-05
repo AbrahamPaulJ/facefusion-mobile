@@ -288,7 +288,6 @@ class MainActivity : ComponentActivity() {
     private fun setSourceFrom(uri: Uri) {
         sourceUri = uri
         sourceThumb = decodeOriented(uri)
-        status = getString(R.string.status_source_set)
         // A different face means the loaded pipeline is holding the wrong embedding.
         previewOptionsChanged()
     }

@@ -234,7 +234,6 @@
     <string name="set_bug_report_button">分享错误报告</string>
 
     <string name="status_share_failed">无法分享报告：%1$s</string>
-    <string name="status_source_set">源人脸已设置</string>
     <string name="status_cancelling">正在取消…</string>
     <string name="status_cancelled">已取消</string>
     <string name="status_loading_models">正在加载模型…</string>
