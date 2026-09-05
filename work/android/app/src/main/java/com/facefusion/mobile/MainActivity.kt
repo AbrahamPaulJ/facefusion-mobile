@@ -433,16 +433,37 @@ class MainActivity : ComponentActivity() {
         if (uris.isNullOrEmpty()) return@registerForActivityResult
         batchQueue = emptyList()
         loadTarget(uris.first())
+        // ⚠ VIDEOS ONLY, and the first pick decides whether there is a queue at all.
+        //
+        // A still target has no Swap button -- the pane already IS the result -- so a queue
+        // behind one would be a list with no way to start it. And runBatch drives
+        // VideoSwapper, which has nothing to do with a photo. Both are real limits rather
+        // than oversights, so the picker enforces them here instead of letting the run fail
+        // per item with "cannot read".
+        val images = uris.count {
+            contentResolver.getType(it)?.startsWith("image/") == true
+        }
+        val videos = uris.filter {
+            contentResolver.getType(it)?.startsWith("image/") != true
+        }
+        if (images > 0 && videos.size < 2) {
+            // Nothing to queue: either the visible target is the still, or every other pick
+            // was one. The single-target flow is exactly right for that.
+            if (images == uris.size) status = getString(R.string.status_batch_images_only)
+            return@registerForActivityResult
+        }
         if (uris.size > 1) {
             // ⚠ INCLUDING the first. The queue holds every item with the visible target at
             // index 0, from the pick until the run ends -- one representation, so the UI
             // and the runner cannot disagree about whether item one is in the list. The
             // first version kept it out and had both of them add it back, which drew the
             // visible clip twice.
-            batchQueue = uris.map {
+            batchQueue = videos.map {
                 BatchItem(it, displayName(it) ?: getString(R.string.batch_unnamed_clip))
             }
-            status = getString(R.string.status_batch_queued, uris.size)
+            status = if (images > 0)
+                         getString(R.string.status_batch_queued_some, videos.size, images)
+                     else getString(R.string.status_batch_queued, videos.size)
         }
     }
     // Audio or video -- upstream's own `source_paths` takes either and reads whichever
@@ -2574,6 +2595,14 @@ class MainActivity : ComponentActivity() {
                 BatchStatus.end(); BatchService.stop(this@MainActivity)
                 return@launch
             }
+            // ⚠ try/finally around EVERYTHING after the acquire, for the same reason
+            // DownloadService wraps its whole run. This coroutine lives in lifecycleScope,
+            // so the Activity going away CANCELS it mid-clip -- and without this the
+            // pipeline is never released and PipeGuard is never handed back, so the preview
+            // and the API are locked out for the life of the process. BatchStatus.running
+            // would also stay true for ever, leaving BatchService's notify thread spinning
+            // behind an ongoing notification that cannot be swiped away.
+            try {
             val t0 = System.currentTimeMillis()
             val setup = withContext(Dispatchers.Default) {
                 runCatching {
@@ -2611,8 +2640,6 @@ class MainActivity : ComponentActivity() {
                 status = if (e is ContentGate.Refused)
                              e.message ?: getString(R.string.gate_blocked_generic)
                          else getString(R.string.status_failed, e?.message ?: "")
-                NativePipe.release(); PipeGuard.release(); busy = false
-                BatchStatus.end(); BatchService.stop(this@MainActivity)
                 return@launch
             }
 
@@ -2721,12 +2748,14 @@ class MainActivity : ComponentActivity() {
             appendLog("batch: %d done, %d refused, %d failed, %.1f s total"
                 .format(done, refused, failed, (System.currentTimeMillis() - t0) / 1000.0))
             outputPartial = cancelRequested
-            NativePipe.release()
-            PipeGuard.release()
-            busy = false
-            // Ends the notify thread, which stops the service itself.
-            BatchStatus.end()
-            BatchService.stop(this@MainActivity)
+            } finally {
+                NativePipe.release()
+                PipeGuard.release()
+                busy = false
+                // Ends the notify thread, which stops the service itself.
+                BatchStatus.end()
+                BatchService.stop(this@MainActivity)
+            }
         }
     }
 

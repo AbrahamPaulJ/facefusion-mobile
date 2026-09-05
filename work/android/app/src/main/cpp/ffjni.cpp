@@ -30,6 +30,19 @@ std::string g_err;
 std::string g_rejectedTier;
 std::vector<std::string> g_skipTiers;
 
+/**
+ * The reference face's embedding, kept OUTSIDE the pipeline so it survives init.
+ *
+ * The same reasoning g_skipTiers is written down with, and not theoretical here: initEx
+ * does `g_pipe.reset(new Pipeline())`, and runSwap inits at the start of EVERY run. Left on
+ * the pipeline alone, a face the user tapped in the preview would be visibly honoured there
+ * and silently forgotten by the export -- the finished video would come back with every
+ * face swapped and nothing on screen to explain why.
+ *
+ * 512 floats, already L2-normalised. Empty means no reference.
+ */
+std::vector<float> g_refEmbedding;
+
 std::string jstr(JNIEnv* env, jstring s) {
   if (!s) return {};
   const char* c = env->GetStringUTFChars(s, nullptr);
@@ -122,6 +135,10 @@ Java_com_facefusion_mobile_NativePipe_initEx(JNIEnv* env, jclass, jstring jLib, 
     g_pipe.reset();
     return JNI_FALSE;
   }
+  // Re-apply the reference face to the pipeline that just replaced the one holding it.
+  // See g_refEmbedding: without this the selection survives only until the next run.
+  if (g_refEmbedding.size() == 512)
+    g_pipe->setReferenceEmbedding(g_refEmbedding.data());
   return JNI_TRUE;
 }
 
@@ -275,6 +292,10 @@ Java_com_facefusion_mobile_NativePipe_setReferenceFaceAt(JNIEnv* env, jclass,
     g_err = g_pipe->error();
     return env->NewFloatArray(0);
   }
+  // Keep it where an init cannot destroy it.
+  g_refEmbedding.assign(512, 0.f);
+  if (!g_pipe->referenceEmbedding(g_refEmbedding.data())) g_refEmbedding.clear();
+
   jfloatArray out = env->NewFloatArray(4);
   if (out) env->SetFloatArrayRegion(out, 0, 4, box);
   return out;
@@ -282,12 +303,17 @@ Java_com_facefusion_mobile_NativePipe_setReferenceFaceAt(JNIEnv* env, jclass,
 
 JNIEXPORT void JNICALL
 Java_com_facefusion_mobile_NativePipe_clearReferenceFace(JNIEnv*, jclass) {
+  // BOTH copies. Clearing only the pipeline's would let the next init put it straight back.
+  g_refEmbedding.clear();
   if (g_pipe) g_pipe->clearReferenceFace();
 }
 
 JNIEXPORT jboolean JNICALL
 Java_com_facefusion_mobile_NativePipe_hasReferenceFace(JNIEnv*, jclass) {
-  return (g_pipe && g_pipe->hasReferenceFace()) ? JNI_TRUE : JNI_FALSE;
+  // The KEPT copy, not the pipeline's: this is asked while no pipeline is loaded (a target
+  // change releases it), and answering "no" then would drop a selection that is still set.
+  return (!g_refEmbedding.empty() || (g_pipe && g_pipe->hasReferenceFace()))
+             ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL

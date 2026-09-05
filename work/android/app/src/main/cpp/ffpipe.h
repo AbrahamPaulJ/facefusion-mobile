@@ -229,6 +229,22 @@ class Pipeline {
    */
   bool setReferenceFaceAt(const ffcv::Image& frame, float x, float y, float* outBox);
 
+  /**
+   * Set the reference identity directly, from an embedding already chosen.
+   *
+   * ⚠ Exists because init() builds a NEW Pipeline, so a reference picked in the preview is
+   * destroyed by the very run that should honour it -- the tap would appear to work and the
+   * exported video would swap every face. The JNI layer keeps the embedding and re-applies
+   * it after every init, the same way `skipVariants` is pushed rather than passed.
+   *
+   * [e] is 512 floats, ALREADY L2-normalised: it is compared with a dot product and
+   * normalising twice would quietly change the distance.
+   */
+  void setReferenceEmbedding(const float* e);
+
+  /** The reference embedding into [out] (512 floats). False when none is set. */
+  bool referenceEmbedding(float* out) const;
+
   /** Forget it: back to `many`, or to `one` if swapLargestOnly is set. */
   void clearReferenceFace();
 

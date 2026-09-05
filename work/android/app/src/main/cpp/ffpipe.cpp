@@ -922,6 +922,18 @@ bool Pipeline::setReferenceFaceAt(const ffcv::Image& frame, float x, float y, fl
   return true;
 }
 
+void Pipeline::setReferenceEmbedding(const float* e) {
+  if (!p_ || !e) return;
+  std::memcpy(p_->refEmbeddingNorm, e, sizeof(p_->refEmbeddingNorm));
+  p_->haveReference = true;
+}
+
+bool Pipeline::referenceEmbedding(float* out) const {
+  if (!p_ || !p_->haveReference || !out) return false;
+  std::memcpy(out, p_->refEmbeddingNorm, sizeof(p_->refEmbeddingNorm));
+  return true;
+}
+
 void Pipeline::clearReferenceFace() { if (p_) p_->haveReference = false; }
 
 bool Pipeline::hasReferenceFace() const { return p_ && p_->haveReference; }

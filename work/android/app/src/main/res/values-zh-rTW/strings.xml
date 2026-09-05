@@ -367,4 +367,6 @@
     <string name="notif_batch_title">正在替換片段</string>
     <string name="notif_batch_text">第 %1$d / %2$d 個片段：%3$s</string>
     <string name="notif_batch_channel">批次替換</string>
+    <string name="status_batch_queued_some">已排入 %1$d 個片段。已略過 %2$d 張相片——批次僅支援影片。</string>
+    <string name="status_batch_images_only">相片逐張替換；結果已顯示在面板上。</string>
 </resources>

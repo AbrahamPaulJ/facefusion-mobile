@@ -348,4 +348,6 @@
     <string name="notif_batch_title">Обработка клипов</string>
     <string name="notif_batch_text">Клип %1$d из %2$d: %3$s</string>
     <string name="notif_batch_channel">Пакетная обработка</string>
+    <string name="status_batch_queued_some">В очереди %1$d клипов. Фото пропущено: %2$d — пакет только для видео.</string>
+    <string name="status_batch_images_only">Фото обрабатывается по одному; результат уже на панели.</string>
 </resources>

@@ -406,6 +406,8 @@
     <string name="batch_skipped">skipped</string>
     <string name="batch_remove">Remove from queue</string>
     <string name="batch_unnamed_clip">clip</string>
+    <string name="status_batch_queued_some">%1$d clips queued. %2$d photos were left out — batches are videos only.</string>
+    <string name="status_batch_images_only">Photos are swapped one at a time; the result is already on the pane.</string>
     <string name="notif_batch_title">Swapping clips</string>
     <string name="notif_batch_text">Clip %1$d of %2$d: %3$s</string>
     <string name="notif_batch_channel">Batch swap</string>
