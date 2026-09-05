@@ -157,6 +157,12 @@ fun LiveScreen(
                 )
             }
 
+            // The SAME overlay the Swap screen draws over its swapped pane -- progress,
+            // byte counter, error and retry included. Live is a tab, so a fresh install can
+            // land here first: it used to say "Models not installed" over a Start button
+            // that could never enable, with the only way out on a screen it did not mention.
+            if (!modelsReady) DownloadOverlay(onDownload)
+
             // Frame rate over the feed, where it is read while looking at the result rather
             // than after it. Only while running: a stale rate on a stopped feed is a lie.
             if (running) {
@@ -178,27 +184,11 @@ fun LiveScreen(
             }
         }
 
-        // ⚠ The DOWNLOAD comes first when there is nothing to run with. Live is a tab, so
-        // it can be the first screen a fresh install lands on -- and it said "Models not
-        // installed" over a Start button that could never enable, with the only actual way
-        // out on a different tab that the message did not mention. The Swap screen has had
-        // its own download overlay since 0.1.0; this is the same offer, in the one other
-        // place that needs it.
-        if (!modelsReady) {
-            Button(onDownload, Modifier.fillMaxWidth(),
-                   shape = RoundedCornerShape(14.dp)) {
-                Text(stringResource(R.string.dl_download))
-            }
-            Text(stringResource(R.string.dl_not_on_device),
-                 style = MaterialTheme.typography.bodySmall, fontSize = 11.sp,
-                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-        } else {
-            Button(
-                onClick = onToggleRun,
-                enabled = sourceThumb != null,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text(stringResource(if (running) R.string.live_stop else R.string.live_start)) }
-        }
+        Button(
+            onClick = onToggleRun,
+            enabled = modelsReady && sourceThumb != null,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text(stringResource(if (running) R.string.live_stop else R.string.live_start)) }
 
         // ---------------------------------------------------------------- fast mode
         //

@@ -312,4 +312,8 @@
     <string name="status_record_too_short">Запись слишком короткая</string>
     <string name="status_record_failed">Не удалось начать запись</string>
     <string name="status_mic_denied">Для записи голоса нужен доступ к микрофону</string>
+    <string name="set_tab_models">Модели</string>
+    <string name="set_tab_device">Устройство</string>
+    <string name="set_tab_api">API</string>
+    <string name="set_tab_about">О программе</string>
 </resources>

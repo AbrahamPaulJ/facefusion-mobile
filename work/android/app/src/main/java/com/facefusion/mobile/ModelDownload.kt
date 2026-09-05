@@ -82,6 +82,7 @@ object ModelDownload {
     fun reset() {
         running = false; fileIndex = 0; fileCount = 0; currentName = ""
         doneBytes = 0; totalBytes = 0; error = null; finished = false; cancelled = false
+        queued = emptySet()
     }
 
     /** True when the connection is metered, so the caller can warn before spending ~275 MB. */
@@ -134,6 +135,18 @@ object ModelDownload {
      */
     private fun legacyKey(variant: String): String =
         if (variant == ModelPaths.NCNN_TIER) "ncnn_preview" else variant
+
+    /**
+     * The LOCAL filenames this download is actually fetching, while it runs.
+     *
+     * ⚠ Exists because "is a download running" is not the same question as "is THIS model
+     * downloading", and the Settings inventory was asking the first and displaying the
+     * answer to the second. Every row said "Downloading" for the whole run -- harmless
+     * while the bulk fetch really did take everything, and a plain lie the moment the
+     * optional models stopped being in it.
+     */
+    var queued by mutableStateOf<Set<String>>(emptySet())
+        private set
 
     /**
      * Stages that are OFF until the user turns them on, so a first run must not pay for
@@ -193,6 +206,7 @@ object ModelDownload {
                 " required, fetching " +
                 todo.map { it.name } + ", keeping " +
                 entries.filterNot { e -> todo.any { it.name == e.name } }.map { it.name })
+            queued = todo.map { it.name }.toSet()
             fileCount = todo.size
             totalBytes = todo.sumOf { it.bytes }
             doneBytes = 0
@@ -209,6 +223,9 @@ object ModelDownload {
             return null
         } finally {
             running = false
+            // Cleared with running, not left behind: a stale queue would keep a row
+            // labelled "Downloading" after the download it belonged to had ended.
+            queued = emptySet()
             onTick()
         }
     }

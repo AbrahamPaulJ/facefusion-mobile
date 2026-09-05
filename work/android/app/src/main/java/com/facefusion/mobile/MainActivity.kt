@@ -1190,7 +1190,11 @@ class MainActivity : ComponentActivity() {
                             // one. Offline `hostedFiles` is empty and nothing is ever called
                             // outdated, which is the right answer when there is nothing to
                             // compare against -- never a scary row because the network is.
-                            outdated = present && hostedLen != null && hostedLen != len)
+                            outdated = present && hostedLen != null && hostedLen != len,
+                            // In the queue that is running RIGHT NOW, rather than "some
+                            // download exists". The bulk button skips the optional models,
+                            // so the two stopped meaning the same thing.
+                            fetching = files.any { it.name in ModelDownload.queued })
         }
         return (required.map { (n, l) -> row(n, l, true) } +
             gate.map { (n, l) -> row(n, l, !gateOk) }.filter { it.present || it.downloadable } +

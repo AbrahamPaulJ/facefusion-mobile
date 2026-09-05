@@ -900,13 +900,19 @@ fun SwapScreen(
 }
 
 /**
- * The model download, drawn over the swapped preview.
+ * The model download, drawn over a preview pane.
  *
  * Only ever composed when the files are actually missing, so there is no button sitting
  * around inviting a 275 MB transfer nobody needs.
+ *
+ * Shared with [LiveScreen] rather than private to this file: Live is a tab, so it can be
+ * the first screen a fresh install sees, and it needs the same offer. It briefly had a
+ * plain Button of its own instead -- same onDownload, but none of the progress, the byte
+ * counter, the error or the retry, so the two screens disagreed about what a download
+ * looks like for no reason beyond where the composable happened to live.
  */
 @Composable
-private fun DownloadOverlay(onDownload: () -> Unit) {
+fun DownloadOverlay(onDownload: () -> Unit) {
     Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)) {
         Column(
             Modifier.fillMaxSize().padding(20.dp),

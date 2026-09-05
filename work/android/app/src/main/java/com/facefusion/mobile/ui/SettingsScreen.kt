@@ -45,6 +45,14 @@ data class ModelRow(
      */
     val outdated: Boolean = false,
     /**
+     * This row's files are in the download that is running right now.
+     *
+     * Distinct from ModelDownload.running, which is true for EVERY row while any download
+     * is in flight. The bulk button no longer fetches the optional models, so "a download
+     * is running" stopped implying "this one is being fetched".
+     */
+    val fetching: Boolean = false,
+    /**
      * EVERY file behind this row, not just the one it is named after.
      *
      * A QNN model is one context binary and this is a single name; an ncnn model is a
@@ -128,13 +136,31 @@ fun SettingsScreen(
 ) {
     var confirming by remember { mutableStateOf<ModelRow?>(null) }
 
+    // SUB-TABS. This screen had grown to six sections in one scroll -- the model inventory,
+    // the device panel, the runtime picker, the API, the supported-device table and the
+    // about block -- so reaching the API meant scrolling past ~400 dp of chip trivia.
+    //
+    // The tab row sits OUTSIDE the scroll, so it stays put while a section scrolls under
+    // it. Device deliberately owns two non-adjacent blocks (the panel, and the
+    // supported-devices table further down): they answer the same question and were only
+    // ever apart because the API section happened to sit between them.
+    var tab by rememberSaveable { mutableStateOf(0) }
+    Column(modifier.fillMaxSize()) {
+    TabRow(selectedTabIndex = tab) {
+        listOf(R.string.set_tab_models, R.string.set_tab_device,
+               R.string.set_tab_api, R.string.set_tab_about).forEachIndexed { i, res ->
+            Tab(selected = tab == i, onClick = { tab = i },
+                text = { Text(stringResource(res)) })
+        }
+    }
     Column(
-        modifier
+        Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        if (tab == 0) {
         // ---------------------------------------------------------------- models
         //
         // One block per model SET, not one list. A device that has run both runtimes
@@ -192,7 +218,7 @@ fun SettingsScreen(
                                 // superseded, and the useful action is to replace it. Deleting
                                 // it first would reach the same place through a broken app.
                                 TextButton(onDownloadModel, enabled = !ModelDownload.running) {
-                                    Text(stringResource(if (ModelDownload.running)
+                                    Text(stringResource(if (m.fetching)
                                                            R.string.set_updating
                                                        else R.string.set_update))
                                 }
@@ -202,8 +228,15 @@ fun SettingsScreen(
                                          color = MaterialTheme.colorScheme.error)
                                 }
                             } else if (m.downloadable && active) {
+                                // ⚠ m.fetching, not ModelDownload.running. The first asks
+                                // whether THIS model is in the current queue; the second
+                                // only whether some download exists. Every row used to
+                                // claim "Downloading" for the whole run, which became
+                                // visibly wrong once the optional models stopped being
+                                // fetched by the bulk button. The button stays DISABLED
+                                // either way -- two downloads at once is still not a thing.
                                 TextButton(onDownloadModel, enabled = !ModelDownload.running) {
-                                    Text(stringResource(if (ModelDownload.running)
+                                    Text(stringResource(if (m.fetching)
                                                            R.string.set_downloading
                                                        else R.string.set_download))
                                 }
@@ -249,6 +282,8 @@ fun SettingsScreen(
         Spacer(Modifier.height(6.dp))
 
         // ---------------------------------------------------------------- device
+        }
+        if (tab == 1) {
         Caption(stringResource(R.string.set_this_device))
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -363,6 +398,8 @@ fun SettingsScreen(
             }
         }
 
+        }
+        if (tab == 2) {
         // ---------------------------------------------------------------- remote API
         //
         // Reads ApiService's state directly, the way the download overlay reads
@@ -435,6 +472,8 @@ fun SettingsScreen(
             }
         }
 
+        }
+        if (tab == 1) {
         Caption(stringResource(R.string.set_supported_devices))
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(vertical = 4.dp)) {
@@ -488,6 +527,8 @@ fun SettingsScreen(
         // "Cannot read video".
         //
         // Reported by a user who went looking for it exactly where the documentation said.
+        }
+        if (tab == 3) {
         Caption(stringResource(R.string.set_bug_report))
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -538,6 +579,8 @@ fun SettingsScreen(
         }
 
         Spacer(Modifier.height(16.dp))
+        }
+    }
     }
 
     confirming?.let { m ->

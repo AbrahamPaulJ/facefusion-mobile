@@ -328,4 +328,8 @@
     <string name="status_record_too_short">录制时间太短</string>
     <string name="status_record_failed">无法开始录制</string>
     <string name="status_mic_denied">录制语音需要麦克风权限</string>
+    <string name="set_tab_models">模型</string>
+    <string name="set_tab_device">设备</string>
+    <string name="set_tab_api">API</string>
+    <string name="set_tab_about">关于</string>
 </resources>

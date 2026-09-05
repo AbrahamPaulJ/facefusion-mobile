@@ -331,4 +331,8 @@
     <string name="status_record_too_short">錄製時間太短</string>
     <string name="status_record_failed">無法開始錄製</string>
     <string name="status_mic_denied">錄製語音需要麥克風權限</string>
+    <string name="set_tab_models">模型</string>
+    <string name="set_tab_device">裝置</string>
+    <string name="set_tab_api">API</string>
+    <string name="set_tab_about">關於</string>
 </resources>

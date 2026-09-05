@@ -416,4 +416,8 @@ Turning it off runs your own Swap settings instead. This is experimental: the en
     <string name="status_record_too_short">Recording too short</string>
     <string name="status_record_failed">Could not start recording</string>
     <string name="status_mic_denied">Microphone permission is needed to record a voice</string>
+    <string name="set_tab_models">Models</string>
+    <string name="set_tab_device">Device</string>
+    <string name="set_tab_api">API</string>
+    <string name="set_tab_about">About</string>
 </resources>
