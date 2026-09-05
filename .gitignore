@@ -66,6 +66,9 @@ work/android/.gradle/
 work/android/local.properties
 work/native/*.so
 work/native/libffcv.so
+# The arm64+ASAN build of test_warp_bounds. It has to live on a Windows-visible path
+# because adb.exe cannot stat a WSL one, so it lands in the tree rather than in ~.
+work/native/asan-build/
 *.apk
 
 # Editor / OS

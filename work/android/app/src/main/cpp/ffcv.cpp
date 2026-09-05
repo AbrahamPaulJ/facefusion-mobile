@@ -69,8 +69,16 @@ const uint8_t kZeroPx[4] = {0, 0, 0, 0};
  * multiply-accumulates.
  *
  * ⚠ Reads FOUR bytes from a THREE-byte pixel. In bounds everywhere except the image's
- * final pixel, so every caller must test for that tap and fall back to scalar -- the check
- * is on p11 alone, which is the largest index of the four.
+ * final pixel, so every caller must test for that tap and fall back to scalar.
+ *
+ * ⚠ Test the COORDINATES, not p11. p11 is the largest of the four only when all four are
+ * real pixels; under BORDER_CONSTANT a rejected tap becomes kZeroPx, so the final pixel can
+ * arrive as p00, p10 or p01 with p11 pointing at the zero constant -- which is a check that
+ * passes while the load runs off the end of the image. That was a live SIGSEGV: 0.6.0
+ * crashed in the landmarker crop whenever a face reached the frame's bottom-right corner.
+ * The 2x2 window touches the final pixel exactly when x0 >= sw-2 && y0 >= sh-2, under
+ * either border rule, provided sw and sh are both >= 2 (at 1 a clamp can pull an
+ * out-of-range coordinate onto the last pixel from below).
  */
 inline float32x4_t tapsU8x3(const uint8_t* p00, const uint8_t* p10,
                             const uint8_t* p01, const uint8_t* p11,
@@ -189,16 +197,25 @@ Image warpAffine(const Image& src, const Affine& M, int dw, int dh, Border borde
   // uses -- deliberately not hoisted per row. Only the accumulate is vectorised, so the
   // only arithmetic difference is vfma rounding a multiply-add once where a scalar pair
   // rounds twice, and these crops feed three graphs whose inputs are worth not drifting.
-  if (src.c == 3 && !neonDisabled()) {
+  if (src.c == 3 && src.w >= 2 && src.h >= 2 && !neonDisabled()) {
     const int sw = src.w, sh = src.h;
     const uint8_t* s = src.data.data();
-    const size_t nbytes = (size_t)sw * sh * 3;
     for (int y = 0; y < dh; ++y) {
       uint8_t* out = dst.row(y);
       for (int x = 0; x < dw; ++x) {
         const float sxf = (float)(inv(0, 0) * x + inv(0, 1) * y + inv(0, 2));
         const float syf = (float)(inv(1, 0) * x + inv(1, 1) * y + inv(1, 2));
         const int x0 = (int)std::floor(sxf), y0 = (int)std::floor(syf);
+        // The tail guard, on the coordinates -- see tapsU8x3. A window that can touch the
+        // image's final pixel goes scalar; that is a handful of destination pixels at the
+        // bottom-right corner, and the alternative is a one-byte read off the end.
+        if (x0 >= sw - 2 && y0 >= sh - 2) {
+          float px[4];
+          sampleBilinear<uint8_t, 3>(s, sw, sh, sxf, syf, border, px);
+          for (int ch = 0; ch < 3; ++ch)
+            out[x * 3 + ch] = (uint8_t)iclamp((int)std::lround(px[ch]), 0, 255);
+          continue;
+        }
         const float ax = sxf - x0, ay = syf - y0;
         float w00 = (1 - ax) * (1 - ay), w10 = ax * (1 - ay);
         float w01 = (1 - ax) * ay,       w11 = ax * ay;
@@ -217,14 +234,6 @@ Image warpAffine(const Image& src, const Affine& M, int dw, int dh, Border borde
           p10 = (x1ok && y0ok) ? s + ((size_t)y0 * sw + x0 + 1) * 3 : (w10 = 0.f, kZeroPx);
           p01 = (x0ok && y1ok) ? s + ((size_t)(y0 + 1) * sw + x0) * 3 : (w01 = 0.f, kZeroPx);
           p11 = (x1ok && y1ok) ? s + ((size_t)(y0 + 1) * sw + x0 + 1) * 3 : (w11 = 0.f, kZeroPx);
-        }
-        // The four-byte read must not run past the buffer; only p11 can reach its end.
-        if (p11 != kZeroPx && (size_t)(p11 - s) + 4 > nbytes) {
-          float px[4];
-          sampleBilinear<uint8_t, 3>(s, sw, sh, sxf, syf, border, px);
-          for (int ch = 0; ch < 3; ++ch)
-            out[x * 3 + ch] = (uint8_t)iclamp((int)std::lround(px[ch]), 0, 255);
-          continue;
         }
         storeU8x3(out + x * 3, tapsU8x3(p00, p10, p01, p11, w00, w10, w01, w11));
       }
