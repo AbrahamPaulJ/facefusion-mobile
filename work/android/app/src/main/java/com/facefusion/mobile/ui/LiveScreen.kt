@@ -71,15 +71,16 @@ fun LiveScreen(
 
         // ---------------------------------------------------------------- source
         //
-        // Above the feed, and the same pane the Swap screen uses: full width while empty,
-        // because an empty pane is a call to action, and collapsed to a small square once
-        // filled, because the source is one face that never changes during a run.
+        // Above the feed, and the same pane the Swap screen uses: full width always, and
+        // collapsed in HEIGHT once filled -- the source is one face that never changes
+        // during a run, so the pane it fills need not be tall. Not narrow, though: the
+        // caption row has to hold "SOURCE FACE" beside a camera and a delete button.
         //
         // ⚠ Not tappable while running. setSource re-detects and re-embeds, and doing that
         // under the pump would change identity halfway through a frame the camera is still
         // filling.
         val sourceBox = 104.dp
-        Box(if (sourceThumb != null) Modifier.width(sourceBox) else Modifier.fillMaxWidth()) {
+        Box(Modifier.fillMaxWidth()) {
             PreviewPane(
                 label = stringResource(R.string.swap_source_face),
                 height = if (sourceThumb != null) sourceBox else 220.dp,

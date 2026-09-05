@@ -440,11 +440,18 @@ fun SwapScreen(
         // same kind of thing: an image you choose by tapping its own frame.
         // EMPTY it is a full-width drop target, the same size and shape as the target's,
         // because an empty pane is a call to action and has to be easy to hit. FILLED it
-        // collapses to a small square: the source is one face, it never changes during a
-        // run, and at full width it was spending a third of the screen restating a decision
-        // already made. The pane stays tappable, so re-picking costs the same tap it did.
+        // collapses -- but in HEIGHT ONLY. The source is one face that never changes during
+        // a run, and a full-height pane was spending a third of the screen restating a
+        // decision already made; that cost was always the vertical one.
+        //
+        // ⚠ It used to collapse in BOTH axes, to a 104 dp square, and the width was pure
+        // loss: the space to its right sat empty while the caption row inside it had to fit
+        // "SOURCE FACE" plus a camera and a delete button into 104 dp, so the label wrapped
+        // onto two lines. The image does not stretch -- PreviewPane draws it
+        // ContentScale.Fit, so a wider box is more room for the caption and more letterbox
+        // around the same picture, at the same aspect ratio.
         val sourceBox = 104.dp
-        Box(if (hasSource) Modifier.width(sourceBox) else Modifier.fillMaxWidth()) {
+        Box(Modifier.fillMaxWidth()) {
             PreviewPane(
                 label = stringResource(R.string.swap_source_face),
                 height = if (hasSource) sourceBox else paneHeight,
