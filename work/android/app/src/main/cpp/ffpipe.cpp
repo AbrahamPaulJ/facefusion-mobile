@@ -585,18 +585,11 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame) {
   double ratioW = (double)frame.w / tw, ratioH = (double)frame.h / th;
 
   std::vector<float> in((size_t)3 * S * S, 0.f);   // CHW, /255, zero-padded
-  if (getenv("FFDETPREPLEGACY")) {
-    // The two-step version, kept for the A/B only. See resizeToCHW's header note.
-    ffcv::Image temp = (scale < 1.0) ? ffcv::resizeLinear(frame, tw, th) : frame;
-    for (int y = 0; y < temp.h; ++y) {
-      const uint8_t* row = temp.row(y);
-      for (int x = 0; x < temp.w; ++x)
-        for (int c = 0; c < 3; ++c)
-          in[(size_t)c * S * S + (size_t)y * S + x] = row[x * 3 + c] / 255.0f;
-    }
-  } else {
-    ffcv::resizeToCHW(frame, tw, th, S, in.data());
-  }
+  // Fused resize-and-planarise. The two-step version this replaced -- resizeLinear into an
+  // intermediate Image, then a scalar transpose out of it -- was 4.3 ms/frame of the
+  // geometry budget and its A/B switch is gone as of 0.6.1; see resizeToCHW's header note
+  // for why the fused one is bit-identical rather than merely close.
+  ffcv::resizeToCHW(frame, tw, th, S, in.data());
   msGeom += nowMs() - t0;
   msGeomDetPrep += nowMs() - t0;
 

@@ -593,59 +593,6 @@ void pasteBack(Image& frame, const MatF& crop, const MatF& mask, const Affine& a
   pasteBackRoi(frame, crop, mask, affine, 0, 0, crop.w, crop.h);
 }
 
-// The pre-0.5.2 paste: two full bilinear warps into two float buffers, then a blend pass
-// over them. Kept ONLY as the A/B reference for the fused version below, selected by
-// FFPASTELEGACY=1, so one binary can measure both inside a single thermal session --
-// which is the only kind of comparison this device gives a trustworthy answer to.
-// Delete once the fused path has been exact and faster across a release.
-static void pasteBackRoiLegacy(Image& frame, const MatF& crop, const MatF& mask,
-                               const Affine& affine, int rx0, int ry0, int rx1, int ry1) {
-  Affine inv = invertAffine(affine);
-  // The destination box is the projection of the caller's RECTANGLE, not of the whole
-  // crop. The lip syncer's mask is non-zero only over the lower face, so projecting all
-  // 512x512 corners warped roughly five times the area that the blend could touch, and
-  // both warps below are bilinear over every pixel of it. Outside the rectangle the mask
-  // is zero and the blend is the identity, so shrinking the box changes no output pixel.
-  rx0 = iclamp(rx0, 0, crop.w); rx1 = iclamp(rx1, 0, crop.w);
-  ry0 = iclamp(ry0, 0, crop.h); ry1 = iclamp(ry1, 0, crop.h);
-  if (rx1 <= rx0 || ry1 <= ry0) return;
-  float corners[8] = {(float)rx0, (float)ry0, (float)rx1, (float)ry0,
-                      (float)rx1, (float)ry1, (float)rx0, (float)ry1};
-  float out[8];
-  transformPoints(corners, 4, inv, out);
-  float minx = out[0], maxx = out[0], miny = out[1], maxy = out[1];
-  for (int i = 1; i < 4; ++i) {
-    minx = std::min(minx, out[2 * i]);   maxx = std::max(maxx, out[2 * i]);
-    miny = std::min(miny, out[2 * i + 1]); maxy = std::max(maxy, out[2 * i + 1]);
-  }
-  int x1 = iclamp((int)std::floor(minx), 0, frame.w);
-  int y1 = iclamp((int)std::floor(miny), 0, frame.h);
-  int x2 = iclamp((int)std::ceil(maxx), 0, frame.w);
-  int y2 = iclamp((int)std::ceil(maxy), 0, frame.h);
-  int pw = x2 - x1, ph = y2 - y1;
-  if (pw <= 0 || ph <= 0) return;
-
-  Affine paste = inv;
-  paste(0, 2) -= x1;
-  paste(1, 2) -= y1;
-
-  MatF im = warpAffineF(mask, paste, pw, ph, BORDER_CONSTANT);
-  MatF ic = warpAffineF(crop, paste, pw, ph, BORDER_REPLICATE);
-
-  for (int y = 0; y < ph; ++y) {
-    uint8_t* dst = frame.row(y1 + y) + (size_t)x1 * 3;
-    const float* mrow = im.row(y);
-    const float* crow = ic.row(y);
-    for (int x = 0; x < pw; ++x) {
-      float a = clampf(mrow[x], 0.f, 1.f);
-      for (int ch = 0; ch < 3; ++ch) {
-        float v = dst[x * 3 + ch] * (1.f - a) + crow[x * 3 + ch] * a;
-        dst[x * 3 + ch] = (uint8_t)iclamp((int)v, 0, 255);   // numpy astype = truncate
-      }
-    }
-  }
-}
-
 /**
  * paste_back, fused: sample the mask, sample the crop and blend in ONE pass.
  *
@@ -677,9 +624,6 @@ static void pasteBackRoiLegacy(Image& frame, const MatF& crop, const MatF& mask,
  */
 void pasteBackRoi(Image& frame, const MatF& crop, const MatF& mask, const Affine& affine,
                   int rx0, int ry0, int rx1, int ry1) {
-  if (getenv("FFPASTELEGACY"))
-    return pasteBackRoiLegacy(frame, crop, mask, affine, rx0, ry0, rx1, ry1);
-
   Affine inv = invertAffine(affine);
   rx0 = iclamp(rx0, 0, crop.w); rx1 = iclamp(rx1, 0, crop.w);
   ry0 = iclamp(ry0, 0, crop.h); ry1 = iclamp(ry1, 0, crop.h);
@@ -710,25 +654,13 @@ void pasteBackRoi(Image& frame, const MatF& crop, const MatF& mask, const Affine
   const float* mdata = mask.data.data();
   const float* cdata = crop.data.data();
 
-  // TILED, and this is where the time actually was. The affine is a rotation, so walking
-  // the destination in raster order walks the crop DIAGONALLY: a destination row touches a
-  // new crop row every few pixels, uses one or two of the five pixels in each 64-byte line,
-  // and by the time the next destination row wants that line it has been evicted. Measured
-  // at ~300 cycles per pixel for about 30 flops and 16 loads -- the arithmetic was never
-  // the cost, and no amount of SIMD would have found that out.
-  //
-  // A 64x64 destination tile touches roughly 64x64 of the crop, ~49 KB of float RGB, which
-  // stays resident while the tile is worked. Every pixel's computation is UNCHANGED and
-  // independent of every other, so this reorders nothing arithmetically: the output is
-  // bit-identical to the untiled loop, not merely within tolerance.
-  //
-  // FFPASTETILE overrides the size, 0 disabling tiling, so the sweep that chose 64 can be
-  // rerun on other silicon without a rebuild.
-  static const int kTile = [] {
-    const char* e = getenv("FFPASTETILE");
-    return e ? atoi(e) : 64;
-  }();
-  const int tile = kTile > 0 ? kTile : (pw > ph ? pw : ph);
+  // ⚠ This loop was TILED at 64x64 until 0.6.1, on the reasoning that a rotated affine
+  // walks the crop diagonally and thrashes the cache. That reasoning was never confirmed:
+  // the sweep that chose 64 measured the tiling as NOTHING against plain raster order, and
+  // the two hypotheses before it were wrong the same way. Raster order it is -- the
+  // arithmetic is per-pixel and independent either way, so the output is unchanged.
+  // Do not re-add tiling without a bench_geom PAIRED number; this is the third guess at
+  // this loop's memory behaviour and the first two cost a session each.
 
   // FFPASTESCALAR=1 keeps the scalar blend, so the NEON path is A/B-able in one binary.
   //
@@ -762,15 +694,11 @@ void pasteBackRoi(Image& frame, const MatF& crop, const MatF& mask, const Affine
   const bool dbg = kDbg && dbgLeft > 0;
   long nOutside = 0, nZero = 0, nBlend = 0, nFull = 0;
 
-  for (int ty = 0; ty < ph; ty += tile) {
-  const int tyEnd = ty + tile < ph ? ty + tile : ph;
-  for (int tx = 0; tx < pw; tx += tile) {
-  const int txEnd = tx + tile < pw ? tx + tile : pw;
-  for (int y = ty; y < tyEnd; ++y) {
+  for (int y = 0; y < ph; ++y) {
     uint8_t* dst = frame.row(y1 + y) + (size_t)x1 * 3;
     const double bx = W(0, 1) * y + W(0, 2);
     const double by = W(1, 1) * y + W(1, 2);
-    for (int x = tx; x < txEnd; ++x) {
+    for (int x = 0; x < pw; ++x) {
       const float sxf = (float)(W(0, 0) * x + bx);
       const float syf = (float)(W(1, 0) * x + by);
       const int px0 = (int)std::floor(sxf), py0 = (int)std::floor(syf);
@@ -852,8 +780,6 @@ void pasteBackRoi(Image& frame, const MatF& crop, const MatF& mask, const Affine
         d[c] = (uint8_t)iclamp((int)v, 0, 255);   // numpy astype = truncate
       }
     }
-  }
-  }
   }
   if (dbg) {
     --dbgLeft;
