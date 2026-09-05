@@ -152,6 +152,13 @@ class MainActivity : ComponentActivity() {
     private var liveFps by mutableStateOf(0.0)
     private var liveFaces by mutableStateOf(0)
     private var liveNote by mutableStateOf<String?>(null)
+    /**
+     * Which lens Live uses. In memory only, deliberately: it is not a [SwapOptions] field
+     * -- nothing about it reaches the pipeline -- and a camera choice that survived a
+     * restart would be a surprise on an app that opens on the Swap tab.
+     */
+    private var liveFrontCamera by mutableStateOf(true)
+
     // ⚠ Compose state, NOT live.isRunning. A plain field on the engine is invisible to
     // recomposition, so the first build showed a running feed under a button still saying
     // "Start" -- the pixels updated because the bitmap reference changed and nothing else
@@ -784,6 +791,8 @@ class MainActivity : ComponentActivity() {
                                 note = liveNote,
                                 modelsReady = !modelsMissing,
                                 onDownload = { onDownloadTapped() },
+                                frontCamera = liveFrontCamera,
+                                onSwitchCamera = ::switchLiveCamera,
                             )
                             Screen.Settings -> SettingsScreen(
                                 sections = modelSections(),
@@ -1983,8 +1992,26 @@ class MainActivity : ComponentActivity() {
         startLive()
     }
 
+    /**
+     * Flip the lens, restarting the pump if it was running.
+     *
+     * stop-then-start, not a rebind: see [LiveEngine.frontCamera]. It also means the
+     * pipeline is released and re-acquired around the switch, so PipeGuard's ownership and
+     * the tracker's state are exactly as they are for any other start -- a switch invents
+     * no new lifecycle, which is the point while roadmap 11 is still open.
+     */
+    private fun switchLiveCamera() {
+        val wasRunning = liveRunning
+        if (wasRunning) stopLive()
+        liveFrontCamera = !liveFrontCamera
+        liveNote = null
+        if (wasRunning) startLive()
+    }
+
     private fun startLive() {
         val src = sourceUri ?: return
+        // Read at bind time by the engine, so it must be set before start() and not after.
+        live.frontCamera = liveFrontCamera
         lifecycleScope.launch {
             if (!PipeGuard.acquire("live", 5000)) {
                 liveNote = pipeBusyMessage(); return@launch

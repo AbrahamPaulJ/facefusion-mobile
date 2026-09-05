@@ -393,6 +393,8 @@
     <string name="live_stop">Stop</string>
     <!-- %1$s frames per second, %2$s the face count phrase below -->
     <string name="live_stat">%1$s fps   %2$s</string>
+    <string name="live_lens_front">FRONT</string>
+    <string name="live_lens_back">BACK</string>
     <string name="live_faces">%1$d face(s)</string>
     <string name="live_no_face">no face</string>
     <string name="live_stop_to_change">Stop to change the source</string>

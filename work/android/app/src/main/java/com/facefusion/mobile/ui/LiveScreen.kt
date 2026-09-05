@@ -57,6 +57,10 @@ fun LiveScreen(
     modelsReady: Boolean,
     /** Start the model download. Live is reachable before any model exists. */
     onDownload: () -> Unit,
+    /** Which lens is bound. Decides the MIRROR, and nothing else on this screen. */
+    frontCamera: Boolean = true,
+    /** Flip the lens. Stops and restarts the pump when it is running. */
+    onSwitchCamera: () -> Unit = {},
 ) {
     // SCROLLS. Without this the controls below the feed are simply clipped: the first build
     // put the settings switch behind the navigation bar, where the only clue it existed was
@@ -143,7 +147,16 @@ fun LiveScreen(
                     // image so the detector gets a face the right way round; only what is
                     // drawn is flipped, which is what every selfie camera does and what
                     // makes moving left move left.
-                    modifier = Modifier.fillMaxSize().graphicsLayer(scaleX = -1f),
+                    //
+                    // ⚠ FRONT ONLY. The back camera is not a mirror -- it points at what
+                    // the user is looking at, and flipping it puts text backwards and
+                    // moves the world the wrong way. Mirroring it would not touch the
+                    // swap, which is what makes the mistake hard to read: the pipeline
+                    // gets the true image either way, so the bug would look like the
+                    // model failing when it is only the view.
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer(scaleX = if (frontCamera) -1f else 1f),
                 )
             } else {
                 Text(
@@ -162,6 +175,27 @@ fun LiveScreen(
             // land here first: it used to say "Models not installed" over a Start button
             // that could never enable, with the only way out on a screen it did not mention.
             if (!modelsReady) DownloadOverlay(onDownload)
+
+            // THE LENS, top-left, opposite the frame rate. A chip rather than an icon
+            // because material-icons-extended is not a dependency here and, more usefully,
+            // because a word says which camera is live -- an icon only says that it can be
+            // changed. Drawn whether or not the pump is running, since the choice is worth
+            // making before pressing Start.
+            Surface(
+                onClick = onSwitchCamera,
+                color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.55f),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+            ) {
+                Text(
+                    stringResource(if (frontCamera) R.string.live_lens_front
+                                   else R.string.live_lens_back),
+                    color = MaterialTheme.colorScheme.inverseOnSurface,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
 
             // Frame rate over the feed, where it is read while looking at the result rather
             // than after it. Only while running: a stale rate on a stopped feed is a lie.

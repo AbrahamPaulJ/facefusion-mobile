@@ -344,8 +344,13 @@ android {
         // 59 = the chip that triggered the download now comes ON when it lands. The
         // tap was an enable; 58 made the model arrive and left the stage off, so the
         // user had to ask twice and the first ask looked like it had failed.
-        versionCode = 59
-        versionName = "0.7.0$variantTag"    // "-dev" == NO content gate
+        // 60 = 0.8.0 opens. 0.7.0 is published and its asset is versionCode 59, so
+        // the moment a feature lands locally the build stops being that release and
+        // must stop calling itself one -- a bug report naming "0.7.0" has to mean the
+        // thing on GitHub. Features from here (roadmap 13a, 2b, 12b, 14, 13b) bump
+        // the CODE only; the name moves again when 0.8.0 is actually released.
+        versionCode = 60
+        versionName = "0.8.0$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }

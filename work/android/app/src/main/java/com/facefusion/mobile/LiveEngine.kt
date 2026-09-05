@@ -88,6 +88,20 @@ class LiveEngine {
     private val kGateIntervalMs = 1000L
     private var lastGateMs = 0L
 
+    /**
+     * Which lens [start] binds. Read at BIND time, so changing it does nothing to a pump
+     * that is already running -- the caller switches by stopping and starting again.
+     *
+     * ⚠ That is deliberate, and it is the cheap half of a real trade. Rebinding in place
+     * (unbindAll + bindToLifecycle on the live executor) would save ~200 ms, and it would
+     * do it on exactly the unbind/rebind path that already carries an unconfirmed
+     * use-after-free (roadmap 11, and the SIGSEGV quoted on [stop]). stop() then start()
+     * reuses the one path that has been debugged: the executor is drained, the buffers are
+     * dropped, and nothing native outlives the switch. A camera flip that takes as long as
+     * opening the camera is what every camera app already does.
+     */
+    @Volatile var frontCamera: Boolean = true
+
     // Per-stage cost, logged every 30 frames. Live was 6.5 fps on its first run against
     // 26.6 on a file, and no amount of reasoning about which stage was to blame beat
     // asking -- the same lesson the geometry buckets taught.
@@ -128,7 +142,7 @@ class LiveEngine {
     private val kMaxPreview = 1080
 
     /**
-     * Binds the front camera and starts the pump.
+     * Binds [frontCamera]'s lens and starts the pump.
      *
      * The pipeline must already be initialised and hold a source -- this class deliberately
      * does not own that: the same [NativePipe] is shared with the preview and the API, and
@@ -161,6 +175,13 @@ class LiveEngine {
             //
             // ResolutionSelector states the same intent in the API that is actually
             // consulted: nearest supported size to 720p, preferring lower, 16:9.
+            //
+            // ⚠ This is what keeps the BACK camera from costing frame rate. It offers far
+            // larger sizes than the front one, and every stage here scales with frame area
+            // -- detprep, the YUV conversion and the display downsample all do. Asking for
+            // 720p CLOSEST_LOWER_THEN_HIGHER means the better sensor is not followed up
+            // into a slideshow. Analysis resolution is a frame-rate decision, not a
+            // quality one; the swap runs at the size this returns.
             val resolution = androidx.camera.core.resolutionselector.ResolutionSelector.Builder()
                 .setAspectRatioStrategy(
                     androidx.camera.core.resolutionselector.AspectRatioStrategy
@@ -178,9 +199,23 @@ class LiveEngine {
                 .setOutputImageRotationEnabled(true)
                 .build()
             analysis.setAnalyzer(e) { img -> onImage(img, onShot) }
+            // The lens, and a REFUSAL that names itself. bindToLifecycle throws
+            // IllegalArgumentException for a camera the device does not have -- a tablet
+            // with no front camera, a phone with the back one disabled by policy -- and
+            // that arrived as "camera: IllegalArgumentException", which says nothing about
+            // what to do. Asked first, it is one sentence and the other lens still works.
+            val want = if (frontCamera) CameraSelector.DEFAULT_FRONT_CAMERA
+                       else CameraSelector.DEFAULT_BACK_CAMERA
+            if (!runCatching { p.hasCamera(want) }.getOrDefault(false)) {
+                onShot(Shot(null, 0, 0.0,
+                            if (frontCamera) "no front camera on this device"
+                            else "no back camera on this device"))
+                running = false
+                return@addListener
+            }
             runCatching {
                 p.unbindAll()
-                p.bindToLifecycle(owner, CameraSelector.DEFAULT_FRONT_CAMERA, analysis)
+                p.bindToLifecycle(owner, want, analysis)
                 // What was actually GRANTED, logged at bind rather than inferred from the
                 // first frame -- the gap between asked and granted is the whole story here.
                 android.util.Log.i("fflive", "granted ${analysis.resolutionInfo?.resolution}")

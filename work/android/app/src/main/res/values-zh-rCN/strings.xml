@@ -335,4 +335,6 @@
     <string name="set_tab_device">设备</string>
     <string name="set_tab_api">API</string>
     <string name="set_tab_about">关于</string>
+    <string name="live_lens_front">前置</string>
+    <string name="live_lens_back">后置</string>
 </resources>

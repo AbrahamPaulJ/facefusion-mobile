@@ -338,4 +338,6 @@
     <string name="set_tab_device">裝置</string>
     <string name="set_tab_api">API</string>
     <string name="set_tab_about">關於</string>
+    <string name="live_lens_front">前鏡頭</string>
+    <string name="live_lens_back">後鏡頭</string>
 </resources>

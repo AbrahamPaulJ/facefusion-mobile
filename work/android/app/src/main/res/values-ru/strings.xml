@@ -319,4 +319,6 @@
     <string name="set_tab_device">Устройство</string>
     <string name="set_tab_api">API</string>
     <string name="set_tab_about">О программе</string>
+    <string name="live_lens_front">ФРОНТ</string>
+    <string name="live_lens_back">ТЫЛ</string>
 </resources>
