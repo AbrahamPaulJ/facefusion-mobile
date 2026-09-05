@@ -197,6 +197,19 @@ object NativePipe {
      */
     @JvmStatic external fun contentScore(bgr: ByteArray, w: Int, h: Int): Float
 
+    /**
+     * The faces in one BGR frame, as boxes: **five floats each** -- x0, y0, x1, y1, score,
+     * in the frame's own pixel coordinates.
+     *
+     * Detector only. No landmarks and no embeddings, so this answers "what is on screen"
+     * and nothing about identity; it costs one yoloface pass rather than that plus 3.55 ms
+     * per face. It touches no tracker state either, so calling it while a run is warm
+     * cannot move what the run depends on.
+     *
+     * Empty when there is no pipeline or the frame is the wrong size -- never null.
+     */
+    @JvmStatic external fun detectFaces(bgr: ByteArray, w: Int, h: Int): FloatArray
+
     /** True when this tier had no fp32 gate context; see [ContentGate.QUANTISED_BIAS]. */
     @JvmStatic external fun contentGateIsQuantised(): Boolean
 

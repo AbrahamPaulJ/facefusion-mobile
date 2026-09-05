@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.widget.VideoView
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -23,6 +24,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
@@ -201,6 +204,15 @@ fun PreviewPane(
      * null disables gestures entirely (the output pane, which owns its own surface).
      */
     zoom: ZoomState? = null,
+    /**
+     * Face boxes to outline, in [bitmap]'s OWN pixel coordinates: five floats per face --
+     * x0, y0, x1, y1, score -- exactly as `NativePipe.detectFaces` returns them.
+     *
+     * In image space rather than pane space on purpose: the pane knows its own letterbox
+     * and its own zoom, and the detector does not. Converting here is four lines; converting
+     * at the call site would mean teaching MainActivity about ContentScale.Fit.
+     */
+    faceBoxes: FloatArray? = null,
     trailing: @Composable RowScope.() -> Unit = {},
 ) {
     // ONE container around the caption row AND the image, rather than a caption floating
@@ -320,6 +332,48 @@ fun PreviewPane(
                         ),
                     contentScale = ContentScale.Fit,
                 )
+                if (faceBoxes != null && faceBoxes.size >= 5) {
+                    // The SAME graphicsLayer as the Image above, so the outlines pan and
+                    // zoom with what they are outlining rather than sliding off it.
+                    Canvas(
+                        Modifier
+                            .fillMaxSize()
+                            .then(
+                                if (zoom != null) Modifier.graphicsLayer {
+                                    scaleX = zoom.scale
+                                    scaleY = zoom.scale
+                                    translationX = zoom.offset.x
+                                    translationY = zoom.offset.y
+                                } else Modifier
+                            )
+                    ) {
+                        // ContentScale.Fit, recomputed rather than guessed: uniform scale
+                        // to the smaller ratio, then centred. Getting this wrong does not
+                        // fail loudly -- it draws rectangles that are slightly off the
+                        // faces, which reads as a bad detector.
+                        val iw = bitmap.width.toFloat()
+                        val ih = bitmap.height.toFloat()
+                        if (iw > 0f && ih > 0f) {
+                            val k = minOf(size.width / iw, size.height / ih)
+                            val ox = (size.width - iw * k) / 2f
+                            val oy = (size.height - ih * k) / 2f
+                            // 2 dp at scale 1, thinned as the pane zooms in so the stroke
+                            // stays the same width on screen instead of growing into a slab.
+                            val w = 2.dp.toPx() / (zoom?.scale ?: 1f)
+                            for (i in 0 until faceBoxes.size / 5) {
+                                val b = i * 5
+                                drawRect(
+                                    color = FfRed,
+                                    topLeft = Offset(ox + faceBoxes[b] * k,
+                                                     oy + faceBoxes[b + 1] * k),
+                                    size = Size((faceBoxes[b + 2] - faceBoxes[b]) * k,
+                                                (faceBoxes[b + 3] - faceBoxes[b + 1]) * k),
+                                    style = Stroke(width = w),
+                                )
+                            }
+                        }
+                    }
+                }
             } else {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,

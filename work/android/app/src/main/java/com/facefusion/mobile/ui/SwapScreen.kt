@@ -48,6 +48,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import com.facefusion.mobile.R
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Face
 
 /** Everything the two preview panes need to draw themselves. */
 data class PreviewUi(
@@ -59,6 +60,11 @@ data class PreviewUi(
     val busy: Boolean = false,
     /** "No face detected", or an error. Shown in place of the image. */
     val note: String? = null,
+    /**
+     * What the detector found in [original], five floats per face, in the ORIGINAL's own
+     * pixel coordinates. Null when the overlay is off or nothing has been asked yet.
+     */
+    val faceBoxes: FloatArray? = null,
 )
 
 /**
@@ -131,6 +137,10 @@ fun SwapScreen(
      * missing set" -- and the missing set excludes exactly these two models by name.
      */
     onRequestModel: (label: String, model: String) -> Unit,
+    /** Whether the detector's boxes are drawn over the ORIGINAL pane. */
+    showFaceBoxes: Boolean,
+    /** Turn the face overlay on or off. Detection runs only while it is on. */
+    onToggleFaceBoxes: () -> Unit,
     openCard: String,
     onToggleCard: (String) -> Unit,
     /** There is something to save: a finished video, or a swapped still on the pane. */
@@ -532,6 +542,7 @@ fun SwapScreen(
                 onClick = if (idle) onPickTarget else null,
                 actionIcon = if (hasTarget) null else Icons.Default.Add,
                 zoom = zoom,
+                faceBoxes = preview.faceBoxes,
             ) {
                 // CAMERA, beside the gallery pick, and shown while the pane is EMPTY --
                 // which is when someone deciding what to swap needs it. Two buttons because
@@ -550,6 +561,17 @@ fun SwapScreen(
                     }
                 }
                 if (hasTarget) {
+                    // FACES. Off by default -- an app that draws rectangles over every
+                    // preview has changed how it looks for everyone to answer a question
+                    // most sessions never ask. One tap, on the pane the answer is drawn
+                    // over, and the icon goes red while it is on.
+                    IconButton(onToggleFaceBoxes, enabled = idle,
+                               modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Default.Face, stringResource(R.string.swap_show_faces),
+                             Modifier.size(20.dp),
+                             tint = if (showFaceBoxes) FfRed
+                                    else MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     // Icons rather than the word "Change": two actions fit where one word
                     // did, and the pane itself is already the picker, so the word was
                     // saying a third time what the tap and the + icon already say.

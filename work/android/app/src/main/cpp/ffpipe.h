@@ -184,7 +184,12 @@ class Pipeline {
   bool hasEnhancer() const;
 
   // Every face in one frame, fully analysed (detector + landmarker + recogniser).
-  std::vector<Face> analyse(const ffcv::Image& frame);
+  //
+  // `boxesOnly` stops after the detector: box, detector landmark5 and score are filled,
+  // landmark68 / landmark5_68 / embedding are NOT. It is the UI's question -- "which faces
+  // are in this frame" -- and it costs one yoloface pass instead of yoloface plus 3.55 ms
+  // per face. It also touches no tracker state, so it is safe to call while a run is warm.
+  std::vector<Face> analyse(const ffcv::Image& frame, bool boxesOnly = false);
 
   // The source identity: the largest face of the source image, embedding only.
   // Detector tracking, in FRAMES between real detections. 0 disables it.

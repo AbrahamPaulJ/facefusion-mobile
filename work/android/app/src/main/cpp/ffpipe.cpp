@@ -530,7 +530,7 @@ ContentVerdict Pipeline::checkContent(const ffcv::Image& frame) {
 
 // ---------------------------------------------------------------- detection
 
-std::vector<Face> Pipeline::analyse(const ffcv::Image& frame) {
+std::vector<Face> Pipeline::analyse(const ffcv::Image& frame, bool boxesOnly) {
   std::vector<Face> faces;
   const Config& cfg = p_->cfg;
   const int S = cfg.detectorSize;
@@ -550,7 +550,10 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame) {
   auto& tr = p_->track;
   const int trackPeriod =
       p_->trackPeriodOverride >= 0 ? p_->trackPeriodOverride : ffTrackPeriod();
-  const bool useTrack = trackPeriod > 0 && tr.valid && tr.since < trackPeriod;
+  // ⚠ boxesOnly never tracks. Tracking reconstructs the box from the PREVIOUS frame,
+  // which is meaningless for a UI question about one frame the user is looking at --
+  // and it would answer with a box the detector never found.
+  const bool useTrack = !boxesOnly && trackPeriod > 0 && tr.valid && tr.since < trackPeriod;
 
   if (useTrack) {
     // The landmarker still runs, every frame, on the reconstructed box. ONLY the search
@@ -646,6 +649,15 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame) {
     std::memcpy(f.landmark5, lms[idx].data(), sizeof(f.landmark5));
     for (int i = 0; i < 4; ++i) f.box[i] = boxes[idx][i];
     f.detScore = scores[idx];
+
+    // BOXES ONLY: what the detector found, and nothing after it.
+    //
+    // The rest of this loop is 5->68, the landmarker (2.55 ms/face) and the recogniser
+    // (1.00 ms/face) -- all of it identity and alignment work, none of it needed to draw a
+    // rectangle. `continue` also steps over the tracker update at the bottom of the loop,
+    // which is the other half of why this is safe to call from the UI: a question about
+    // one frame must not move state a video run depends on.
+    if (boxesOnly) { faces.push_back(f); continue; }
 
     // ---- 5 -> 68, then the snapped face angle
     t0 = nowMs();
@@ -825,7 +837,9 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame) {
     }
   }
 
-  ++framesDone;
+  // Not a processed frame: boxesOnly answers a UI question and must not appear in the
+  // stats a run reports.
+  if (!boxesOnly) ++framesDone;
   return faces;
 }
 

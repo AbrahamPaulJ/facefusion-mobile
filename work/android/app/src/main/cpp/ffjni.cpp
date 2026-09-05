@@ -208,6 +208,44 @@ Java_com_facefusion_mobile_NativePipe_contentScore(JNIEnv* env, jclass, jbyteArr
   return v.score;
 }
 
+// Which faces are in this frame, as boxes -- five floats each: x0, y0, x1, y1, score.
+//
+// A flat float[] rather than an object array: five numbers per face crossing JNI once beats
+// constructing N Java objects, and the caller draws rectangles from it directly.
+//
+// ⚠ DETECTOR ONLY. It does not run the landmarker or the recogniser, so nothing here is an
+// identity -- that is deliberate. Drawing rectangles needs no embedding, and computing one
+// per face on every preview would pay 3.55 ms/face for a picture. The day a face PICKER
+// needs identities (roadmap 12b), it asks for them explicitly rather than getting them as
+// a side effect of asking what is on screen.
+//
+// Returns an empty array when there is no pipeline or the frame is the wrong size, never
+// null: a UI overlay that has to null-check is a UI overlay that will crash once.
+JNIEXPORT jfloatArray JNICALL
+Java_com_facefusion_mobile_NativePipe_detectFaces(JNIEnv* env, jclass, jbyteArray jBgr,
+                                                  jint w, jint h) {
+  if (!g_pipe) { g_err = "pipeline not initialised"; return env->NewFloatArray(0); }
+  ffcv::Image img(w, h, 3);
+  if ((size_t)env->GetArrayLength(jBgr) != img.data.size()) {
+    g_err = "detectFaces: frame is not w*h*3 bytes";
+    return env->NewFloatArray(0);
+  }
+  env->GetByteArrayRegion(jBgr, 0, (jsize)img.data.size(), (jbyte*)img.data.data());
+  std::vector<ffpipe::Face> faces = g_pipe->analyse(img, /*boxesOnly=*/true);
+
+  std::vector<float> flat;
+  flat.reserve(faces.size() * 5);
+  for (const auto& f : faces) {
+    flat.push_back(f.box[0]); flat.push_back(f.box[1]);
+    flat.push_back(f.box[2]); flat.push_back(f.box[3]);
+    flat.push_back(f.detScore);
+  }
+  jfloatArray out = env->NewFloatArray((jsize)flat.size());
+  if (out && !flat.empty())
+    env->SetFloatArrayRegion(out, 0, (jsize)flat.size(), flat.data());
+  return out;
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_facefusion_mobile_NativePipe_contentGateIsQuantised(JNIEnv*, jclass) {
   return (g_pipe && g_pipe->contentGateIsQuantised()) ? JNI_TRUE : JNI_FALSE;

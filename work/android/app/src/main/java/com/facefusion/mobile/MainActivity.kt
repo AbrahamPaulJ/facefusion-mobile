@@ -153,6 +153,16 @@ class MainActivity : ComponentActivity() {
     private var liveFaces by mutableStateOf(0)
     private var liveNote by mutableStateOf<String?>(null)
     /**
+     * Whether the detector's boxes are drawn over the ORIGINAL pane, and what they are.
+     *
+     * Off by default: rectangles over every preview change how the app looks for everyone
+     * in order to answer a question most sessions never ask. While it is ON, every new
+     * original frame costs one yoloface pass (~2 ms) and no identity work at all.
+     */
+    private var showFaceBoxes by mutableStateOf(false)
+    private var faceBoxes by mutableStateOf<FloatArray?>(null)
+
+    /**
      * Which lens Live uses. In memory only, deliberately: it is not a [SwapOptions] field
      * -- nothing about it reaches the pipeline -- and a camera choice that survived a
      * restart would be a surprise on an app that opens on the Swap tab.
@@ -665,6 +675,32 @@ class MainActivity : ComponentActivity() {
                 // a stale frame filled the pane instead. Now that a target change keeps the
                 // pipeline (see clearPreviewFrames), this is what draws the new target, and
                 // the guard would have left the pane empty.
+                // WHAT THE DETECTOR SEES, on demand.
+                //
+                // Keyed on the frame and the switch, so it re-asks when either changes and
+                // never runs while the overlay is off. `previewWarm` is the precondition
+                // that matters: detectFaces goes straight at the shared g_pipe, so it must
+                // not be asked while a run owns it -- `busy` covers that, and PipeGuard
+                // covers the API.
+                LaunchedEffect(originalFrame, showFaceBoxes, previewWarm, busy) {
+                    val frame = originalFrame
+                    if (!showFaceBoxes || frame == null || !previewWarm || busy) {
+                        if (!showFaceBoxes) faceBoxes = null
+                        return@LaunchedEffect
+                    }
+                    faceBoxes = withContext(Dispatchers.Default) {
+                        runCatching {
+                            val soft = frame.copy(Bitmap.Config.ARGB_8888, false)
+                                ?: return@runCatching null
+                            val px = IntArray(soft.width * soft.height)
+                            soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
+                            NativePipe.detectFaces(
+                                NativePipe.argbToBgr(px, soft.width, soft.height),
+                                soft.width, soft.height)
+                        }.getOrNull()
+                    }
+                }
+
                 LaunchedEffect(sourceUri, targetVersion, modelsMissing) {
                     android.util.Log.d("ffpreview", "autowarm fired: src=" +
                         (sourceUri != null) + " tgt=" +
@@ -718,6 +754,7 @@ class MainActivity : ComponentActivity() {
                                     warm = previewWarm,
                                     busy = previewBusy,
                                     note = previewNote,
+                                    faceBoxes = if (showFaceBoxes) faceBoxes else null,
                                 ),
                                 run = RunUi(busy, preparing, progress, framesDone,
                                             framesTotal, elapsedS),
@@ -731,6 +768,14 @@ class MainActivity : ComponentActivity() {
                                 hasLipSyncer = hasLipSyncer,
                                 onRequestModel = { label, model ->
                                     confirmModel = label to model
+                                },
+                                showFaceBoxes = showFaceBoxes,
+                                onToggleFaceBoxes = {
+                                    showFaceBoxes = !showFaceBoxes
+                                    // Drop the old answer with the switch. Keeping it would
+                                    // redraw the PREVIOUS frame's boxes over the current one
+                                    // for as long as detection takes.
+                                    faceBoxes = null
                                 },
                                 openCard = openCard,
                                 onToggleCard = { k -> openCard = if (openCard == k) "" else k },

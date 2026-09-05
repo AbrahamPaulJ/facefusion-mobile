@@ -321,4 +321,5 @@
     <string name="set_tab_about">О программе</string>
     <string name="live_lens_front">ФРОНТ</string>
     <string name="live_lens_back">ТЫЛ</string>
+    <string name="swap_show_faces">Показать найденные лица</string>
 </resources>

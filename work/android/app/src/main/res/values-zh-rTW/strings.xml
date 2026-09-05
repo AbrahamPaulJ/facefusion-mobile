@@ -340,4 +340,5 @@
     <string name="set_tab_about">關於</string>
     <string name="live_lens_front">前鏡頭</string>
     <string name="live_lens_back">後鏡頭</string>
+    <string name="swap_show_faces">顯示偵測到的臉孔</string>
 </resources>

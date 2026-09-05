@@ -337,4 +337,5 @@
     <string name="set_tab_about">关于</string>
     <string name="live_lens_front">前置</string>
     <string name="live_lens_back">后置</string>
+    <string name="swap_show_faces">显示检测到的人脸</string>
 </resources>
