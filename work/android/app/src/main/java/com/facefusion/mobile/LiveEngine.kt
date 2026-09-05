@@ -81,6 +81,10 @@ class LiveEngine {
 
     val isRunning: Boolean get() = running
 
+    // Longest edge of the DISPLAYED bitmap. Above a phone screen's own width there is
+    // nothing to see and everything to pay for.
+    private val kMaxPreview = 1080
+
     /**
      * Binds the front camera and starts the pump.
      *
@@ -104,10 +108,28 @@ class LiveEngine {
                 return@addListener
             }
             provider = p
+            // ⚠ setTargetResolution DID NOT WORK and did not complain. Asking it for
+            // 1280x720 got a 2736x2736 SQUARE frame -- 7.5 megapixels, 8.1x what was
+            // requested -- and every stage paid: 35 ms of YUV conversion, 42 ms of swap
+            // (detprep scales with frame area) and 56 ms of display, for 6.9 fps against
+            // 26.6 on a 720p file. It is deprecated in camera-core 1.3 and interacts badly
+            // with output rotation, which is presumably why it was ignored rather than
+            // honoured or refused.
+            //
+            // ResolutionSelector states the same intent in the API that is actually
+            // consulted: nearest supported size to 720p, preferring lower, 16:9.
+            val resolution = androidx.camera.core.resolutionselector.ResolutionSelector.Builder()
+                .setAspectRatioStrategy(
+                    androidx.camera.core.resolutionselector.AspectRatioStrategy
+                        .RATIO_16_9_FALLBACK_AUTO_STRATEGY)
+                .setResolutionStrategy(
+                    androidx.camera.core.resolutionselector.ResolutionStrategy(
+                        android.util.Size(1280, 720),
+                        androidx.camera.core.resolutionselector.ResolutionStrategy
+                            .FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER))
+                .build()
             val analysis = ImageAnalysis.Builder()
-                // 720p to match what the swap was measured at. CameraX treats this as a
-                // request, not a promise, and picks the nearest supported size.
-                .setTargetResolution(android.util.Size(1280, 720))
+                .setResolutionSelector(resolution)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
                 .setOutputImageRotationEnabled(true)
@@ -116,6 +138,9 @@ class LiveEngine {
             runCatching {
                 p.unbindAll()
                 p.bindToLifecycle(owner, CameraSelector.DEFAULT_FRONT_CAMERA, analysis)
+                // What was actually GRANTED, logged at bind rather than inferred from the
+                // first frame -- the gap between asked and granted is the whole story here.
+                android.util.Log.i("fflive", "granted ${analysis.resolutionInfo?.resolution}")
             }.onFailure {
                 onShot(Shot(null, 0, 0.0, "camera: ${it.javaClass.simpleName}"))
                 running = false
@@ -177,13 +202,22 @@ class LiveEngine {
                 return
             }
 
+            // DOWNSCALE FOR DISPLAY. bgrToArgb already box-downsamples -- it exists for
+            // exactly this -- and the pane is under 1100 px wide on this phone, so
+            // converting at full sensor resolution and letting the GPU shrink it afterwards
+            // was pure waste: at 2736x2736 the IntArray alone is 30 MB PER FRAME, allocated
+            // and copied, which is why `out` was the most expensive stage of the three.
+            // The swap still runs at full frame resolution; only what is drawn shrinks.
+            val scale = maxOf(1, (maxOf(w, h) + kMaxPreview - 1) / kMaxPreview)
+            val dw = w / scale
+            val dh = h / scale
             bufIx = bufIx xor 1
             var bmp = bufs[bufIx]
-            if (bmp == null || bmp.width != w || bmp.height != h) {
-                bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            if (bmp == null || bmp.width != dw || bmp.height != dh) {
+                bmp = Bitmap.createBitmap(dw, dh, Bitmap.Config.ARGB_8888)
                 bufs[bufIx] = bmp
             }
-            bmp.setPixels(NativePipe.bgrToArgb(bgr, w, h, w, h), 0, w, 0, 0, w, h)
+            bmp.setPixels(NativePipe.bgrToArgb(bgr, w, h, dw, dh), 0, dw, 0, 0, dw, dh)
             msOut += (System.nanoTime() - t) / 1e6
 
             if (++nStat == 30) {
