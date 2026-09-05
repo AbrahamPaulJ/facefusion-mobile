@@ -722,7 +722,14 @@ void pasteBackRoi(Image& frame, const MatF& crop, const MatF& mask, const Affine
   const int tile = kTile > 0 ? kTile : (pw > ph ? pw : ph);
 
   // FFPASTESCALAR=1 keeps the scalar blend, so the NEON path is A/B-able in one binary.
-  static const bool neonOff = getenv("FFPASTESCALAR") != nullptr;
+  //
+  // FFCVSCALAR is documented as turning off every NEON path in this file, and until 0.5.2
+  // it did not reach this one -- so a whole-file A/B ran the NEON blend in BOTH arms and
+  // reported its cost as noise (-0.45 ms/frame, sign flipping with the run order). It is
+  // ORed in here so the switch means what the docs and the working rules say it means.
+#ifdef FFCV_NEON
+  static const bool neonOff = getenv("FFPASTESCALAR") != nullptr || neonDisabled();
+#endif
 
   // FFPASTEDBG reports the box actually being blended. Guessing at it produced two wrong
   // hypotheses in a row -- a working set that would thrash the cache, then a tile size to
