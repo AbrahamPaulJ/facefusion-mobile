@@ -1325,7 +1325,7 @@ class MainActivity : ComponentActivity() {
             // The API server may be mid-request. Wait briefly rather than bounce: a preview
             // that quietly does not appear is the bug this whole pass has been about.
             if (!PipeGuard.acquire("preview", 4000)) {
-                previewNote = getString(R.string.status_api_busy)
+                previewNote = pipeBusyMessage()
                 return@launch
             }
             // Someone else has had the pipeline since this screen last used it, so the warm
@@ -1692,6 +1692,24 @@ class MainActivity : ComponentActivity() {
      * invalidated for exactly the reason picking a different source does: otherwise the
      * swapped pane keeps showing a face the user has just removed.
      */
+    /**
+     * Why the pipeline could not be taken, naming whoever has it.
+     *
+     * ⚠ All three callers used to print "the remote API is using the NPU" no matter who
+     * actually held it. PipeGuard has recorded the holder since it was written and nothing
+     * asked. Reported from the field as Live blaming the API on the GPU backend -- where
+     * the preview holds the pipe far longer, so it is the preview that loses the race.
+     * The message also claimed an NPU on devices whose whole point is not having one.
+     */
+    private fun pipeBusyMessage(): String = getString(R.string.status_pipe_busy,
+        getString(when (PipeGuard.holder) {
+            "preview" -> R.string.pipe_holder_preview
+            "swap" -> R.string.pipe_holder_swap
+            "api", "api-stop" -> R.string.pipe_holder_api
+            "live" -> R.string.pipe_holder_live
+            else -> R.string.pipe_holder_other
+        }))
+
     private fun clearSource() {
         sourceUri = null
         sourceThumb = null
@@ -1756,7 +1774,7 @@ class MainActivity : ComponentActivity() {
         val src = sourceUri ?: return
         lifecycleScope.launch {
             if (!PipeGuard.acquire("live", 5000)) {
-                liveNote = getString(R.string.status_api_busy); return@launch
+                liveNote = pipeBusyMessage(); return@launch
             }
             // The preview holds a warm pipeline configured for the Swap screen. Live needs
             // its own configuration, so the preview's is dropped rather than mutated --
@@ -1852,7 +1870,7 @@ class MainActivity : ComponentActivity() {
             // The run owns the pipeline for its whole length, minutes on a long clip. The
             // API server gets 503 for the duration, which is the honest answer.
             if (!PipeGuard.acquire("swap", 5000)) {
-                status = getString(R.string.status_api_busy)
+                status = pipeBusyMessage()
                 busy = false
                 return@launch
             }

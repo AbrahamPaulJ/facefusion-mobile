@@ -261,7 +261,6 @@
     <string name="status_save_failed">儲存失敗：%1$s</string>
     <string name="status_save_frame_failed">儲存該格失敗：%1$s</string>
     <string name="status_save_first">請先儲存至相簿，然後再分享</string>
-    <string name="status_api_busy">遠端 API 正在佔用 NPU</string>
     <string name="status_no_face">這一格中沒有偵測到人臉</string>
     <string name="status_cannot_read_frame">無法讀取該格</string>
     <string name="status_cannot_read_source">無法讀取來源圖片</string>
@@ -320,4 +319,10 @@
     <string name="live_fast_confirm_ok">關閉</string>
     <string name="common_cancel">取消</string>
     <string name="common_delete">刪除</string>
+    <string name="status_pipe_busy">忙碌中：%1$s 正在使用模型</string>
+    <string name="pipe_holder_preview">預覽</string>
+    <string name="pipe_holder_swap">進行中的替換</string>
+    <string name="pipe_holder_api">遠端 API</string>
+    <string name="pipe_holder_live">即時相機</string>
+    <string name="pipe_holder_other">應用程式的其他部分</string>
 </resources>

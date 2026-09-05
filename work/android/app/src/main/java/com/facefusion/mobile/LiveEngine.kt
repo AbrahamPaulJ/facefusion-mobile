@@ -71,14 +71,22 @@ class LiveEngine {
      */
     @Volatile var gateThreshold: Float = Float.NaN
     /**
-     * One check per this many frames. The gate costs 5.05 ms against a ~40 ms frame, so
-     * every frame would be a 12% tax for a scene that changes far slower than 25 times a
-     * second. At 30 it is under 0.2 ms/frame amortised and still samples ~1.2 times a
-     * second -- slightly OFTENER than the video path's one-per-second, because a live feed
-     * can be pointed somewhere new at any moment.
+     * One check per this many MILLISECONDS of wall time.
+     *
+     * ⚠ Time, not frames, and the difference is the whole point. The first version sampled
+     * every 30 FRAMES, which is ~1.2 checks/second on the NPU and looks fine -- but the
+     * guarantee it actually makes is "one check per 30 frames", and on the ncnn backend a
+     * frame costs ~240-540 ms instead of ~40. The same constant would have left 8 to 16
+     * SECONDS of unchecked camera between samples on exactly the devices that are slowest,
+     * which is a gate that quietly weakens as the hardware gets worse.
+     *
+     * One second matches what checkVideo already promises for a file (analyse_video's
+     * SAMPLE_INTERVAL_US), so the app now makes ONE promise about unchecked footage
+     * regardless of path or backend. The cost is bounded the same way: 5.05 ms once a
+     * second on the NPU is 0.5% of a frame's budget.
      */
-    private val kGateEvery = 30
-    private var gateTick = 0
+    private val kGateIntervalMs = 1000L
+    private var lastGateMs = 0L
 
     // Per-stage cost, logged every 30 frames. Live was 6.5 fps on its first run against
     // 26.6 on a file, and no amount of reasoning about which stage was to blame beat
@@ -130,6 +138,7 @@ class LiveEngine {
         if (running) return
         running = true
         windowStart = System.nanoTime(); windowFrames = 0
+        lastGateMs = 0L   // so this session gates its own first frame
         val e = Executors.newSingleThreadExecutor()
         exec = e
         val future = ProcessCameraProvider.getInstance(ctx)
@@ -245,11 +254,12 @@ class LiveEngine {
             // ONE call: planes in, swapped preview written into bmp's own pixels. The four
             // it replaced spent 23 of Live's 62 ms/frame moving bytes across JNI -- see
             // liveFrame in ffjni.cpp for what each of them was copying.
-            // Sample the gate on one frame in kGateEvery, and on the very FIRST frame of a
-            // session -- gateTick starts at 0, so `% kGateEvery == 0` fires immediately.
-            // That matters: a run that is refused should be refused before it has shown
-            // anything, not 29 frames in.
-            val gateNow = !gateThreshold.isNaN() && (gateTick++ % kGateEvery == 0)
+            // Sample on the first frame of a session and every kGateIntervalMs after.
+            // lastGateMs is zeroed in start(), so the first frame always samples: a session
+            // that will be refused should be refused before it has shown anything.
+            val nowMs = System.currentTimeMillis()
+            val gateNow = !gateThreshold.isNaN() && (nowMs - lastGateMs >= kGateIntervalMs)
+            if (gateNow) lastGateMs = nowMs
             val t = System.nanoTime()
             val faces = NativePipe.liveFrame(
                 p[0].buffer, p[0].rowStride,

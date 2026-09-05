@@ -264,7 +264,6 @@
     <string name="status_save_failed">Не удалось сохранить: %1$s</string>
     <string name="status_save_frame_failed">Не удалось сохранить кадр: %1$s</string>
     <string name="status_save_first">Сначала сохраните в галерею, затем поделитесь</string>
-    <string name="status_api_busy">Удалённый API сейчас использует NPU</string>
     <string name="status_no_face">В этом кадре лицо не найдено</string>
     <string name="status_cannot_read_frame">Не удалось прочитать этот кадр</string>
     <string name="status_cannot_read_source">Не удалось прочитать исходное изображение</string>
@@ -301,4 +300,10 @@
     <string name="common_cancel">Отмена</string>
     <string name="common_delete">Удалить</string>
 
+    <string name="status_pipe_busy">Занято: %1$s использует модели</string>
+    <string name="pipe_holder_preview">предпросмотр</string>
+    <string name="pipe_holder_swap">выполняемая замена</string>
+    <string name="pipe_holder_api">удалённый API</string>
+    <string name="pipe_holder_live">камера Live</string>
+    <string name="pipe_holder_other">другая часть приложения</string>
 </resources>

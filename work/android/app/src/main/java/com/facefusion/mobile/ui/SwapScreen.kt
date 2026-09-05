@@ -31,6 +31,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.facefusion.mobile.FaceDetectorCard
@@ -290,6 +291,19 @@ fun SwapScreen(
                                 !installed -> MaterialTheme.colorScheme.onSurfaceVariant
                                 else -> MaterialTheme.colorScheme.onSurface
                             },
+                            // ⚠ weight(fill = false) is what keeps every gear THE SAME
+                            // SIZE. Row does not wrap, it SQUEEZES, and with two chips
+                            // across a phone the squeeze landed on whichever child had no
+                            // weight -- the icon. So face_swapper and face_enhancer, which
+                            // share a row, drew a visibly smaller gear than lip_syncer,
+                            // which has its row to itself. A weighted child is measured
+                            // with what is LEFT after the unweighted ones, so the label now
+                            // absorbs the shortfall (it ellipsises) and the gear never
+                            // changes size. fill = false so a short label still does not
+                            // stretch the chip.
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
                         )
                         // Its own clickable inside the chip's, which Compose resolves to the
                         // innermost -- so the gear opens settings and does NOT also toggle
@@ -302,10 +316,9 @@ fun SwapScreen(
                                 Icons.Default.Settings,
                                 stringResource(R.string.swap_proc_settings, name),
                                 Modifier
-                                    .size(22.dp)
+                                    .size(18.dp)
                                     .clip(CircleShape)
-                                    .clickable(enabled = idle) { onSettings() }
-                                    .padding(2.dp),
+                                    .clickable(enabled = idle) { onSettings() },
                                 tint = if (active) Color.White.copy(alpha = 0.85f)
                                        else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -329,7 +342,15 @@ fun SwapScreen(
                     ProcessorChip(
                         name = stringResource(R.string.swap_proc_swapper),
                         installed = true, on = true, available = true, onToggle = {},
-                        onSettings = { settingsFor = "swapper" },
+                        // Opens with the Face Swapper card already expanded, so the
+                        // weight slider -- the knob most runs actually touch -- is there
+                        // on arrival rather than one tap further in. Only when nothing
+                        // else is open, so a card the user deliberately left open on a
+                        // previous visit is respected.
+                        onSettings = {
+                            settingsFor = "swapper"
+                            if (openCard.isEmpty()) onToggleCard("swapper")
+                        },
                     )
                     ProcessorChip(
                         name = stringResource(R.string.swap_proc_enhancer),

@@ -346,7 +346,16 @@
     <string name="status_save_failed">Save failed: %1$s</string>
     <string name="status_save_frame_failed">Save frame failed: %1$s</string>
     <string name="status_save_first">Save to gallery first, then share</string>
-    <string name="status_api_busy">The remote API is using the NPU</string>
+    <!-- ⚠ Names the ACTUAL holder. This used to be a single "the remote API is using the
+         NPU" shown by all three callers, so a preview still finishing was reported as the
+         API - and on the GPU backend, where the preview is ~20x slower, that was the
+         common case rather than the rare one. It also said NPU on devices that have none. -->
+    <string name="status_pipe_busy">Busy: %1$s is using the models</string>
+    <string name="pipe_holder_preview">the preview</string>
+    <string name="pipe_holder_swap">a swap in progress</string>
+    <string name="pipe_holder_api">the remote API</string>
+    <string name="pipe_holder_live">the Live camera</string>
+    <string name="pipe_holder_other">another part of the app</string>
     <string name="status_no_face">No face detected in this frame</string>
     <string name="status_cannot_read_frame">Could not read that frame</string>
     <string name="status_cannot_read_source">Could not read the source image</string>

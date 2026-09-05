@@ -258,7 +258,6 @@
     <string name="status_save_failed">保存失败：%1$s</string>
     <string name="status_save_frame_failed">保存该帧失败：%1$s</string>
     <string name="status_save_first">请先保存到相册，然后再分享</string>
-    <string name="status_api_busy">远程 API 正在占用 NPU</string>
     <string name="status_no_face">这一帧中没有检测到人脸</string>
     <string name="status_cannot_read_frame">无法读取该帧</string>
     <string name="status_cannot_read_source">无法读取源图片</string>
@@ -317,4 +316,10 @@
     <string name="live_fast_confirm_ok">关闭</string>
     <string name="common_cancel">取消</string>
     <string name="common_delete">删除</string>
+    <string name="status_pipe_busy">忙碌：%1$s 正在使用模型</string>
+    <string name="pipe_holder_preview">预览</string>
+    <string name="pipe_holder_swap">正在进行的替换</string>
+    <string name="pipe_holder_api">远程 API</string>
+    <string name="pipe_holder_live">实时相机</string>
+    <string name="pipe_holder_other">应用的其他部分</string>
 </resources>
