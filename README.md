@@ -104,7 +104,7 @@ Measured on a Snapdragon 8 Elite, same clip through the same app.
 
 The NPU figure is measured on the current release. The GPU one was measured before the CPU
 geometry was rewritten, and that work is shared by both paths, so expect it to be lower than
-this table says — it has not been re-measured on a phone that needs it.
+this table says — it has not been re-measured since.
 
 The GPU and CPU path produces the same swap rather than an approximation of it. Two stages
 stay on the CPU whatever the phone has, because on the GPU they come out measurably wrong:
@@ -119,8 +119,6 @@ you say otherwise.
 
 ## Roadmap
 
-- Get the GPU and CPU path onto a phone that actually needs it. It has only ever run on a
-  Snapdragon with the NPU switched off.
 - Show the faces detected in the target, so you can see what will be swapped.
 - Live portrait, for stills only. The generator costs nine times the entire current frame,
   which turns a 10 second clip into about four minutes.
