@@ -156,6 +156,12 @@
     <string name="opt_faces_every_short">every face</string>
     <string name="opt_faces_largest_short">largest face</string>
     <string name="opt_faces_hint">swap every face in the frame, or only the largest one</string>
+    <!-- The only option in the app that trades OUTPUT for speed, so the hint says so
+         plainly rather than selling it. zh-rCN/zh-rTW fall back to English until
+         translated, which is the intended behaviour for a new string. -->
+    <string name="opt_fast_video">Fast video</string>
+    <string name="opt_fast_video_hint">Frames between face detections. The face is tracked in between instead of found again, which is faster but slightly less exact when the head moves quickly. Applies to video runs only — the preview always finds the face.</string>
+    <string name="opt_fast_video_off">Off</string>
     <string name="opt_detector_note">detector size is fixed at 640 and the swapper at 256 — both are compiled into the NPU binaries</string>
 
     <string name="opt_face_enhancer">Face Enhancer</string>

@@ -322,6 +322,19 @@ fun FaceDetectorCard(
             { onChange(opts.copy(largestOnly = it)) },
             hint = stringResource(R.string.opt_faces_hint),
         )
+        // How OFTEN the detector runs, which belongs beside the two sliders that say how
+        // it behaves when it does. Unlike everything else in this card, this one changes
+        // the output: measured against detecting every frame it deviates by 45.5 dB over
+        // the swapped region at natural head motion and 42.2 dB at 6x, where this port's
+        // own native-vs-host error is 42.0 dB over the same region.
+        OptionSegments(
+            stringResource(R.string.opt_fast_video),
+            listOf(0 to stringResource(R.string.opt_fast_video_off),
+                   2 to "2", 4 to "4", 8 to "8"),
+            opts.trackPeriod,
+            { onChange(opts.copy(trackPeriod = it)) },
+            hint = stringResource(R.string.opt_fast_video_hint),
+        )
         // detector size (640) and the swapper's 256² input are absent on purpose: both are
         // baked into the context binary at conversion, so they are a rebuild, not a knob.
         Text(stringResource(R.string.opt_detector_note),

@@ -48,6 +48,16 @@ object NativePipe {
      * can be left out of. Set it once, from [ModelPaths.apply], and no future path can
      * forget it.
      */
+    /**
+     * Frames between real face detections; 0 detects every frame.
+     *
+     * ⚠ Video runs ONLY, and it must be cleared afterwards. [processFrame] is shared with
+     * the preview, whose consecutive calls are unrelated frames the user seeked to -- a
+     * left-over period there would reconstruct a box from a frame that has nothing to do
+     * with the one being drawn.
+     */
+    @JvmStatic external fun setTrackPeriod(frames: Int)
+
     @JvmStatic external fun setSkipTiers(tiers: String)
 
     /**

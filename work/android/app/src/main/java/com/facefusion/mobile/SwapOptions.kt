@@ -47,6 +47,24 @@ data class SwapOptions(
     val largestOnly: Boolean = false,
 
     /**
+     * Frames between real face detections during a VIDEO run. 0 = detect every frame,
+     * which is upstream's behaviour and the default.
+     *
+     * The only option here that trades OUTPUT for speed. Everything else in this class
+     * either changes the result on purpose (weight, blur) or is free; this one reconstructs
+     * the detector's box from the previous frame's landmarks and skips yoloface plus its
+     * whole-frame letterbox -- measured at 7.07 ms/frame saved at period 4, against a
+     * deviation from every-frame detection of 45.5 dB over the swapped region at natural
+     * motion and 42.2 dB at 6x motion. For scale, this port's native-vs-host-reference
+     * error is 42.0 dB over the same region, so at ordinary motion it costs less than the
+     * quantisation already does.
+     *
+     * ⚠ Applies to video runs ONLY. The preview shares `Pipeline::analyse`, where
+     * consecutive calls are unrelated frames the user seeked to.
+     */
+    val trackPeriod: Int = 0,
+
+    /**
      * `--face-enhancer`, gpen_bfr_256. Off by default.
      *
      * Costs 8.57 GMAC per face on top of the swapper's 31.93, and needs its own context
@@ -114,6 +132,7 @@ data class SwapOptions(
             .putFloat(K_LMK, landmarkerScore)
             .putInt(K_BOOST, pixelBoost)
             .putBoolean(K_LARGEST, largestOnly)
+            .putInt(K_TRACK, trackPeriod)
             .putBoolean(K_ENHANCE, faceEnhance)
             .putFloat(K_ENHANCE_BLEND, enhanceBlend)
             .putBoolean(K_LIP_SYNC, lipSync)
@@ -132,6 +151,7 @@ data class SwapOptions(
         private const val K_LMK = "landmarker_score"
         private const val K_BOOST = "pixel_boost"
         private const val K_LARGEST = "largest_only"
+        private const val K_TRACK = "track_period"
         private const val K_ENHANCE = "face_enhance"
         private const val K_ENHANCE_BLEND = "face_enhance_blend"
         private const val K_LIP_SYNC = "lip_sync"
@@ -159,6 +179,7 @@ data class SwapOptions(
                 landmarkerScore = p.getFloat(K_LMK, d.landmarkerScore),
                 pixelBoost = p.getInt(K_BOOST, d.pixelBoost),
                 largestOnly = p.getBoolean(K_LARGEST, d.largestOnly),
+                trackPeriod = p.getInt(K_TRACK, d.trackPeriod),
                 faceEnhance = p.getBoolean(K_ENHANCE, d.faceEnhance),
                 enhanceBlend = p.getFloat(K_ENHANCE_BLEND, d.enhanceBlend),
                 lipSync = p.getBoolean(K_LIP_SYNC, d.lipSync),

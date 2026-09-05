@@ -180,6 +180,9 @@ struct Pipeline::Impl {
     void reset() { valid = false; since = 0; }
   };
   Track track;
+  // <0 means "not set by the caller": fall back to FFTRACK so the headless CLI keeps its
+  // env switch and the app never depends on one.
+  int trackPeriodOverride = -1;
 };
 
 Pipeline::Pipeline() = default;
@@ -542,7 +545,8 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame) {
   double t0 = 0;
 
   auto& tr = p_->track;
-  const int trackPeriod = ffTrackPeriod();
+  const int trackPeriod =
+      p_->trackPeriodOverride >= 0 ? p_->trackPeriodOverride : ffTrackPeriod();
   const bool useTrack = trackPeriod > 0 && tr.valid && tr.since < trackPeriod;
 
   if (useTrack) {
@@ -827,6 +831,13 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame) {
 
   ++framesDone;
   return faces;
+}
+
+void Pipeline::setTrackPeriod(int frames) {
+  p_->trackPeriodOverride = frames < 0 ? 0 : frames;
+  // A period change invalidates whatever was being tracked: the caller is starting or
+  // ending a sequential run, so "the previous frame" is not this run's previous frame.
+  p_->track.reset();
 }
 
 bool Pipeline::setSource(const ffcv::Image& img) {

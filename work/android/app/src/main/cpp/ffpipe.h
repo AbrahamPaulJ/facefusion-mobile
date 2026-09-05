@@ -187,6 +187,14 @@ class Pipeline {
   std::vector<Face> analyse(const ffcv::Image& frame);
 
   // The source identity: the largest face of the source image, embedding only.
+  // Detector tracking, in FRAMES between real detections. 0 disables it.
+  //
+  // ⚠ Set this ONLY for sequential decode. analyse() is also the preview path, where
+  // consecutive calls are unrelated frames the user seeked to, and "reconstruct the box
+  // from the previous frame" means nothing there. VideoSwapper turns it on for its run and
+  // back off afterwards; nothing else may.
+  void setTrackPeriod(int frames);
+
   bool setSource(const ffcv::Image& sourceImage);
 
   /**

@@ -156,6 +156,15 @@ Java_com_facefusion_mobile_NativePipe_rejectedTier(JNIEnv* env, jclass) {
   return env->NewStringUTF(g_rejectedTier.c_str());
 }
 
+// Frames between real face detections; 0 disables tracking. Set ONLY around a sequential
+// video run -- the preview path shares analyse() and its consecutive calls are unrelated
+// seeked frames. A no-op without a pipeline rather than an error, because VideoSwapper
+// clears the period in its cleanup, which can run after release() on a cancelled job.
+JNIEXPORT void JNICALL
+Java_com_facefusion_mobile_NativePipe_setTrackPeriod(JNIEnv*, jclass, jint frames) {
+  if (g_pipe) g_pipe->setTrackPeriod((int)frames);
+}
+
 // Comma-separated, because a JNI array of strings costs three more calls and this list is
 // at most three short tokens long. Applied to every subsequent init; "" clears it.
 JNIEXPORT void JNICALL

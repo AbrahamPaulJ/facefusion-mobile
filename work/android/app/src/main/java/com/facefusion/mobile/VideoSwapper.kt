@@ -46,6 +46,15 @@ class VideoSwapper(
      */
     private val isCancelled: () -> Boolean = { false },
     /**
+     * Frames between real face detections. 0 detects every frame, as upstream does.
+     *
+     * This is the only knob here that trades output for speed, and it is set from THIS
+     * class rather than by whoever configured the pipeline, because the preview shares
+     * `Pipeline::analyse` and must never inherit it. It is cleared again when the run ends,
+     * including when it is cancelled.
+     */
+    private val trackPeriod: Int = 0,
+    /**
      * Run the lip syncer after the swap.
      *
      * Off unless the caller asks AND the model is on the device: this is a separate
@@ -156,6 +165,13 @@ class VideoSwapper(
         val fps = if (outputFps in 1..inFps) outputFps else inFps
         val spanUs = (if (trimEndUs == Long.MAX_VALUE) durationUs(vf) else trimEndUs) - trimStartUs
         val expected = ((spanUs / 1_000_000.0) * fps).toInt().coerceAtLeast(1)
+
+        // Sequential decode starts here, so the tracker may be armed. Cleared in the
+        // teardown below, on every exit path including cancellation -- a period left set
+        // would follow the pipeline into the next preview refresh.
+        NativePipe.setTrackPeriod(trackPeriod)
+        if (trackPeriod > 0)
+            onLog("fast video: re-detecting every $trackPeriod frames")
         onLog("${width}x$height @ ${inFps}fps" +
               (if (rotation != 0) " rot ${rotation} -> ${outW}x$outH" else "") +
               (if (fps != inFps) " -> ${fps}fps" else "") + ", ~$expected frames")
@@ -235,6 +251,11 @@ class VideoSwapper(
         }
         encoder.configure(encFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         encoder.start()
+
+        // Started after both codecs are up, so the fps below is the SWAP rate and not
+        // diluted by MediaCodec configuration -- which is what a like-for-like comparison
+        // between two settings of trackPeriod needs it to be.
+        val runStartMs = System.currentTimeMillis()
 
         val muxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
         var muxAudio = -1
@@ -416,8 +437,16 @@ class VideoSwapper(
         muxer.stop(); muxer.release()
         extractor.release()
         if (audioExtractor !== extractor) audioExtractor.release()
+        NativePipe.setTrackPeriod(0)
         onLog((if (cancelled) "partial: " else "") +
               "wrote ${File(outputPath).length() / 1024} KB, $swapped frames")
+        // The headline number, spelled out rather than left to be divided out of the stage
+        // list: this is what a report says when someone is asked how fast it ran.
+        val elapsedMs = System.currentTimeMillis() - runStartMs
+        if (swapped > 0 && elapsedMs > 0)
+            onLog("%.1f fps  (%.1f ms/frame, %d frames in %.1fs)"
+                .format(swapped * 1000.0 / elapsedMs, elapsedMs.toDouble() / swapped,
+                        swapped, elapsedMs / 1000.0))
         NativePipe.stageMillis().takeIf { it.isNotEmpty() }?.let(onLog)
         outputPath
     }

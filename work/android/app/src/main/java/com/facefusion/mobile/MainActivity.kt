@@ -1700,6 +1700,7 @@ class MainActivity : ComponentActivity() {
 
                     VideoSwapper(
                         outputFps = opts.outputFps,
+                        trackPeriod = opts.trackPeriod,
                         lipSync = opts.lipSync,
                         voicePath = voiceFile?.absolutePath,
                         trimStartUs = (trimStartMs * 1000).toLong(),
@@ -1991,6 +1992,7 @@ class MainActivity : ComponentActivity() {
                     (voiceFile?.let { ", voice: ${it.name}" } ?: ""))
                 VideoSwapper(onProgress = { d, t -> if (d % 25 == 0) say("frame $d/$t") },
                              onLog = { say(it) },
+                             trackPeriod = opts.trackPeriod,
                              lipSync = opts.lipSync,
                              voicePath = voiceFile?.absolutePath)
                     .swap(tgtFile.absolutePath, out.absolutePath)
