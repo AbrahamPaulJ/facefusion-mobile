@@ -2556,9 +2556,20 @@ class MainActivity : ComponentActivity() {
             it.copy(state = BatchState.Waiting, output = null, detail = null)
         }
 
+        // The foreground service, for the process rather than for the work. See
+        // BatchService: it stops Android reclaiming the app mid-batch and puts a progress
+        // line and a Cancel button in the shade. It does NOT make the batch outlive the
+        // Activity -- the loop below still runs in lifecycleScope.
+        BatchStatus.begin(batchQueue.size)
+        if (android.os.Build.VERSION.SDK_INT >= 33)
+            askNotify.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        BatchService.start(this)
+
         lifecycleScope.launch {
             if (!PipeGuard.acquire("batch", 5000)) {
-                status = pipeBusyMessage(); busy = false; return@launch
+                status = pipeBusyMessage(); busy = false
+                BatchStatus.end(); BatchService.stop(this@MainActivity)
+                return@launch
             }
             val t0 = System.currentTimeMillis()
             val setup = withContext(Dispatchers.Default) {
@@ -2598,6 +2609,7 @@ class MainActivity : ComponentActivity() {
                              e.message ?: getString(R.string.gate_blocked_generic)
                          else getString(R.string.status_failed, e?.message ?: "")
                 NativePipe.release(); PipeGuard.release(); busy = false
+                BatchStatus.end(); BatchService.stop(this@MainActivity)
                 return@launch
             }
 
@@ -2605,6 +2617,10 @@ class MainActivity : ComponentActivity() {
             var refused = 0
             var failed = 0
             for ((i, item) in batchQueue.withIndex()) {
+                // ⚠ BOTH cancel sources. The button in the app and the one in the
+                // notification are two ways to ask for the same thing, and watching only
+                // the first would ignore whichever the user actually reached for.
+                if (BatchStatus.cancelled) cancelRequested = true
                 if (cancelRequested) {
                     batchQueue = batchQueue.mapIndexed { j, it ->
                         if (j >= i && it.state == BatchState.Waiting)
@@ -2616,6 +2632,7 @@ class MainActivity : ComponentActivity() {
                     if (j == i) it.copy(state = BatchState.Running) else it
                 }
                 status = getString(R.string.status_batch_item, i + 1, batchQueue.size, item.name)
+                BatchStatus.item(i + 1, item.name)
                 framesDone = 0; framesTotal = 0; progress = 0f
 
                 val r = withContext(Dispatchers.Default) {
@@ -2666,7 +2683,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                             onLog = { appendLog(it) },
-                            isCancelled = { cancelRequested },
+                            isCancelled = { cancelRequested || BatchStatus.cancelled },
                         ).swap(f.absolutePath, out.absolutePath).getOrThrow()
                         out
                     }
@@ -2704,6 +2721,9 @@ class MainActivity : ComponentActivity() {
             NativePipe.release()
             PipeGuard.release()
             busy = false
+            // Ends the notify thread, which stops the service itself.
+            BatchStatus.end()
+            BatchService.stop(this@MainActivity)
         }
     }
 

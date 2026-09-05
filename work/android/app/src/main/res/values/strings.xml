@@ -406,6 +406,9 @@
     <string name="batch_skipped">skipped</string>
     <string name="batch_remove">Remove from queue</string>
     <string name="batch_unnamed_clip">clip</string>
+    <string name="notif_batch_title">Swapping clips</string>
+    <string name="notif_batch_text">Clip %1$d of %2$d: %3$s</string>
+    <string name="notif_batch_channel">Batch swap</string>
     <string name="opt_reference_distance">Match the chosen face</string>
     <string name="opt_reference_distance_hint">Only used after tapping a face on the target. Higher matches more people; lower can stop matching the same person when they turn away.</string>
     <string name="status_reference_set">Swapping this face only. Tap it again for all faces.</string>

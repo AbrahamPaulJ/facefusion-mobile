@@ -364,4 +364,7 @@
     <string name="status_live_recording">正在錄製即時畫面。</string>
     <string name="status_live_rec_saved">錄製已儲存，共 %1$d 影格。</string>
     <string name="status_live_rec_empty">沒有錄製到任何內容。</string>
+    <string name="notif_batch_title">正在替換片段</string>
+    <string name="notif_batch_text">第 %1$d / %2$d 個片段：%3$s</string>
+    <string name="notif_batch_channel">批次替換</string>
 </resources>

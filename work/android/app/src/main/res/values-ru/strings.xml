@@ -345,4 +345,7 @@
     <string name="status_live_recording">Идёт запись трансляции.</string>
     <string name="status_live_rec_saved">Запись сохранена, кадров: %1$d.</string>
     <string name="status_live_rec_empty">Записать ничего не удалось.</string>
+    <string name="notif_batch_title">Обработка клипов</string>
+    <string name="notif_batch_text">Клип %1$d из %2$d: %3$s</string>
+    <string name="notif_batch_channel">Пакетная обработка</string>
 </resources>
