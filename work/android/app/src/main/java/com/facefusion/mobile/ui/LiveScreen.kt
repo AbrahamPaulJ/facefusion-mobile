@@ -55,6 +55,8 @@ fun LiveScreen(
     onUseMySettings: (Boolean) -> Unit,
     note: String?,
     modelsReady: Boolean,
+    /** Start the model download. Live is reachable before any model exists. */
+    onDownload: () -> Unit,
 ) {
     // SCROLLS. Without this the controls below the feed are simply clipped: the first build
     // put the settings switch behind the navigation bar, where the only clue it existed was
@@ -176,11 +178,27 @@ fun LiveScreen(
             }
         }
 
-        Button(
-            onClick = onToggleRun,
-            enabled = modelsReady && sourceThumb != null,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(stringResource(if (running) R.string.live_stop else R.string.live_start)) }
+        // ⚠ The DOWNLOAD comes first when there is nothing to run with. Live is a tab, so
+        // it can be the first screen a fresh install lands on -- and it said "Models not
+        // installed" over a Start button that could never enable, with the only actual way
+        // out on a different tab that the message did not mention. The Swap screen has had
+        // its own download overlay since 0.1.0; this is the same offer, in the one other
+        // place that needs it.
+        if (!modelsReady) {
+            Button(onDownload, Modifier.fillMaxWidth(),
+                   shape = RoundedCornerShape(14.dp)) {
+                Text(stringResource(R.string.dl_download))
+            }
+            Text(stringResource(R.string.dl_not_on_device),
+                 style = MaterialTheme.typography.bodySmall, fontSize = 11.sp,
+                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            Button(
+                onClick = onToggleRun,
+                enabled = sourceThumb != null,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(stringResource(if (running) R.string.live_stop else R.string.live_start)) }
+        }
 
         // ---------------------------------------------------------------- fast mode
         //

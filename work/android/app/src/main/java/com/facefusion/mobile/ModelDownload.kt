@@ -135,6 +135,15 @@ object ModelDownload {
     private fun legacyKey(variant: String): String =
         if (variant == ModelPaths.NCNN_TIER) "ncnn_preview" else variant
 
+    /**
+     * Stages that are OFF until the user turns them on, so a first run must not pay for
+     * them. Each has its own button in the Settings inventory.
+     *
+     * ⚠ wav2lip is here because ffpipe stopped opening it in 0.6.0 -- it is not merely
+     * optional, it is unreachable, and it is still published for tiers built before then.
+     */
+    private val OPTIONAL_MODELS = listOf("gpen", "edtalk", "wav2lip")
+
     /** Which of [entries] are not already present and correct in [dir]. */
     fun missing(dir: File, entries: List<Entry>): List<Entry> =
         entries.filter { e ->
@@ -151,17 +160,37 @@ object ModelDownload {
         cancelled = false
         error = null; finished = false; running = true
         try {
-            val entries = try {
-                manifestFor(chain).second
+            val (tier, published) = try {
+                manifestFor(chain)
             } catch (e: Exception) {
                 return fail("Could not read the model list: ${e.message}")
             }
+
+            // ⚠ REQUIRED ONLY. This used to hand the manifest's whole file list straight to
+            // missing(), so "Download models" fetched the face enhancer and the lip syncer
+            // as well -- about 85 MB per tier of stages that are OFF by default, that the
+            // Settings inventory already offers one button each for, and that the README
+            // describes as separate downloads. A first run paid for two features it had not
+            // been asked about.
+            //
+            // Written as an EXCLUSION rather than a whitelist on purpose: a model added to
+            // the manifest later is required until somebody says otherwise, so the failure
+            // direction is a download that is too big, not an app missing a file it needs.
+            //
+            // filesFor() returns an empty list for a name a variant does not carry (edtalk
+            // and wav2lip have no ncnn stems), so this is a no-op there rather than wrong.
+            val optional = OPTIONAL_MODELS
+                .flatMap { ModelPaths.filesFor(tier, it) }
+                .toSet()
+            val entries = published.filterNot { it.name in optional }
 
             val todo = missing(dir, entries)
             // Say WHAT is about to be fetched and what was kept. A download that quietly
             // re-fetches a 196 MB file it already has, and one that fetches only the file
             // you asked for, look identical from outside -- a progress bar and a wait.
-            android.util.Log.i("ffmodels", "manifest " + entries.size + " files, fetching " +
+            android.util.Log.i("ffmodels", "manifest " + published.size + " files, " +
+                (published.size - entries.size) + " optional skipped, " + entries.size +
+                " required, fetching " +
                 todo.map { it.name } + ", keeping " +
                 entries.filterNot { e -> todo.any { it.name == e.name } }.map { it.name })
             fileCount = todo.size

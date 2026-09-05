@@ -762,10 +762,22 @@ fun SwapScreen(
                 // Deleting a render IS destructive -- minutes of NPU time, and the file is
                 // gone from the phone -- so this one asks, unlike the source and target
                 // buttons, which only drop a reference to a file the user still has.
-                OutlinedButton({ confirmDeleteOutput = true }, enabled = idle,
-                               shape = RoundedCornerShape(14.dp)) {
-                    Icon(Icons.Default.Delete, stringResource(R.string.out_delete),
-                         Modifier.size(18.dp))
+                //
+                // ⚠ VIDEO ONLY, and that is not an oversight. A still has no output file:
+                // its result is the swapped PANE, regenerated from the source and target
+                // whenever both are present. The button was shown for stills too and did
+                // nothing at all -- discardOutput() deletes outputFile, which is null on
+                // that path -- so it confirmed and then visibly ignored the answer.
+                //
+                // Clearing the pane instead would be worse, not better: the autowarm effect
+                // would redraw it within the same second. The way to get rid of a still's
+                // result is to remove the target, which has its own button on its own pane.
+                if (outputFile != null) {
+                    OutlinedButton({ confirmDeleteOutput = true }, enabled = idle,
+                                   shape = RoundedCornerShape(14.dp)) {
+                        Icon(Icons.Default.Delete, stringResource(R.string.out_delete),
+                             Modifier.size(18.dp))
+                    }
                 }
             }
             if (savedPath != null)

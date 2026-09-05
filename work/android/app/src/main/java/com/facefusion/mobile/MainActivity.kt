@@ -769,6 +769,7 @@ class MainActivity : ComponentActivity() {
                                 onUseMySettings = { liveUseMySettings = it },
                                 note = liveNote,
                                 modelsReady = !modelsMissing,
+                                onDownload = { onDownloadTapped() },
                             )
                             Screen.Settings -> SettingsScreen(
                                 sections = modelSections(),
