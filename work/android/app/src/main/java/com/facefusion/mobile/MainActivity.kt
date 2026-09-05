@@ -163,6 +163,15 @@ class MainActivity : ComponentActivity() {
     private var faceBoxes by mutableStateOf<FloatArray?>(null)
 
     /**
+     * The face chosen to swap, as its box -- upstream's `face_selector_mode = reference`.
+     *
+     * The IDENTITY lives natively (see `Pipeline::setReferenceFaceAt`); this is only what
+     * to draw. Kept as a box rather than an index because the boxes are recomputed on every
+     * new frame and an index would silently come to mean a different face.
+     */
+    private var referenceBox by mutableStateOf<FloatArray?>(null)
+
+    /**
      * Which lens Live uses. In memory only, deliberately: it is not a [SwapOptions] field
      * -- nothing about it reaches the pipeline -- and a camera choice that survived a
      * restart would be a surprise on an app that opens on the Swap tab.
@@ -755,6 +764,7 @@ class MainActivity : ComponentActivity() {
                                     busy = previewBusy,
                                     note = previewNote,
                                     faceBoxes = if (showFaceBoxes) faceBoxes else null,
+                                    referenceBox = if (showFaceBoxes) referenceBox else null,
                                 ),
                                 run = RunUi(busy, preparing, progress, framesDone,
                                             framesTotal, elapsedS),
@@ -777,6 +787,7 @@ class MainActivity : ComponentActivity() {
                                     // for as long as detection takes.
                                     faceBoxes = null
                                 },
+                                onPickFace = ::pickReferenceFace,
                                 openCard = openCard,
                                 onToggleCard = { k -> openCard = if (openCard == k) "" else k },
                                 // A still needs no run, so it has no output FILE -- what
@@ -1666,7 +1677,22 @@ class MainActivity : ComponentActivity() {
         return queried ?: uri.lastPathSegment?.substringAfterLast('/')
     }
 
+    /**
+     * Forget the reference face.
+     *
+     * Called wherever the TARGET changes. An identity picked out of a different video is
+     * not a selection any more -- it is an invisible filter that would silently swap
+     * nobody, and the user has no way to see that it is still set.
+     */
+    private fun dropReferenceFace() {
+        if (referenceBox == null && !NativePipe.hasReferenceFace()) return
+        NativePipe.clearReferenceFace()
+        referenceBox = null
+        faceBoxes = null
+    }
+
     private fun loadTarget(uri: Uri) {
+        dropReferenceFace()
         if (contentResolver.getType(uri)?.startsWith("image/") == true) {
             loadTargetImage(uri)
             return
@@ -1754,6 +1780,7 @@ class MainActivity : ComponentActivity() {
      * BitmapFactory for the new path.
      */
     private fun loadTargetImage(uri: Uri) {
+        dropReferenceFace()
         preparing = true
         targetName = displayName(uri)
         lifecycleScope.launch {
@@ -1985,6 +2012,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun clearTarget() {
+        dropReferenceFace()
         previews.closeTarget()
         targetFile = null
         targetImage = null
@@ -2045,6 +2073,55 @@ class MainActivity : ComponentActivity() {
      * the tracker's state are exactly as they are for any other start -- a switch invents
      * no new lifecycle, which is the point while roadmap 11 is still open.
      */
+    /**
+     * Tap a face to swap only that one; tap it again to go back to all of them.
+     *
+     * Runs on the ORIGINAL frame -- the same image the boxes were drawn from, so the
+     * coordinates the pane hands back mean what the detector meant by them. The identity is
+     * stored natively and outlives every options change; only the box is state here.
+     *
+     * ⚠ The reference is cleared whenever the TARGET changes, in clearTarget/loadTarget:
+     * an identity picked out of a different video is not a selection, it is a filter the
+     * user cannot see and would have to guess at.
+     */
+    private fun pickReferenceFace(x: Float, y: Float) {
+        val frame = originalFrame ?: return
+        if (!previewWarm || busy) return
+        val current = referenceBox
+        // A second tap on the CHOSEN face is how it is cleared. No new control, and it is
+        // the same gesture that set it -- which is what makes it discoverable at all.
+        if (current != null && current.size >= 4 &&
+            x >= current[0] && x <= current[2] && y >= current[1] && y <= current[3]) {
+            NativePipe.clearReferenceFace()
+            referenceBox = null
+            status = getString(R.string.status_reference_cleared)
+            previewOptionsChanged()
+            return
+        }
+        lifecycleScope.launch {
+            val box = withContext(Dispatchers.Default) {
+                runCatching {
+                    val soft = frame.copy(Bitmap.Config.ARGB_8888, false)
+                        ?: return@runCatching FloatArray(0)
+                    val px = IntArray(soft.width * soft.height)
+                    soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
+                    NativePipe.setReferenceFaceAt(
+                        NativePipe.argbToBgr(px, soft.width, soft.height),
+                        soft.width, soft.height, x, y)
+                }.getOrDefault(FloatArray(0))
+            }
+            if (box.size < 4) {
+                status = getString(R.string.status_reference_missed)
+                return@launch
+            }
+            referenceBox = box
+            status = getString(R.string.status_reference_set)
+            // REDRAW, so the swapped pane immediately shows the selection taking effect.
+            // Not a reload: the reference is not a model and not even a Config field.
+            previewOptionsChanged()
+        }
+    }
+
     private fun switchLiveCamera() {
         val wasRunning = liveRunning
         if (wasRunning) stopLive()

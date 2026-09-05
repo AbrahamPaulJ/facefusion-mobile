@@ -213,6 +213,20 @@ fun PreviewPane(
      * at the call site would mean teaching MainActivity about ContentScale.Fit.
      */
     faceBoxes: FloatArray? = null,
+    /**
+     * The box of the face currently chosen as the reference, drawn differently from the
+     * rest. Four floats, same coordinates as [faceBoxes].
+     */
+    referenceBox: FloatArray? = null,
+    /**
+     * A tap landed inside one of [faceBoxes]; the arguments are the tap in the BITMAP's own
+     * pixel coordinates.
+     *
+     * ⚠ Only consulted when there are boxes to hit. A tap that misses every box still runs
+     * [onClick] -- the pane is the target picker first and a face picker second, and
+     * swallowing misses would break the way every other pane on the screen behaves.
+     */
+    onPickFace: ((Float, Float) -> Unit)? = null,
     trailing: @Composable RowScope.() -> Unit = {},
 ) {
     // ONE container around the caption row AND the image, rather than a caption floating
@@ -301,12 +315,48 @@ fun PreviewPane(
                                     } while (ev.changes.any { it.pressed })
                                 }
                             }
-                            .pointerInput(zoom, onClick) {
+                            .pointerInput(zoom, onClick, onPickFace, faceBoxes) {
                                 detectTapGestures(
                                     // The only way back from a deep zoom, and the
                                     // conventional one.
                                     onDoubleTap = { zoom.reset() },
-                                    onTap = { onClick?.invoke() },
+                                    onTap = { tap ->
+                                        // PANE COORDINATES BACK TO IMAGE COORDINATES, in
+                                        // the reverse order they were applied: undo the
+                                        // zoom layer (scale about the box's centre, then
+                                        // translate), then undo ContentScale.Fit's
+                                        // letterbox. Getting this backwards does not throw
+                                        // -- it picks a face a few dozen pixels from the
+                                        // one under the finger, which is indistinguishable
+                                        // from a bad detector.
+                                        var picked = false
+                                        val boxes = faceBoxes
+                                        if (onPickFace != null && boxes != null &&
+                                            boxes.size >= 5) {
+                                            val bw = size.width.toFloat()
+                                            val bh = size.height.toFloat()
+                                            val iw = bitmap.width.toFloat()
+                                            val ih = bitmap.height.toFloat()
+                                            val z = zoom.scale
+                                            val ux = bw / 2f + (tap.x - bw / 2f -
+                                                                zoom.offset.x) / z
+                                            val uy = bh / 2f + (tap.y - bh / 2f -
+                                                                zoom.offset.y) / z
+                                            val k = minOf(bw / iw, bh / ih)
+                                            val ix = (ux - (bw - iw * k) / 2f) / k
+                                            val iy = (uy - (bh - ih * k) / 2f) / k
+                                            for (i in 0 until boxes.size / 5) {
+                                                val b = i * 5
+                                                if (ix >= boxes[b] && ix <= boxes[b + 2] &&
+                                                    iy >= boxes[b + 1] && iy <= boxes[b + 3]) {
+                                                    onPickFace(ix, iy)
+                                                    picked = true
+                                                    break
+                                                }
+                                            }
+                                        }
+                                        if (!picked) onClick?.invoke()
+                                    },
                                 )
                             }
                     } else if (onClick != null) {
@@ -362,13 +412,23 @@ fun PreviewPane(
                             val w = 2.dp.toPx() / (zoom?.scale ?: 1f)
                             for (i in 0 until faceBoxes.size / 5) {
                                 val b = i * 5
+                                // The CHOSEN face is drawn twice as thick and opaque; the
+                                // others are dimmed. A selector that picked the wrong
+                                // neighbour and one that picked nothing look identical
+                                // otherwise, and they need different reactions.
+                                val chosen = referenceBox != null &&
+                                    referenceBox.size >= 4 &&
+                                    kotlin.math.abs(referenceBox[0] - faceBoxes[b]) < 1f &&
+                                    kotlin.math.abs(referenceBox[1] - faceBoxes[b + 1]) < 1f
                                 drawRect(
-                                    color = FfRed,
+                                    color = if (chosen) FfRed
+                                            else FfRed.copy(alpha =
+                                                if (referenceBox != null) 0.35f else 1f),
                                     topLeft = Offset(ox + faceBoxes[b] * k,
                                                      oy + faceBoxes[b + 1] * k),
                                     size = Size((faceBoxes[b + 2] - faceBoxes[b]) * k,
                                                 (faceBoxes[b + 3] - faceBoxes[b + 1]) * k),
-                                    style = Stroke(width = w),
+                                    style = Stroke(width = if (chosen) w * 2f else w),
                                 )
                             }
                         }

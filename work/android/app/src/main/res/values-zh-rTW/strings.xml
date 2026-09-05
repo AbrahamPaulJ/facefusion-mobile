@@ -341,4 +341,9 @@
     <string name="live_lens_front">前鏡頭</string>
     <string name="live_lens_back">後鏡頭</string>
     <string name="swap_show_faces">顯示偵測到的臉孔</string>
+    <string name="status_reference_set">僅替換該人臉。再次點按可替換所有人臉。</string>
+    <string name="status_reference_missed">該位置沒有人臉。</string>
+    <string name="status_reference_cleared">已恢復替換所有人臉。</string>
+    <string name="opt_reference_distance">比對所選臉孔</string>
+    <string name="opt_reference_distance_hint">僅在點選目標臉孔後生效。數值越大比對到的人越多；越小則同一個人轉頭時可能不再符合。</string>
 </resources>

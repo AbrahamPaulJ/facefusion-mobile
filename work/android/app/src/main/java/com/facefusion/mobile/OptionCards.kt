@@ -314,6 +314,13 @@ fun FaceDetectorCard(
         OptionSlider(stringResource(R.string.opt_face_alignment), opts.landmarkerScore,
                      { onChange(opts.copy(landmarkerScore = it)) },
                      hint = stringResource(R.string.opt_face_alignment_hint))
+        // How close a face has to be to the one that was TAPPED. Dead until a face is
+        // picked on the ORIGINAL pane -- which is why it says so rather than sitting here
+        // looking like a knob that does nothing. It is not a mode switch: the pipeline
+        // holding a reference IS the mode, and this only widens or narrows it.
+        OptionSlider(stringResource(R.string.opt_reference_distance), opts.referenceDistance,
+                     { onChange(opts.copy(referenceDistance = it)) },
+                     hint = stringResource(R.string.opt_reference_distance_hint))
         OptionSegments(
             stringResource(R.string.opt_faces),
             listOf(false to stringResource(R.string.opt_faces_every),

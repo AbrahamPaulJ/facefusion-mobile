@@ -54,7 +54,7 @@ inline uint8_t clamp8(int v) { return (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v))
 void tunables(JNIEnv* env, ffpipe::Config& cfg, jfloat weight, jfloat maskBlur,
               jintArray jPadding, jfloat detScore, jfloat lmkScore, jint pixelBoost,
               jboolean largestOnly, jboolean faceEnhance, jfloat enhanceBlend,
-              jfloat lipSyncWeight) {
+              jfloat lipSyncWeight, jfloat referenceDistance) {
   cfg.swapperWeight = std::fmin(1.f, std::fmax(0.f, weight));
   cfg.maskBlur = std::fmin(1.f, std::fmax(0.f, maskBlur));
   cfg.detectorScore = std::fmin(1.f, std::fmax(0.f, detScore));
@@ -67,6 +67,7 @@ void tunables(JNIEnv* env, ffpipe::Config& cfg, jfloat weight, jfloat maskBlur,
   cfg.faceEnhance = faceEnhance == JNI_TRUE;
   cfg.faceEnhancerBlend = std::fmin(1.f, std::fmax(0.f, enhanceBlend));
   cfg.lipSyncWeight = std::fmin(1.f, std::fmax(0.f, lipSyncWeight));
+  cfg.referenceDistance = std::fmin(1.f, std::fmax(0.f, referenceDistance));
   if (jPadding && env->GetArrayLength(jPadding) == 4) {
     jint pad[4];
     env->GetIntArrayRegion(jPadding, 0, 4, pad);
@@ -92,7 +93,8 @@ Java_com_facefusion_mobile_NativePipe_initEx(JNIEnv* env, jclass, jstring jLib, 
                                              jfloat lmkScore, jint pixelBoost,
                                              jboolean largestOnly,
                                              jboolean faceEnhance, jfloat enhanceBlend,
-                                             jfloat lipSyncWeight) {
+                                             jfloat lipSyncWeight,
+                                             jfloat referenceDistance) {
   g_pipe.reset(new ffpipe::Pipeline());
   ffpipe::Config cfg;
   std::string swapper = jstr(env, jSwapper);
@@ -101,7 +103,7 @@ Java_com_facefusion_mobile_NativePipe_initEx(JNIEnv* env, jclass, jstring jLib, 
     cfg.swapDenorm = false; cfg.swapperIsHyperswap = false;
   }
   tunables(env, cfg, weight, maskBlur, jPadding, detScore, lmkScore, pixelBoost,
-           largestOnly, faceEnhance, enhanceBlend, lipSyncWeight);
+           largestOnly, faceEnhance, enhanceBlend, lipSyncWeight, referenceDistance);
 
   // PUSHED, not passed. There are four paths into init -- the preview, runSwap, the
   // self-test and the API -- and a per-call-site argument is a list you can be absent
@@ -141,11 +143,12 @@ Java_com_facefusion_mobile_NativePipe_setOptionsEx(JNIEnv* env, jclass,
                                                    jboolean largestOnly,
                                                    jboolean faceEnhance,
                                                    jfloat enhanceBlend,
-                                                   jfloat lipSyncWeight) {
+                                                   jfloat lipSyncWeight,
+                                                   jfloat referenceDistance) {
   if (!g_pipe) return JNI_FALSE;
   ffpipe::Config cfg;
   tunables(env, cfg, weight, maskBlur, jPadding, detScore, lmkScore, pixelBoost,
-           largestOnly, faceEnhance, enhanceBlend, lipSyncWeight);
+           largestOnly, faceEnhance, enhanceBlend, lipSyncWeight, referenceDistance);
   g_pipe->updateConfig(cfg);
   return JNI_TRUE;
 }
@@ -244,6 +247,47 @@ Java_com_facefusion_mobile_NativePipe_detectFaces(JNIEnv* env, jclass, jbyteArra
   if (out && !flat.empty())
     env->SetFloatArrayRegion(out, 0, (jsize)flat.size(), flat.data());
   return out;
+}
+
+// Point at a face and swap only that one -- upstream's face_selector_mode = reference.
+//
+// Returns the chosen face's box as four floats, or an EMPTY array when the point was not
+// inside any detected face. The box comes back so the UI can show which face it took: a
+// selector that silently picks the wrong neighbour and a selector that picked nothing look
+// identical from outside, and they need different reactions from the user.
+//
+// ⚠ Runs the FULL analyse, embeddings included -- unlike detectFaces, which deliberately
+// does not. Identity is the entire point here, and it is paid once per tap rather than per
+// frame.
+JNIEXPORT jfloatArray JNICALL
+Java_com_facefusion_mobile_NativePipe_setReferenceFaceAt(JNIEnv* env, jclass,
+                                                         jbyteArray jBgr, jint w, jint h,
+                                                         jfloat x, jfloat y) {
+  if (!g_pipe) { g_err = "pipeline not initialised"; return env->NewFloatArray(0); }
+  ffcv::Image img(w, h, 3);
+  if ((size_t)env->GetArrayLength(jBgr) != img.data.size()) {
+    g_err = "setReferenceFaceAt: frame is not w*h*3 bytes";
+    return env->NewFloatArray(0);
+  }
+  env->GetByteArrayRegion(jBgr, 0, (jsize)img.data.size(), (jbyte*)img.data.data());
+  float box[4] = {0, 0, 0, 0};
+  if (!g_pipe->setReferenceFaceAt(img, x, y, box)) {
+    g_err = g_pipe->error();
+    return env->NewFloatArray(0);
+  }
+  jfloatArray out = env->NewFloatArray(4);
+  if (out) env->SetFloatArrayRegion(out, 0, 4, box);
+  return out;
+}
+
+JNIEXPORT void JNICALL
+Java_com_facefusion_mobile_NativePipe_clearReferenceFace(JNIEnv*, jclass) {
+  if (g_pipe) g_pipe->clearReferenceFace();
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_facefusion_mobile_NativePipe_hasReferenceFace(JNIEnv*, jclass) {
+  return (g_pipe && g_pipe->hasReferenceFace()) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL

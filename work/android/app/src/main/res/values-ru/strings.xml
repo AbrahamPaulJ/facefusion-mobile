@@ -322,4 +322,9 @@
     <string name="live_lens_front">ФРОНТ</string>
     <string name="live_lens_back">ТЫЛ</string>
     <string name="swap_show_faces">Показать найденные лица</string>
+    <string name="status_reference_set">Меняется только это лицо. Нажмите ещё раз для всех лиц.</string>
+    <string name="status_reference_missed">В этой точке лица нет.</string>
+    <string name="status_reference_cleared">Снова меняются все лица.</string>
+    <string name="opt_reference_distance">Совпадение с выбранным лицом</string>
+    <string name="opt_reference_distance_hint">Работает только после выбора лица на цели. Больше — совпадает больше людей; меньше — тот же человек может перестать совпадать, когда отвернётся.</string>
 </resources>

@@ -135,6 +135,10 @@ struct Pipeline::Impl {
   float srcEmbedding[512]{};
   float srcEmbeddingNorm[512]{};
   bool haveSource = false;
+  // The TARGET face to swap, when the user has pointed at one. Normalised, because that is
+  // what upstream's distance is defined over. Not in Config -- see setReferenceFaceAt.
+  float refEmbeddingNorm[512]{};
+  bool haveReference = false;
   std::vector<float> emap;   // inswapper only: the 512x512 initializer
 
   // A box mask depends only on (size, cfg.maskBlur, cfg.maskPadding) -- constant across
@@ -470,6 +474,7 @@ void Pipeline::updateConfig(const Config& c) {
   live.swapperWeight     = c.swapperWeight;
   live.pixelBoost        = c.pixelBoost;
   live.swapLargestOnly   = c.swapLargestOnly;
+  live.referenceDistance = c.referenceDistance;
   live.faceEnhance       = c.faceEnhance;
   live.faceEnhancerBlend = c.faceEnhancerBlend;
   live.lipSyncWeight     = c.lipSyncWeight;
@@ -879,6 +884,48 @@ bool Pipeline::setSource(const ffcv::Image& img) {
   return true;
 }
 
+/**
+ * face_selector.py:compare_faces, as one number.
+ *
+ * `1 - dot(a, b)` over two L2-normalised embeddings is 0..2; upstream maps that onto 0..1
+ * with interp([0,2],[0,1]), which is a halving, and compares against the threshold. Written
+ * out rather than folded into the comparison so the number can be logged and read on
+ * upstream's own scale.
+ */
+static float faceDistance(const float* a, const float* b) {
+  double dot = 0;
+  for (int i = 0; i < 512; ++i) dot += (double)a[i] * b[i];
+  return (float)((1.0 - dot) * 0.5);
+}
+
+bool Pipeline::setReferenceFaceAt(const ffcv::Image& frame, float x, float y, float* outBox) {
+  err_.clear();
+  if (!p_) { err_ = "pipeline not initialised"; return false; }
+  // The FULL analyse: this needs the embedding, which boxesOnly deliberately does not
+  // compute. It is the one place the extra 3.55 ms/face is the whole point.
+  auto faces = analyse(frame);
+  const Face* hit = nullptr;
+  for (const auto& f : faces) {
+    if (x >= f.box[0] && x <= f.box[2] && y >= f.box[1] && y <= f.box[3]) {
+      // The SMALLEST box containing the point wins. Overlapping detections happen when one
+      // face is behind another, and taking the first would pick by detector order -- which
+      // is score order, not what the finger was over.
+      if (!hit || (f.box[2] - f.box[0]) * (f.box[3] - f.box[1]) <
+                  (hit->box[2] - hit->box[0]) * (hit->box[3] - hit->box[1]))
+        hit = &f;
+    }
+  }
+  if (!hit) { err_ = "no face at that point"; return false; }
+  std::memcpy(p_->refEmbeddingNorm, hit->embeddingNorm, sizeof(p_->refEmbeddingNorm));
+  p_->haveReference = true;
+  if (outBox) for (int i = 0; i < 4; ++i) outBox[i] = hit->box[i];
+  return true;
+}
+
+void Pipeline::clearReferenceFace() { if (p_) p_->haveReference = false; }
+
+bool Pipeline::hasReferenceFace() const { return p_ && p_->haveReference; }
+
 void Pipeline::resetStats() {
   msDetect = msLandmark = msRecognise = msSwap = msGeom = msEnhance = msLipSync = 0;
   msLipCrop = msLipMask = msLipPrep = msLipPaste = 0;
@@ -1022,9 +1069,16 @@ bool Pipeline::swapAll(ffcv::Image& frame, const std::vector<Face>& faces) {
   msGeom += nowMs() - tm;
   msGeomMask += nowMs() - tm;
 
+  // face_selector_mode `reference`: every face within referenceDistance of the one the
+  // user pointed at. Checked FIRST because the two modes are exclusive upstream -- a
+  // reference that is set is the whole selector, and `one` is what the app falls back to
+  // when there is none. Doing it the other way round would let "largest" quietly override
+  // a face the user chose by hand, which is the one selection they made deliberately.
+  const bool byReference = p_->haveReference;
+
   // face_selector_mode `one`: the largest detected face by box area.
   const Face* only = nullptr;
-  if (cfg.swapLargestOnly) {
+  if (!byReference && cfg.swapLargestOnly) {
     float best = -1.f;
     for (const Face& f : faces) {
       float a = (f.box[2] - f.box[0]) * (f.box[3] - f.box[1]);
@@ -1034,6 +1088,12 @@ bool Pipeline::swapAll(ffcv::Image& frame, const std::vector<Face>& faces) {
 
   for (const Face& f : faces) {
     if (only && &f != only) continue;
+    // face_selector.py:find_match_faces -- ALL faces near the reference, not the nearest
+    // one. Upstream returns a list, and a clip where the same person is detected twice
+    // (a reflection, a poster) should swap both rather than pick between them.
+    if (byReference &&
+        faceDistance(f.embeddingNorm, p_->refEmbeddingNorm) >= cfg.referenceDistance)
+      continue;
 
     double t0 = nowMs();
     ffcv::Affine am = ffcv::umeyama(f.landmark5_68, tmpl, 5);

@@ -394,6 +394,11 @@
     <!-- %1$s frames per second, %2$s the face count phrase below -->
     <string name="live_stat">%1$s fps   %2$s</string>
     <string name="swap_show_faces">Show detected faces</string>
+    <string name="opt_reference_distance">Match the chosen face</string>
+    <string name="opt_reference_distance_hint">Only used after tapping a face on the target. Higher matches more people; lower can stop matching the same person when they turn away.</string>
+    <string name="status_reference_set">Swapping this face only. Tap it again for all faces.</string>
+    <string name="status_reference_missed">No face at that point.</string>
+    <string name="status_reference_cleared">Swapping every face again.</string>
     <string name="live_lens_front">FRONT</string>
     <string name="live_lens_back">BACK</string>
     <string name="live_faces">%1$d face(s)</string>

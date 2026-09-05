@@ -47,6 +47,21 @@ data class SwapOptions(
     val largestOnly: Boolean = false,
 
     /**
+     * `--reference-face-distance`, 0.0-1.0, upstream default 0.3.
+     *
+     * Only meaningful once a reference face has been picked by tapping one
+     * (`NativePipe.setReferenceFaceAt`), which is why there is no mode field beside it:
+     * the pipeline holds the reference, and holding one IS the mode. Upstream's own
+     * comparison, from face_selector.py:
+     *
+     *     d = (1 - dot(embedding_norm, reference.embedding_norm)) / 2  ->  match if d < this
+     *
+     * so 0.3 accepts anything above 0.4 cosine similarity. Raise it and other people start
+     * being swapped too; lower it and a face that turns away stops matching itself.
+     */
+    val referenceDistance: Float = 0.3f,
+
+    /**
      * Frames between real face detections during a VIDEO run. 0 = detect every frame,
      * which is upstream's behaviour and the default.
      *
@@ -132,6 +147,7 @@ data class SwapOptions(
             .putFloat(K_LMK, landmarkerScore)
             .putInt(K_BOOST, pixelBoost)
             .putBoolean(K_LARGEST, largestOnly)
+            .putFloat(K_REF_DISTANCE, referenceDistance)
             .putInt(K_TRACK, trackPeriod)
             .putBoolean(K_ENHANCE, faceEnhance)
             .putFloat(K_ENHANCE_BLEND, enhanceBlend)
@@ -151,6 +167,7 @@ data class SwapOptions(
         private const val K_LMK = "landmarker_score"
         private const val K_BOOST = "pixel_boost"
         private const val K_LARGEST = "largest_only"
+        private const val K_REF_DISTANCE = "reference_distance"
         private const val K_TRACK = "track_period"
         private const val K_ENHANCE = "face_enhance"
         private const val K_ENHANCE_BLEND = "face_enhance_blend"
@@ -179,6 +196,7 @@ data class SwapOptions(
                 landmarkerScore = p.getFloat(K_LMK, d.landmarkerScore),
                 pixelBoost = p.getInt(K_BOOST, d.pixelBoost),
                 largestOnly = p.getBoolean(K_LARGEST, d.largestOnly),
+                referenceDistance = p.getFloat(K_REF_DISTANCE, d.referenceDistance),
                 trackPeriod = p.getInt(K_TRACK, d.trackPeriod),
                 faceEnhance = p.getBoolean(K_ENHANCE, d.faceEnhance),
                 enhanceBlend = p.getFloat(K_ENHANCE_BLEND, d.enhanceBlend),

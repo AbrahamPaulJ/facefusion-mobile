@@ -28,7 +28,7 @@ object NativePipe {
         detectorScore: Float, landmarkerScore: Float,
         pixelBoost: Int, largestOnly: Boolean,
         faceEnhance: Boolean, enhanceBlend: Float,
-        lipSyncWeight: Float,
+        lipSyncWeight: Float, referenceDistance: Float,
     ): Boolean
 
     /** Load the pipeline with [opts] applied. */
@@ -38,7 +38,8 @@ object NativePipe {
                opts.weight, opts.maskBlur, opts.maskPadding.toIntArray(),
                opts.detectorScore, opts.landmarkerScore,
                opts.pixelBoost, opts.largestOnly,
-               opts.faceEnhance, opts.enhanceBlend, opts.lipSyncWeight)
+               opts.faceEnhance, opts.enhanceBlend, opts.lipSyncWeight,
+               opts.referenceDistance)
 
     /**
      * Tiers to skip at the next [init], comma-separated; "" clears.
@@ -75,7 +76,7 @@ object NativePipe {
         detectorScore: Float, landmarkerScore: Float,
         pixelBoost: Int, largestOnly: Boolean,
         faceEnhance: Boolean, enhanceBlend: Float,
-        lipSyncWeight: Float,
+        lipSyncWeight: Float, referenceDistance: Float,
     ): Boolean
 
     /** [setOptionsEx] from a [SwapOptions]. `swapper` and `outputFps` are not sent: the
@@ -84,7 +85,8 @@ object NativePipe {
         setOptionsEx(opts.weight, opts.maskBlur, opts.maskPadding.toIntArray(),
                      opts.detectorScore, opts.landmarkerScore,
                      opts.pixelBoost, opts.largestOnly,
-                     opts.faceEnhance, opts.enhanceBlend, opts.lipSyncWeight)
+                     opts.faceEnhance, opts.enhanceBlend, opts.lipSyncWeight,
+                     opts.referenceDistance)
 
     /**
      * The tier that LOADED and then would not execute, or "".
@@ -209,6 +211,25 @@ object NativePipe {
      * Empty when there is no pipeline or the frame is the wrong size -- never null.
      */
     @JvmStatic external fun detectFaces(bgr: ByteArray, w: Int, h: Int): FloatArray
+
+    /**
+     * Remember the face at (x, y) -- in the frame's OWN pixel coordinates -- as the one to
+     * swap. Upstream's `face_selector_mode = reference`.
+     *
+     * Returns that face's box as four floats, or an EMPTY array when the point was inside
+     * no detected face. The box is how the UI shows which face was taken: "picked the
+     * wrong neighbour" and "picked nothing" look identical without it.
+     *
+     * Costs a full analyse, embeddings included -- once per tap, not per frame.
+     */
+    @JvmStatic external fun setReferenceFaceAt(bgr: ByteArray, w: Int, h: Int,
+                                               x: Float, y: Float): FloatArray
+
+    /** Forget the reference face: back to every face, or the largest if that is set. */
+    @JvmStatic external fun clearReferenceFace()
+
+    /** Whether a reference face is set. Survives an options change; init clears it. */
+    @JvmStatic external fun hasReferenceFace(): Boolean
 
     /** True when this tier had no fp32 gate context; see [ContentGate.QUANTISED_BIAS]. */
     @JvmStatic external fun contentGateIsQuantised(): Boolean

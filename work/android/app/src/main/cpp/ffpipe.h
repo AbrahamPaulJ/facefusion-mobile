@@ -65,6 +65,18 @@ struct Config {
   // --face-selector-mode, reduced to the two that need no reference-face UI.
   // false = `many`, every detected face; true = `one`, the largest by box area.
   bool swapLargestOnly = false;
+
+  // --reference-face-distance, upstream's default. The comparison is upstream's too, in
+  // face_selector.py:compare_faces:
+  //
+  //     d = 1 - dot(embedding_norm, reference.embedding_norm)   // 0..2
+  //     d = interp(d, [0, 2], [0, 1])                           // i.e. d / 2
+  //     match = d < reference_face_distance
+  //
+  // So 0.3 accepts everything with cosine similarity above 0.4. Raising it swaps more
+  // faces including the wrong ones; lowering it eventually matches nobody, which on a
+  // clip where the reference was picked from one frame is the failure to expect.
+  float referenceDistance = 0.3f;
   // hyperswap: 256, mean/std 0.5, denormalise.  inswapper: 128, mean 0/std 1, no denorm.
   int swapSize = 256;
   float swapMean = 0.5f, swapStd = 0.5f;
@@ -201,6 +213,26 @@ class Pipeline {
   void setTrackPeriod(int frames);
 
   bool setSource(const ffcv::Image& sourceImage);
+
+  /**
+   * Remember the face at (x, y) in [frame] as the one to swap -- upstream's
+   * `face_selector_mode = reference`.
+   *
+   * Returns false when no detected face contains that point, and fills `outBox` with the
+   * chosen face's box when it returns true, so the UI can show WHICH face it took.
+   *
+   * ⚠ The reference lives on the pipeline, NOT in Config. Config is copied field by field
+   * by updateConfig on every options change, and a 512-float identity riding in it would
+   * be one careless `p_->cfg = c` away from being cleared -- or, worse, from being
+   * half-copied. Keeping it here means an options change cannot touch it and a selector
+   * that is set stays set until something explicitly clears it.
+   */
+  bool setReferenceFaceAt(const ffcv::Image& frame, float x, float y, float* outBox);
+
+  /** Forget it: back to `many`, or to `one` if swapLargestOnly is set. */
+  void clearReferenceFace();
+
+  bool hasReferenceFace() const;
 
   /**
    * Take the clip's audio once, and hold one 80x16 mel window per video frame.

@@ -65,6 +65,8 @@ data class PreviewUi(
      * pixel coordinates. Null when the overlay is off or nothing has been asked yet.
      */
     val faceBoxes: FloatArray? = null,
+    /** The face picked as the reference, if any -- drawn solid while the rest dim. */
+    val referenceBox: FloatArray? = null,
 )
 
 /**
@@ -141,6 +143,11 @@ fun SwapScreen(
     showFaceBoxes: Boolean,
     /** Turn the face overlay on or off. Detection runs only while it is on. */
     onToggleFaceBoxes: () -> Unit,
+    /**
+     * A face in the ORIGINAL pane was tapped, in that image's own pixel coordinates:
+     * upstream's `face_selector_mode = reference`. Tapping the chosen one again clears it.
+     */
+    onPickFace: (Float, Float) -> Unit,
     openCard: String,
     onToggleCard: (String) -> Unit,
     /** There is something to save: a finished video, or a swapped still on the pane. */
@@ -543,6 +550,11 @@ fun SwapScreen(
                 actionIcon = if (hasTarget) null else Icons.Default.Add,
                 zoom = zoom,
                 faceBoxes = preview.faceBoxes,
+                referenceBox = preview.referenceBox,
+                // Only while the overlay is on: picking a face you cannot see is not a
+                // feature, and without the boxes a tap here has always meant "choose a
+                // different target".
+                onPickFace = if (showFaceBoxes && idle) onPickFace else null,
             ) {
                 // CAMERA, beside the gallery pick, and shown while the pane is EMPTY --
                 // which is when someone deciding what to swap needs it. Two buttons because

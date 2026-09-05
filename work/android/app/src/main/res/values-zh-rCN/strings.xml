@@ -338,4 +338,9 @@
     <string name="live_lens_front">前置</string>
     <string name="live_lens_back">后置</string>
     <string name="swap_show_faces">显示检测到的人脸</string>
+    <string name="status_reference_set">仅替换该人脸。再次点按可替换所有人脸。</string>
+    <string name="status_reference_missed">该位置没有人脸。</string>
+    <string name="status_reference_cleared">已恢复替换所有人脸。</string>
+    <string name="opt_reference_distance">匹配所选人脸</string>
+    <string name="opt_reference_distance_hint">仅在点选目标人脸后生效。数值越大匹配的人越多；越小则同一个人转头时可能不再匹配。</string>
 </resources>
