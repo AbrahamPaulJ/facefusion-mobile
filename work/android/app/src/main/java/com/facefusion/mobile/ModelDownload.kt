@@ -167,9 +167,17 @@ object ModelDownload {
     /**
      * Download everything missing. Blocking; call from a service worker thread.
      *
+     * @param only the LOCAL filenames to fetch, or null for "whatever this device
+     *   requires". ⚠ The optional models can ONLY be reached through this parameter: the
+     *   null path excludes them by name, so a caller that wants gpen or edtalk and passes
+     *   null gets a run that fetches nothing and reports success. That was the 0.7.0
+     *   regression -- the Settings row's Download button called the bulk fetch, which
+     *   skipped the very model the button was attached to, and the app then said "Models
+     *   ready" because as far as the required set was concerned it was.
      * @return null on success, an error string otherwise.
      */
-    fun run(dir: File, chain: String, onTick: () -> Unit): String? {
+    fun run(dir: File, chain: String, only: Set<String>? = null,
+            onTick: () -> Unit): String? {
         cancelled = false
         error = null; finished = false; running = true
         try {
@@ -195,9 +203,22 @@ object ModelDownload {
             val optional = OPTIONAL_MODELS
                 .flatMap { ModelPaths.filesFor(tier, it) }
                 .toSet()
-            val entries = published.filterNot { it.name in optional }
+            val entries =
+                if (only != null) published.filter { it.name in only }
+                else published.filterNot { it.name in optional }
 
-            val todo = missing(dir, entries)
+            // An explicit request that matches nothing is an ERROR, not an empty success.
+            // The row offering the button was built from `hostedFiles`, so this can only
+            // happen if the manifest moved under it -- and reporting "ready" for a file
+            // that is not there is precisely the failure this whole change is about.
+            if (only != null && entries.isEmpty())
+                return fail("Not published for tier " + tier + ": " +
+                            only.joinToString(", "))
+
+            // Asked for by name, so fetch it even if a file of the right length is already
+            // there: the row's other states (present, outdated) are what decide whether
+            // the button says Download or Update, and Update means re-fetch.
+            val todo = if (only != null) entries else missing(dir, entries)
             // Say WHAT is about to be fetched and what was kept. A download that quietly
             // re-fetches a 196 MB file it already has, and one that fetches only the file
             // you asked for, look identical from outside -- a progress bar and a wait.

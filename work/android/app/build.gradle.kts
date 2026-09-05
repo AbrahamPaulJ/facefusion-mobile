@@ -337,7 +337,14 @@ android {
         // ambiguous for the 47 people who already took the second one, so v0.2.1 is a NEW
         // tag and a NEW asset name, and v0.2.0 keeps pointing at what it always did.
         // archivesBaseName follows versionName, so the filename moves with it.
-        versionCode = 57
+        // 58 = the 0.7.0 optional-model regression: the enhancer and the lip syncer
+        // had a Download button that started the BULK fetch, which excludes them by
+        // name -- so it fetched nothing and reported "Models ready".  Same 0.7.0
+        // name, fifth asset; the code is the only thing that tells them apart.
+        // 59 = the chip that triggered the download now comes ON when it lands. The
+        // tap was an enable; 58 made the model arrive and left the stage off, so the
+        // user had to ask twice and the first ask looked like it had failed.
+        versionCode = 59
         versionName = "0.7.0$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel

@@ -49,7 +49,8 @@
     <string name="swap_proc_enhancer">face_enhancer</string>
     <string name="swap_proc_lip_syncer">lip_syncer</string>
     <string name="proc_get_title">Скачать %1$s?</string>
-    <string name="proc_get_body">Этому процессору нужна модель, которой пока нет на телефоне. Она скачается вместе с остальными недостающими.</string>
+    <string name="proc_get_body">Этому процессору нужна модель, которой пока нет на телефоне. Скачается только эта модель.</string>
+    <string name="proc_get_body_size">Этому процессору нужна модель, которой пока нет на телефоне: %1$s для загрузки.</string>
     <string name="proc_get_confirm">Скачать</string>
     <string name="proc_get_cancel">Не сейчас</string>
 
@@ -259,6 +260,8 @@
     <string name="status_saved_pictures">Сохранено в Pictures/FaceFusion</string>
     <string name="toast_saved_to">Сохранено в %1$s</string>
     <string name="toast_models_ready">Модели готовы</string>
+    <string name="toast_download_done">Загрузка завершена</string>
+    <string name="toast_download_failed">Ошибка загрузки: %1$s</string>
     <string name="status_frame_saved">Кадр сохранён в Pictures/FaceFusion</string>
     <string name="status_save_failed">Не удалось сохранить: %1$s</string>
     <string name="status_save_frame_failed">Не удалось сохранить кадр: %1$s</string>

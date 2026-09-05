@@ -122,8 +122,15 @@ fun SwapScreen(
     hasInswapper: Boolean,
     hasEnhancer: Boolean,
     hasLipSyncer: Boolean,
-    /** A processor whose model is not on the device was tapped. */
-    onRequestModel: (String) -> Unit,
+    /**
+     * A processor whose model is not on the device was tapped.
+     *
+     * Two arguments: the chip's LABEL, which is localized and only ever shown, and the
+     * MODEL name the downloader knows it by ("gpen", "edtalk"). ⚠ It used to pass the
+     * label alone, which left the prompt's Continue with nothing to ask for but "the
+     * missing set" -- and the missing set excludes exactly these two models by name.
+     */
+    onRequestModel: (label: String, model: String) -> Unit,
     openCard: String,
     onToggleCard: (String) -> Unit,
     /** There is something to save: a finished video, or a swapped still on the pane. */
@@ -231,6 +238,8 @@ fun SwapScreen(
             @Composable
             fun ProcessorChip(
                 name: String,
+                /** What the downloader calls this stage's model; "" for one always present. */
+                model: String,
                 installed: Boolean,
                 on: Boolean,
                 available: Boolean,
@@ -244,7 +253,7 @@ fun SwapScreen(
                 val active = installed && on && available
                 val clickable = idle && (!installed || available)
                 Surface(
-                    onClick = { if (installed) onToggle() else onRequestModel(name) },
+                    onClick = { if (installed) onToggle() else onRequestModel(name, model) },
                     enabled = clickable,
                     shape = RoundedCornerShape(8.dp),
                     color = if (active) FfRed else MaterialTheme.colorScheme.surfaceVariant,
@@ -346,6 +355,9 @@ fun SwapScreen(
                     // stages run.
                     ProcessorChip(
                         name = stringResource(R.string.swap_proc_swapper),
+                        // Always installed -- missing() makes it a REQUIRED model, so the
+                        // app never reaches this row without it.
+                        model = "",
                         installed = true, on = true, available = true, onToggle = {},
                         // Opens with the Face Swapper card already expanded, so the
                         // weight slider -- the knob most runs actually touch -- is there
@@ -359,6 +371,7 @@ fun SwapScreen(
                     )
                     ProcessorChip(
                         name = stringResource(R.string.swap_proc_enhancer),
+                        model = "gpen",
                         installed = hasEnhancer,
                         on = opts.faceEnhance,
                         available = true,
@@ -373,6 +386,9 @@ fun SwapScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ProcessorChip(
                         name = stringResource(R.string.swap_proc_lip_syncer),
+                        // edtalk, matching hasLipSyncer -- wav2lip is not offered because
+                        // ffpipe no longer opens it.
+                        model = "edtalk",
                         installed = hasLipSyncer,
                         on = opts.lipSync,
                         available = !hasTarget || durationMs > 0,

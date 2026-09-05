@@ -175,14 +175,18 @@ class MainActivity : ComponentActivity() {
     private var confirmMetered by mutableStateOf(false)
 
     /**
-     * A processor whose model is missing was tapped; the name to name in the prompt.
+     * A processor whose model is missing was tapped: its LABEL, and the model name.
      *
      * The Processors row lists every stage whether or not its model is on the device,
-     * so tapping one that is absent has to lead somewhere. It leads here, and here leads
-     * to the same download the Settings inventory starts -- there is one downloader and
-     * it fetches whatever the manifest says is missing.
+     * so tapping one that is absent has to lead somewhere. It leads here, and here fetches
+     * THAT model -- one downloader, told what to get.
+     *
+     * ⚠ The label alone used to be enough, because Continue started the bulk download.
+     * That download excludes the enhancer and the lip syncer by name (they are the only
+     * stages whose chip can say "not installed" at all), so the prompt this dialog opens
+     * was the one thing in the app that could never fetch what it was offering.
      */
-    private var confirmModel by mutableStateOf<String?>(null)
+    private var confirmModel by mutableStateOf<Pair<String, String>?>(null)
 
     /**
      * Whether this tier's set is incomplete, as explicit state refreshed from disk.
@@ -609,7 +613,30 @@ class MainActivity : ComponentActivity() {
                     // not start one is worse than saying nothing.
                     if (announceDownload) {
                         announceDownload = false
-                        if (!modelsMissing) toast(getString(R.string.toast_models_ready))
+                        val err = ModelDownload.error
+                        // ⚠ "Models ready" is a claim about the REQUIRED set, and it used
+                        // to be the only thing said here -- so a one-model download that
+                        // fetched nothing, or failed outright, still reported success as
+                        // long as the required models happened to be present. Which they
+                        // always are by the time anyone asks for an optional one.
+                        if (err != null)
+                            toast(getString(R.string.toast_download_failed, err))
+                        else if (pendingDownload != null)
+                            toast(getString(R.string.toast_download_done))
+                        else if (!modelsMissing)
+                            toast(getString(R.string.toast_models_ready))
+                        pendingDownload = null
+                        // Finish the tap that started this. Gated on the FILE, not on the
+                        // download reporting success: turning a stage on for a model that
+                        // is not there produces a run that fails later, somewhere that
+                        // cannot explain why.
+                        enableAfterDownload?.let { m ->
+                            if (ModelPaths.present(modelDir(), tier, m)) when (m) {
+                                "gpen" -> applyOpts(opts.copy(faceEnhance = true))
+                                "edtalk" -> applyOpts(opts.copy(lipSync = true))
+                            }
+                        }
+                        enableAfterDownload = null
                     }
                 }
 
@@ -691,26 +718,13 @@ class MainActivity : ComponentActivity() {
                                 statusIsError = statusIsError,
                                 log = log,
                                 opts = opts,
-                                onOptsChange = { o ->
-                                    // Only the SWAPPER selects a different model file.
-                                    // Everything else is a per-frame value the loaded
-                                    // pipeline can simply be told about, so it must not
-                                    // send the preview cold -- going cold is what made a
-                                    // slider cost a model reload.
-                                    val reloads = o.swapper != opts.swapper
-                                    opts = o
-                                    o.save(this@MainActivity)
-                                    // init() consumed the old options; the warm pipeline is
-                                    // now showing something the user did not ask for. This
-                                    // REDRAWS -- clearing the pane and leaving it cleared is
-                                    // how "Preparing preview..." became permanent, since
-                                    // nothing was left to ask for the next one.
-                                    previewOptionsChanged(reloads = reloads)
-                                },
+                                onOptsChange = ::applyOpts,
                                 hasInswapper = hasInswapper,
                                 hasEnhancer = hasEnhancer,
                                 hasLipSyncer = hasLipSyncer,
-                                onRequestModel = { confirmModel = it },
+                                onRequestModel = { label, model ->
+                                    confirmModel = label to model
+                                },
                                 openCard = openCard,
                                 onToggleCard = { k -> openCard = if (openCard == k) "" else k },
                                 // A still needs no run, so it has no output FILE -- what
@@ -775,7 +789,12 @@ class MainActivity : ComponentActivity() {
                                 sections = modelSections(),
                                 modelDirPath = modelDir().absolutePath,
                                 device = deviceUi,
-                                onDownloadModel = { onDownloadTapped() },
+                                // The ROW's files, not the required set. This is the whole
+                                // of the 0.7.0 regression: the button was wired to the bulk
+                                // fetch, which excludes the enhancer and the lip syncer by
+                                // name, so the two models that have nothing BUT this button
+                                // could not be downloaded at all.
+                                onDownloadModel = { m -> onDownloadTapped(m.files) },
                                 onDeleteModel = { m ->
                                     // Every file of the row, not just the one it is named
                                     // after: an ncnn model is a param/bin pair.
@@ -798,13 +817,29 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    confirmModel?.let { name ->
+                    confirmModel?.let { (name, model) ->
                         AlertDialog(
                             onDismissRequest = { confirmModel = null },
                             title = { Text(stringResource(R.string.proc_get_title, name)) },
-                            text = { Text(stringResource(R.string.proc_get_body)) },
+                            text = {
+                                // Say the size when the manifest has been read, and say
+                                // nothing about it when it has not. A number invented for
+                                // an offline device is worse than no number.
+                                val mb = modelSizeMb(model)
+                                Text(if (mb.isEmpty())
+                                         stringResource(R.string.proc_get_body)
+                                     else stringResource(R.string.proc_get_body_size, mb))
+                            },
                             confirmButton = {
-                                TextButton({ confirmModel = null; onDownloadTapped() }) {
+                                // THIS model's files. ModelPaths, not a name pattern: on
+                                // ncnn a model is a param/bin pair.
+                                TextButton({
+                                    confirmModel = null
+                                    // The tap was an ENABLE; the download is only what was
+                                    // in the way.
+                                    enableAfterDownload = model
+                                    onDownloadTapped(ModelPaths.filesFor(tier, model))
+                                }) {
                                     Text(stringResource(R.string.proc_get_confirm))
                                 }
                             },
@@ -936,6 +971,18 @@ class MainActivity : ComponentActivity() {
      * Failure is silent and total: [hostedFiles] stays empty, so Settings offers no
      * downloads at all rather than offering one that cannot succeed.
      */
+    /**
+     * What [model] weighs on the host, as "23.5 MB" -- or "" when nothing says.
+     *
+     * Read from [hostedFiles], the same map the Settings rows use, so the two cannot
+     * disagree; empty offline, and empty for a model this tier does not publish.
+     */
+    private fun modelSizeMb(model: String): String {
+        val files = ModelPaths.filesFor(tier, model)
+        if (files.isEmpty() || !files.all { it in hostedFiles }) return ""
+        return "%.1f MB".format(files.sumOf { hostedFiles[it] ?: 0L } / 1048576.0)
+    }
+
     private fun refreshHostedFiles() = lifecycleScope.launch(Dispatchers.IO) {
         val hosted = runCatching {
             ModelDownload.manifestFor(tierChain.joinToString(","))
@@ -1054,15 +1101,61 @@ class MainActivity : ComponentActivity() {
         android.widget.Toast.makeText(this, text, android.widget.Toast.LENGTH_SHORT).show()
     }
 
-    private fun onDownloadTapped() {
+    /**
+     * Apply a new option set: state, disk, and the warm pipeline.
+     *
+     * A function rather than the lambda it used to be because a download can now finish
+     * one of these on the user's behalf -- see [enableAfterDownload] -- and a second copy
+     * of this would be a second chance to forget the save or the redraw.
+     */
+    private fun applyOpts(o: SwapOptions) {
+        // Only the SWAPPER selects a different model file. Everything else is a per-frame
+        // value the loaded pipeline can simply be told about, so it must not send the
+        // preview cold -- going cold is what made a slider cost a model reload.
+        val reloads = o.swapper != opts.swapper
+        opts = o
+        o.save(this)
+        // init() consumed the old options; the warm pipeline is now showing something the
+        // user did not ask for. This REDRAWS -- clearing the pane and leaving it cleared
+        // is how "Preparing preview..." became permanent, since nothing was left to ask
+        // for the next one.
+        previewOptionsChanged(reloads = reloads)
+    }
+
+    /**
+     * @param only the LOCAL filenames to fetch, or null for "whatever this device needs".
+     *   A Settings row passes its own files, which is the ONLY way to reach the enhancer
+     *   and the lip syncer -- the null path excludes them by name.
+     */
+    private fun onDownloadTapped(only: List<String>? = null) {
         if (android.os.Build.VERSION.SDK_INT >= 33)
             askNotify.launch(android.Manifest.permission.POST_NOTIFICATIONS)
         // Metered is a warning, not a refusal: the user may have no Wi-Fi and still want it.
+        // ⚠ The request has to survive the dialog. Parking it here rather than in the
+        // dialog's lambda is what stops "Continue" from silently turning a one-model
+        // download into the bulk one.
+        pendingDownload = only
         if (ModelDownload.isMetered(this)) confirmMetered = true else beginDownload()
     }
 
     /** True only between starting a download and reporting that it finished. */
     private var announceDownload = false
+
+    /** What [beginDownload] will ask for; see [onDownloadTapped]. */
+    private var pendingDownload: List<String>? = null
+
+    /**
+     * The processor to switch ON once its model lands, or null.
+     *
+     * The tap that starts this download was a tap on the chip -- the user asked to ENABLE
+     * the stage, and the download is only what stood in the way. Leaving the chip off
+     * afterwards makes them ask twice for one thing, and the second ask looks like the
+     * first one failed.
+     *
+     * Set ONLY by the processor prompt. A Settings row is an inventory action and says
+     * nothing about wanting the stage on.
+     */
+    private var enableAfterDownload: String? = null
 
     private fun beginDownload() {
         ModelDownload.reset()
@@ -1070,7 +1163,7 @@ class MainActivity : ComponentActivity() {
         // The whole chain, not one tier: the downloader picks the best tier the manifest
         // actually publishes. Handing it only `tier` would fail outright on a chip whose
         // best tier is not hosted yet.
-        DownloadService.start(this, tierChain.joinToString(","))
+        DownloadService.start(this, tierChain.joinToString(","), pendingDownload)
     }
 
     // ------------------------------------------------------------------ models

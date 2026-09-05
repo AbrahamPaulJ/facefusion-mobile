@@ -43,7 +43,8 @@
     <string name="swap_proc_enhancer">face_enhancer</string>
     <string name="swap_proc_lip_syncer">lip_syncer</string>
     <string name="proc_get_title">下载 %1$s？</string>
-    <string name="proc_get_body">此处理器需要一个本机尚未下载的模型。它将与其余缺失的模型一起下载。</string>
+    <string name="proc_get_body">此处理器需要一个本机尚未下载的模型。仅下载该模型。</string>
+    <string name="proc_get_body_size">此处理器需要一个本机尚未下载的模型：需下载 %1$s。</string>
     <string name="proc_get_confirm">下载</string>
     <string name="proc_get_cancel">暂不</string>
 
@@ -253,6 +254,8 @@
     <string name="status_saved_pictures">已保存到 Pictures/FaceFusion</string>
     <string name="toast_saved_to">已保存到 %1$s</string>
     <string name="toast_models_ready">模型已就绪</string>
+    <string name="toast_download_done">下载完成</string>
+    <string name="toast_download_failed">下载失败：%1$s</string>
     <string name="status_frame_saved">该帧已保存到 Pictures/FaceFusion</string>
     <string name="status_save_failed">保存失败：%1$s</string>
     <string name="status_save_frame_failed">保存该帧失败：%1$s</string>

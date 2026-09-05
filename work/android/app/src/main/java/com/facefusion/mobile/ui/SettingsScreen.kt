@@ -114,8 +114,15 @@ fun SettingsScreen(
     modelDirPath: String,
     device: DeviceUi,
     onDeleteModel: (ModelRow) -> Unit,
-    /** Fetch whatever the manifest has that this device does not. */
-    onDownloadModel: () -> Unit,
+    /**
+     * Fetch THIS row's files.
+     *
+     * ⚠ Takes the row on purpose. It used to take nothing and start the bulk download,
+     * which excludes the enhancer and the lip syncer by name -- so their buttons, the only
+     * way either model is ever fetched, ran a download that skipped them and finished
+     * saying the models were ready.
+     */
+    onDownloadModel: (ModelRow) -> Unit,
     /** Start or stop the HTTP server. [lan] binds every interface instead of loopback. */
     onApiToggle: (on: Boolean, lan: Boolean) -> Unit,
     /**
@@ -220,7 +227,7 @@ fun SettingsScreen(
                                 // go. Delete is not offered here: the file works, it is merely
                                 // superseded, and the useful action is to replace it. Deleting
                                 // it first would reach the same place through a broken app.
-                                TextButton(onDownloadModel, enabled = !ModelDownload.running) {
+                                TextButton({ onDownloadModel(m) }, enabled = !ModelDownload.running) {
                                     Text(stringResource(if (m.fetching)
                                                            R.string.set_updating
                                                        else R.string.set_update))
@@ -238,7 +245,7 @@ fun SettingsScreen(
                                 // visibly wrong once the optional models stopped being
                                 // fetched by the bulk button. The button stays DISABLED
                                 // either way -- two downloads at once is still not a thing.
-                                TextButton(onDownloadModel, enabled = !ModelDownload.running) {
+                                TextButton({ onDownloadModel(m) }, enabled = !ModelDownload.running) {
                                     Text(stringResource(if (m.fetching)
                                                            R.string.set_downloading
                                                        else R.string.set_download))

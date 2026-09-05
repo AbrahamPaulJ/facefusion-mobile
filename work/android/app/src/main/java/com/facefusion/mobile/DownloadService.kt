@@ -32,6 +32,9 @@ class DownloadService : Service() {
         }
 
         val chain = intent?.getStringExtra(EXTRA_TIERS).orEmpty()
+        // null, not an empty set: "fetch nothing" and "fetch what this device requires"
+        // are different requests, and only one of them is ever intended.
+        val only = intent?.getStringArrayExtra(EXTRA_ONLY)?.toSet()
         val dir = File(getExternalFilesDir(null), "models").apply { mkdirs() }
 
         createChannel()
@@ -44,7 +47,7 @@ class DownloadService : Service() {
             var err: String? = "interrupted"
             try {
                 var lastPost = 0L
-                err = ModelDownload.run(dir, chain) {
+                err = ModelDownload.run(dir, chain, only) {
                     // Throttled: the notification manager rate-limits updates anyway, and
                     // posting per chunk is wasted work on a 275 MB transfer.
                     val now = System.currentTimeMillis()
@@ -170,6 +173,7 @@ class DownloadService : Service() {
         private const val CHANNEL = "model_download"
         private const val NOTIF_ID = 1001
         private const val EXTRA_TIERS = "tiers"
+        private const val EXTRA_ONLY = "only"
         private const val ACTION_CANCEL = "com.facefusion.mobile.CANCEL_DOWNLOAD"
 
         /**
@@ -182,9 +186,15 @@ class DownloadService : Service() {
          */
         private const val CANCELLED = "Cancelled"
 
-        /** @param tiers the comma-joined tier chain, best first -- "v81,v73,v68". */
-        fun start(context: Context, tiers: String) {
+        /**
+         * @param tiers the comma-joined tier chain, best first -- "v81,v73,v68".
+         * @param only the LOCAL filenames to fetch, or null for the required set. The
+         *   optional models (the enhancer, the lip syncer) are only reachable this way --
+         *   see the warning on [ModelDownload.run].
+         */
+        fun start(context: Context, tiers: String, only: List<String>? = null) {
             val i = Intent(context, DownloadService::class.java).putExtra(EXTRA_TIERS, tiers)
+            if (only != null) i.putExtra(EXTRA_ONLY, only.toTypedArray())
             context.startForegroundService(i)
         }
     }
