@@ -8,6 +8,7 @@ import android.media.MediaFormat
 import android.media.MediaMuxer
 import java.io.File
 import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 /**
  * Decode -> swap -> encode, with the original audio copied through and an optional trim.
@@ -260,6 +261,15 @@ class VideoSwapper(
         val muxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
         var muxAudio = -1
         var muxing = false
+        // A separate voice file has its OWN timeline, unrelated to the target's trim -- take
+        // it from its own start, capped at the video's post-trim LENGTH so a longer voice
+        // file does not produce an audio track past where the video ends.  Hoisted out of
+        // the copy-through below because the transcode fallback has to agree with it: the
+        // two must not disagree about which span of audio the output carries.
+        val copyStartUs = if (voicePath != null) 0L else trimStartUs
+        val copyEndUs = if (voicePath != null) spanUs else trimEndUs
+        // Non-null only when the pass-through was refused and a transcode replaced it.
+        var aacPackets: List<AacPacket>? = null
         // Audio is PASS-THROUGH, and the MP4 muxer accepts a strictly narrower set of codecs
         // than MediaExtractor will hand back: Opus, Vorbis, FLAC and raw PCM all extract
         // fine and all make addTrack throw IllegalStateException("Failed to add the track
@@ -279,8 +289,37 @@ class VideoSwapper(
                 val af = audioExtractor.getTrackFormat(audioTrack)
                 val amime = af.getString(MediaFormat.KEY_MIME) ?: "?"
                 muxAudio = runCatching { muxer.addTrack(af) }.getOrElse {
-                    onLog("audio: MP4 will not carry $amime, writing video only")
-                    -1
+                    // Refused. Dropping the soundtrack here is worst precisely when it
+                    // matters most: a VOICE file is usually a WAV, WAV extracts as
+                    // audio/raw, and audio/raw is one of the codecs MP4 will not take -- so
+                    // a lip-sync run would sync the mouth to a voice and then write the
+                    // result SILENT, losing the one thing the run was for.
+                    //
+                    // The bytes are recoverable, only the container is fussy, so decode and
+                    // re-encode to AAC rather than give up. Best-effort still: on any
+                    // failure this falls back to the old video-only behaviour rather than
+                    // costing the run.
+                    val t = runCatching {
+                        transcodeToAac(voicePath ?: inputPath, copyStartUs, copyEndUs)
+                    }.getOrNull()
+                    if (t == null) {
+                        onLog("audio: MP4 will not carry $amime and it would not " +
+                              "transcode, writing video only")
+                        -1
+                    } else {
+                        // addTrack with the ENCODER's output format, not a hand-built one:
+                        // MP4 needs AAC's csd-0, which only exists once the encoder has
+                        // produced it.  That is why the transcode runs to completion here,
+                        // before muxer.start(), rather than streaming alongside the copy.
+                        runCatching { muxer.addTrack(t.first) }.getOrElse {
+                            onLog("audio: $amime transcoded but the AAC track was " +
+                                  "refused too, writing video only")
+                            -1
+                        }.also { ix -> if (ix >= 0) {
+                            aacPackets = t.second
+                            onLog("audio: MP4 will not carry $amime -- transcoded to AAC")
+                        } }
+                    }
                 }
             }
             muxer.start()
@@ -395,12 +434,25 @@ class VideoSwapper(
         // been swapped and encoded, so a throw in the copy-through would discard the entire
         // run's NPU work for a soundtrack.  A partial audio track is still a valid MP4 --
         // writeSampleData has already committed whatever it accepted.
-        if (audioTrack >= 0 && muxAudio >= 0) runCatching {
-            // A separate voice file has its OWN timeline, unrelated to the target's trim --
-            // copy it from its own start, capped at the video's post-trim LENGTH so a
-            // longer voice file does not produce an audio track past where the video ends.
-            val copyStartUs = if (voicePath != null) 0L else trimStartUs
-            val copyEndUs = if (voicePath != null) spanUs else trimEndUs
+        val pending = aacPackets
+        if (audioTrack >= 0 && muxAudio >= 0 && pending != null) runCatching {
+            // Already decoded, already trimmed, already timed from zero by the transcode --
+            // so this is a straight write, with none of the extractor's seek-and-skip.
+            val ai = MediaCodec.BufferInfo()
+            for (p in pending) {
+                ai.offset = 0
+                ai.size = p.bytes.size
+                ai.presentationTimeUs = p.ptsUs
+                // Every AAC frame is independently decodable, so all of them are sync
+                // samples -- unlike video, where only the IDRs are.
+                ai.flags = MediaCodec.BUFFER_FLAG_KEY_FRAME
+                muxer.writeSampleData(muxAudio, ByteBuffer.wrap(p.bytes), ai)
+            }
+            onLog("audio: ${pending.size} AAC packets written" +
+                  (if (voicePath != null) " (from the voice track)" else ""))
+        }.onFailure { onLog("audio: writing the transcode failed " +
+                            "(${it.javaClass.simpleName}), video kept") }
+        else if (audioTrack >= 0 && muxAudio >= 0) runCatching {
             val ae = MediaExtractor().apply {
                 setDataSource(voicePath ?: inputPath); selectTrack(audioTrack)
             }
@@ -449,6 +501,102 @@ class VideoSwapper(
                         swapped, elapsedMs / 1000.0))
         NativePipe.stageMillis().takeIf { it.isNotEmpty() }?.let(onLog)
         outputPath
+    }
+
+    /** One encoded AAC frame, held until the muxer has a track to take it. */
+    private class AacPacket(val bytes: ByteArray, val ptsUs: Long)
+
+    /**
+     * Decode [path]'s audio and re-encode it as AAC, for the codecs MP4 will not carry.
+     *
+     * Returns the ENCODER's output format -- which carries the csd-0 the muxer needs and a
+     * hand-built MediaFormat does not -- together with every packet, or null if the audio
+     * could not be decoded or no AAC encoder would take it.
+     *
+     * ⚠ This runs to completion and buffers the result, rather than streaming into the muxer
+     * alongside the video.  It has to: MediaMuxer takes no tracks after start(), and the AAC
+     * format only exists once the encoder has produced its first output.  The cost is
+     * bounded -- 128 kbps is under 1 MB per minute, against the hundreds of MB of frames
+     * this class already moves -- and it only happens on the refusal path.
+     *
+     * The decode is deliberately a SECOND one, not shared with the lip syncer's PCM: that
+     * one exists only when lipSync is on, and this bug bites any PCM source, swap alone.
+     */
+    private fun transcodeToAac(path: String, startUs: Long, endUs: Long):
+            Pair<MediaFormat, List<AacPacket>>? {
+        val pcm = AudioDecoder.decode(path, startUs, endUs) ?: return null
+        if (pcm.samples.isEmpty() || pcm.channels < 1) return null
+
+        val fmt = MediaFormat.createAudioFormat(
+            MediaFormat.MIMETYPE_AUDIO_AAC, pcm.sampleRate, pcm.channels).apply {
+            setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+            setInteger(MediaFormat.KEY_BIT_RATE, 128_000)
+            setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 64 * 1024)
+        }
+        val enc = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
+        try {
+            enc.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            enc.start()
+
+            val packets = ArrayList<AacPacket>()
+            var outFormat: MediaFormat? = null
+            val info = MediaCodec.BufferInfo()
+            var ix = 0                      // next sample (not frame) to feed
+            var fed = false                 // has end-of-stream been queued
+            while (true) {
+                if (!fed) {
+                    val inIx = enc.dequeueInputBuffer(10_000)
+                    if (inIx >= 0) {
+                        val ib = enc.getInputBuffer(inIx)!!
+                        ib.clear()
+                        // PCM 16-bit in NATIVE order -- an encoder fed big-endian samples
+                        // on a little-endian device encodes loud noise, not silence, so a
+                        // wrong guess here is audible rather than absent.
+                        ib.order(ByteOrder.nativeOrder())
+                        val room = ib.capacity() / 2
+                        val n = minOf(room, pcm.samples.size - ix)
+                        // Frames, not samples: the timestamp advances per sample-frame, so
+                        // a stereo buffer covers half as much time as its length suggests.
+                        val ptsUs = ix.toLong() * 1_000_000L / (pcm.sampleRate.toLong() *
+                                                                pcm.channels)
+                        if (n <= 0) {
+                            enc.queueInputBuffer(inIx, 0, 0, ptsUs,
+                                                 MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            fed = true
+                        } else {
+                            ib.asShortBuffer().put(pcm.samples, ix, n)
+                            enc.queueInputBuffer(inIx, 0, n * 2, ptsUs, 0)
+                            ix += n
+                        }
+                    }
+                }
+                val oIx = enc.dequeueOutputBuffer(info, 10_000)
+                if (oIx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    outFormat = enc.outputFormat
+                } else if (oIx >= 0) {
+                    // CODEC_CONFIG is the csd, which reaches the muxer through the output
+                    // FORMAT above; writing it as a sample too would corrupt the track.
+                    if (info.size > 0 &&
+                        info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
+                        val ob = enc.getOutputBuffer(oIx)!!
+                        val arr = ByteArray(info.size)
+                        ob.position(info.offset)
+                        ob.get(arr)
+                        packets.add(AacPacket(arr, info.presentationTimeUs))
+                    }
+                    val eos = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
+                    enc.releaseOutputBuffer(oIx, false)
+                    if (eos) break
+                }
+            }
+            val f = outFormat
+            return if (f != null && packets.isNotEmpty()) f to packets else null
+        } catch (t: Throwable) {
+            return null
+        } finally {
+            runCatching { enc.stop() }
+            enc.release()
+        }
     }
 
     private fun drainEncoder(
