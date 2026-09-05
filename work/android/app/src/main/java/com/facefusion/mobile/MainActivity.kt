@@ -2340,8 +2340,11 @@ class MainActivity : ComponentActivity() {
         // two of those can fire for one user action. Releasing the pipeline twice is a
         // crash of exactly the kind this method was written to fix.
         if (!liveRunning) return
-        // BEFORE live.stop(): stop() drains the analyzer thread, so finishing here means
-        // no frame can arrive at a recorder that is being torn down.
+        // ⚠ This runs while the analyzer thread is STILL LIVE -- live.stop() below is what
+        // drains it. A frame already inside the pump therefore reaches the recorder after
+        // it has been finished, and LiveRecorder.stopped is what makes that harmless. An
+        // earlier comment here claimed the ordering was the protection; it is not, and a
+        // late frame would have built a second encoder over the same file.
         finishLiveRecording(discard = false)
         live.stop()
         liveRunning = false

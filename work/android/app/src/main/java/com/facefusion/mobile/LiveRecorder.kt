@@ -48,6 +48,29 @@ class LiveRecorder(private val out: File, private val onLog: (String) -> Unit = 
     @Volatile private var failed: String? = null
     val error: String? get() = failed
 
+    /**
+     * Set by [stop], and the reason [frame] cannot resurrect a finished recording.
+     *
+     * ⚠ Ordering alone does not close this. The caller clears `LiveEngine.recorder` before
+     * stopping, but a frame ALREADY INSIDE the pump has read the old reference and will
+     * call [frame] with it -- the lock serialises the two, it does not prevent the second.
+     * Without this flag that late frame finds `encoder == null` and `failed == null`, so
+     * `ensure` builds a SECOND encoder and muxer over the same path, which is then never
+     * stopped: a leaked codec and a file truncated by its own replacement.
+     */
+    @Volatile private var stopped = false
+
+    /**
+     * The size the encoder was configured for.
+     *
+     * ⚠ `ensure` returns early once an encoder exists, so without this a resolution change
+     * mid-recording would feed the old encoder buffers of a new size. The camera does not
+     * renegotiate inside one binding, so this should never fire -- which is exactly why it
+     * has to say something rather than produce a corrupt file quietly.
+     */
+    private var encW = 0
+    private var encH = 0
+
     /** How many frames have been written. 0 after a stop that produced nothing usable. */
     val frameCount: Int get() = frames
 
@@ -59,8 +82,14 @@ class LiveRecorder(private val out: File, private val onLog: (String) -> Unit = 
      * rather than something the caller can state in advance.
      */
     private fun ensure(w: Int, h: Int): Boolean {
-        if (encoder != null) return true
-        if (failed != null) return false
+        if (encoder != null) {
+            if (w == encW && h == encH) return true
+            failed = "frame size changed mid-recording (" + encW + "x" + encH +
+                     " -> " + w + "x" + h + ")"
+            onLog("recorder: $failed")
+            return false
+        }
+        if (failed != null || stopped) return false
         return runCatching {
             // Even dimensions: a 4:2:0 chroma plane is half-size in both axes, and an odd
             // edge leaves the encoder rounding in a direction nothing here controls.
@@ -81,6 +110,7 @@ class LiveRecorder(private val out: File, private val onLog: (String) -> Unit = 
             enc.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             enc.start()
             encoder = enc
+            encW = w; encH = h
             muxer = MediaMuxer(out.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             startNs = System.nanoTime()
             onLog("recording ${ew}x${eh} -> ${out.name}")
@@ -105,7 +135,9 @@ class LiveRecorder(private val out: File, private val onLog: (String) -> Unit = 
     // and then every early `return` in it is a type error. Unit is what this returns.
     fun frame(bgr: ByteArray, w: Int, h: Int) {
       synchronized(lock) {
-        if (failed != null) return
+        // stopped FIRST: a frame that was already inside the pump when the recording ended
+        // arrives here afterwards, and must do nothing at all. See [stopped].
+        if (stopped || failed != null) return
         if (!ensure(w, h)) return
         val enc = encoder ?: return
         val ew = w and 1.inv()
@@ -149,6 +181,7 @@ class LiveRecorder(private val out: File, private val onLog: (String) -> Unit = 
      * an unplayable file in front of the user with no way to tell it from a real one.
      */
     fun stop(): File? = synchronized(lock) {
+        stopped = true
         val enc = encoder ?: run { cleanupFailed(); return null }
         runCatching {
             // EOS through the input queue, then drain until the encoder says it is done.
