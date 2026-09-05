@@ -157,7 +157,10 @@ fun SettingsScreen(
         Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp),
+            // top, not just horizontal: the tab row is a hard edge and the first caption
+            // sat directly against it, so the content read as part of the tab rather than
+            // as what the tab had selected.
+            .padding(start = 16.dp, end = 16.dp, top = 14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         if (tab == 0) {
