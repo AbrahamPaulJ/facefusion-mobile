@@ -92,6 +92,9 @@
     <!-- %1$s weight, %2$s pixel boost label, %3$s mask blur -->
     <string name="swap_advanced_summary">weight %1$s   %2$s   blur %3$s</string>
     <string name="swap_reset_defaults">Reset to defaults</string>
+    <!-- The gear on each processor chip, and the sheet it opens. -->
+    <string name="swap_proc_settings">%1$s settings</string>
+    <string name="swap_close">Close</string>
 
     <!-- ==================================================== output pane -->
     <string name="out_output">Output</string>

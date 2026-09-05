@@ -11,11 +11,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -118,8 +124,6 @@ fun SwapScreen(
     onRequestModel: (String) -> Unit,
     openCard: String,
     onToggleCard: (String) -> Unit,
-    advancedOpen: Boolean,
-    onToggleAdvanced: () -> Unit,
     /** There is something to save: a finished video, or a swapped still on the pane. */
     hasOutput: Boolean,
     /** The finished video, for the output pane. Null when the target was a still. */
@@ -173,6 +177,14 @@ fun SwapScreen(
 
     // ONE instance for every pane, which is what makes them zoom together (item 4).
     val zoom = remember { ZoomState() }
+
+    // Which processor's settings sheet is open: "swapper", "enhancer", "lipsync", or null.
+    //
+    // Local and saveable rather than hoisted into MainActivity like [openCard], because it
+    // is transient view state with no bearing on a run -- MainActivity holds what the swap
+    // needs to know, and which sheet is showing is not that. rememberSaveable so a rotation
+    // does not close it mid-adjustment.
+    var settingsFor by rememberSaveable { mutableStateOf<String?>(null) }
     Column(
         modifier
             .fillMaxSize()
@@ -209,6 +221,11 @@ fun SwapScreen(
                 on: Boolean,
                 available: Boolean,
                 onToggle: () -> Unit,
+                // The gear, drawn INSIDE the chip at its trailing edge. Null for a chip
+                // with nothing to configure; also hidden while the model is missing, where
+                // the chip's job is to offer the download and settings would be settings
+                // for something that cannot run.
+                onSettings: (() -> Unit)? = null,
             ) {
                 val active = installed && on && available
                 val clickable = idle && (!installed || available)
@@ -266,6 +283,25 @@ fun SwapScreen(
                                 else -> MaterialTheme.colorScheme.onSurface
                             },
                         )
+                        // Its own clickable inside the chip's, which Compose resolves to the
+                        // innermost -- so the gear opens settings and does NOT also toggle
+                        // the stage underneath it. 22 dp of touch target inside a 36 dp
+                        // chip is below the 48 dp guideline, but a chip that grew to hold a
+                        // 48 dp box would no longer fit two across a phone, which is the
+                        // layout constraint this row is already built around.
+                        if (installed && onSettings != null) {
+                            Icon(
+                                Icons.Default.Settings,
+                                stringResource(R.string.swap_proc_settings, name),
+                                Modifier
+                                    .size(22.dp)
+                                    .clip(CircleShape)
+                                    .clickable(enabled = idle) { onSettings() }
+                                    .padding(2.dp),
+                                tint = if (active) Color.White.copy(alpha = 0.85f)
+                                       else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }
@@ -285,6 +321,7 @@ fun SwapScreen(
                     ProcessorChip(
                         name = stringResource(R.string.swap_proc_swapper),
                         installed = true, on = true, available = true, onToggle = {},
+                        onSettings = { settingsFor = "swapper" },
                     )
                     ProcessorChip(
                         name = stringResource(R.string.swap_proc_enhancer),
@@ -292,6 +329,7 @@ fun SwapScreen(
                         on = opts.faceEnhance,
                         available = true,
                         onToggle = { onOptsChange(opts.copy(faceEnhance = !opts.faceEnhance)) },
+                        onSettings = { settingsFor = "enhancer" },
                     )
                 }
                 // ⚠ `available` is false only once a PHOTO is picked. `durationMs > 0`
@@ -305,42 +343,22 @@ fun SwapScreen(
                         on = opts.lipSync,
                         available = !hasTarget || durationMs > 0,
                         onToggle = { onOptsChange(opts.copy(lipSync = !opts.lipSync)) },
+                        onSettings = { settingsFor = "lipsync" },
                     )
                 }
             }
         }
 
-        // The processors' own knobs, directly under the chip that turns each on -- not
-        // buried two levels down in Advanced, which is for settings almost every run
-        // leaves alone. A stage a user just switched on is not one of those. Each slider
-        // reads and writes the SAME `opts` field the old Advanced card did (or, for lip
-        // sync, the field `syncLip` in `ffpipe.cpp` used to hardcode), so nothing about the
-        // native side changed -- only where the control is drawn.
-        if (hasEnhancer && opts.faceEnhance) {
-            OptionSlider(
-                stringResource(R.string.opt_blend), opts.enhanceBlend,
-                { onOptsChange(opts.copy(enhanceBlend = it)) },
-                hint = when {
-                    opts.enhanceBlend >= 0.95f -> stringResource(R.string.opt_blend_hint_full)
-                    opts.enhanceBlend <= 0.05f -> stringResource(R.string.opt_blend_hint_none)
-                    else -> stringResource(R.string.opt_blend_hint_mixed)
-                },
-            )
-            // It runs on the swapper's own crop: gpen_bfr_256 and hyperswap_1a_256 declare
-            // the same template and size, so no second alignment is involved.
-            Text(stringResource(R.string.opt_enhancer_note, opts.pixelBoostLabel),
-                 style = MaterialTheme.typography.bodySmall, fontSize = 11.sp,
-                 modifier = Modifier.padding(top = 2.dp, bottom = 4.dp))
-        }
-        if (opts.lipSync) {
-            OptionSlider(
-                stringResource(R.string.opt_weight), opts.lipSyncWeight,
-                { onOptsChange(opts.copy(lipSyncWeight = it)) },
-                hint = stringResource(R.string.opt_lip_sync_weight_hint),
-            )
-        }
+        // The processors' knobs used to sit inline here, each under the chip that turns it
+        // on. They are behind that chip's own GEAR now: with three processors the inline
+        // form pushed the source and target panes off the first screen whenever two stages
+        // were enabled, and the panes are the primary path. They did not move far: one tap,
+        // on the chip they already belong to, instead of a scroll down to Advanced.
+        //
+        // Each still reads and writes the SAME `opts` field it always did, so nothing about
+        // the native side changed -- only where the control is drawn.
 
-        // Only while Lip Sync is ON, right under its own weight slider above. It is a
+        // Only while Lip Sync is ON. It is a
         // REQUIRED input, not a tuning knob, so it is up here with source/target rather
         // than in Advanced: the Swap button stays disabled without one (see its `enabled`
         // below), because syncing a clip to the audio it already has has nothing to fix --
@@ -662,44 +680,96 @@ fun SwapScreen(
                 )
         }
 
-        // ---------------------------------------------------------------- advanced
-        //
-        // One accordion around the three option groups. They used to sit between the trim
-        // slider and the Swap button, i.e. across the primary path, for settings almost
-        // every run leaves alone.
-        Accordion(
-            stringResource(R.string.swap_advanced),
-            if (opts == SwapOptions()) stringResource(R.string.swap_defaults)
-            else stringResource(R.string.swap_advanced_summary,
-                                "%.2f".format(opts.weight), opts.pixelBoostLabel,
-                                "%.2f".format(opts.maskBlur)),
-            advancedOpen,
-            onToggleAdvanced,
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Spacer(Modifier.height(2.dp))
-                // The enhancer's card used to live here. Its one knob (blend) now shows
-                // directly under the Processors row instead, right under the chip that
-                // turns it on -- a stage a user just switched on is not "a setting almost
-                // every run leaves alone", which is what this accordion is for.
-                FaceSwapperCard(opts, onOptsChange, openCard == "swapper",
-                                { onToggleCard("swapper") }, inswapperAvailable = hasInswapper)
-                FaceMaskerCard(opts, onOptsChange, openCard == "masker", { onToggleCard("masker") })
-                FaceDetectorCard(opts, onOptsChange, openCard == "detector",
-                                 { onToggleCard("detector") })
-                if (opts != SwapOptions()) {
-                    TextButton(
-                        onClick = { onOptsChange(SwapOptions()) },
-                        modifier = Modifier.align(Alignment.End),
-                    ) { Text(stringResource(R.string.swap_reset_defaults)) }
-                }
-            }
-        }
-
         // ---------------------------------------------------------------- log
         if (log.isNotEmpty()) LogBox(log)
 
         Spacer(Modifier.height(8.dp))
+    }
+
+    // ---------------------------------------------------------------- settings sheets
+    //
+    // What used to be the Advanced accordion, split by the processor each group belongs to
+    // and hung off that processor's own gear. Advanced sat below the trim slider and the
+    // Swap button, so reaching a mask blur meant scrolling PAST the control that starts the
+    // run -- and every group in it was reached the same way regardless of which stage it
+    // configured.
+    //
+    // ⚠ Face Masker and Face Detector are NOT the swapper's own settings: the masker is
+    // shared with the lip syncer (one BoxMaskCache serves both, see Pipeline::Impl) and the
+    // detector feeds every stage. They live behind the swapper's gear because face_swapper
+    // is the one processor that is always on, so its gear is the one that can always be
+    // reached -- not because they belong to it. Anything added here that a second stage
+    // also reads deserves the same note.
+    val sheet = settingsFor
+    if (sheet != null) {
+        AlertDialog(
+            onDismissRequest = { settingsFor = null },
+            confirmButton = {
+                TextButton({ settingsFor = null }) { Text(stringResource(R.string.swap_close)) }
+            },
+            title = {
+                Text(stringResource(when (sheet) {
+                    "enhancer" -> R.string.swap_proc_enhancer
+                    "lipsync"  -> R.string.swap_proc_lip_syncer
+                    else       -> R.string.swap_proc_swapper
+                }))
+            },
+            text = {
+                // Scrollable: the swapper sheet holds three expandable cards, and all three
+                // open at once is taller than a phone in landscape.
+                Column(
+                    Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    when (sheet) {
+                        "enhancer" -> {
+                            OptionSlider(
+                                stringResource(R.string.opt_blend), opts.enhanceBlend,
+                                { onOptsChange(opts.copy(enhanceBlend = it)) },
+                                hint = when {
+                                    opts.enhanceBlend >= 0.95f ->
+                                        stringResource(R.string.opt_blend_hint_full)
+                                    opts.enhanceBlend <= 0.05f ->
+                                        stringResource(R.string.opt_blend_hint_none)
+                                    else -> stringResource(R.string.opt_blend_hint_mixed)
+                                },
+                            )
+                            // It runs on the swapper's own crop: gpen_bfr_256 and
+                            // hyperswap_1a_256 declare the same template and size, so no
+                            // second alignment is involved.
+                            Text(stringResource(R.string.opt_enhancer_note, opts.pixelBoostLabel),
+                                 style = MaterialTheme.typography.bodySmall, fontSize = 11.sp)
+                        }
+                        "lipsync" -> {
+                            OptionSlider(
+                                stringResource(R.string.opt_weight), opts.lipSyncWeight,
+                                { onOptsChange(opts.copy(lipSyncWeight = it)) },
+                                hint = stringResource(R.string.opt_lip_sync_weight_hint),
+                            )
+                            // The Voice picker deliberately stays on the main screen: it is
+                            // a REQUIRED input that gates the Swap button, not a knob, and
+                            // a required input behind a gear is a required input nobody
+                            // finds.
+                        }
+                        else -> {
+                            FaceSwapperCard(opts, onOptsChange, openCard == "swapper",
+                                            { onToggleCard("swapper") },
+                                            inswapperAvailable = hasInswapper)
+                            FaceMaskerCard(opts, onOptsChange, openCard == "masker",
+                                           { onToggleCard("masker") })
+                            FaceDetectorCard(opts, onOptsChange, openCard == "detector",
+                                             { onToggleCard("detector") })
+                            if (opts != SwapOptions()) {
+                                TextButton(
+                                    onClick = { onOptsChange(SwapOptions()) },
+                                    modifier = Modifier.align(Alignment.End),
+                                ) { Text(stringResource(R.string.swap_reset_defaults)) }
+                            }
+                        }
+                    }
+                }
+            },
+        )
     }
 }
 

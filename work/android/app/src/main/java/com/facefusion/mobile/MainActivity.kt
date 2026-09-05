@@ -628,8 +628,6 @@ class MainActivity : ComponentActivity() {
                                 onRequestModel = { confirmModel = it },
                                 openCard = openCard,
                                 onToggleCard = { k -> openCard = if (openCard == k) "" else k },
-                                advancedOpen = advancedOpen,
-                                onToggleAdvanced = { advancedOpen = !advancedOpen },
                                 // A still needs no run, so it has no output FILE -- what
                                 // there is to save is the pane itself.
                                 hasOutput = if (targetImage != null) swappedFrame != null
