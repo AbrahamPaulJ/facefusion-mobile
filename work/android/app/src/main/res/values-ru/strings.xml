@@ -327,4 +327,16 @@
     <string name="status_reference_cleared">Снова меняются все лица.</string>
     <string name="opt_reference_distance">Совпадение с выбранным лицом</string>
     <string name="opt_reference_distance_hint">Работает только после выбора лица на цели. Больше — совпадает больше людей; меньше — тот же человек может перестать совпадать, когда отвернётся.</string>
+    <string name="swap_action_batch">Обработать %1$d клипов</string>
+    <string name="status_batch_queued">В очереди %1$d клипов. Обрезка и частота кадров — только для первого.</string>
+    <string name="status_batch_item">Клип %1$d из %2$d: %3$s</string>
+    <string name="status_batch_done">Готово: %1$d, не обработано: %2$d</string>
+    <string name="batch_waiting">ожидает</string>
+    <string name="batch_running">идёт</string>
+    <string name="batch_done">готово</string>
+    <string name="batch_refused">отклонено</string>
+    <string name="batch_failed">ошибка</string>
+    <string name="batch_skipped">пропущено</string>
+    <string name="batch_remove">Убрать из очереди</string>
+    <string name="batch_unnamed_clip">клип</string>
 </resources>

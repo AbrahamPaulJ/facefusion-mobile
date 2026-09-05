@@ -343,4 +343,16 @@
     <string name="status_reference_cleared">已恢复替换所有人脸。</string>
     <string name="opt_reference_distance">匹配所选人脸</string>
     <string name="opt_reference_distance_hint">仅在点选目标人脸后生效。数值越大匹配的人越多；越小则同一个人转头时可能不再匹配。</string>
+    <string name="swap_action_batch">替换 %1$d 个片段</string>
+    <string name="status_batch_queued">已排入 %1$d 个片段。剪裁和帧率仅适用于第一个。</string>
+    <string name="status_batch_item">第 %1$d / %2$d 个片段：%3$s</string>
+    <string name="status_batch_done">完成 %1$d 个，未替换 %2$d 个</string>
+    <string name="batch_waiting">等待中</string>
+    <string name="batch_running">进行中</string>
+    <string name="batch_done">完成</string>
+    <string name="batch_refused">已拒绝</string>
+    <string name="batch_failed">失败</string>
+    <string name="batch_skipped">已跳过</string>
+    <string name="batch_remove">从队列移除</string>
+    <string name="batch_unnamed_clip">片段</string>
 </resources>

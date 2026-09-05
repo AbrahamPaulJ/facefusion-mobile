@@ -172,6 +172,21 @@ class MainActivity : ComponentActivity() {
     private var referenceBox by mutableStateOf<FloatArray?>(null)
 
     /**
+     * The targets waiting behind the visible one -- roadmap 14.
+     *
+     * ONE SOURCE, MANY TARGETS. That is the whole mode, and it is the shape the warm
+     * pipeline already has: setSource is called once and every target reuses it, so a
+     * twelve-clip batch pays for the models and the identity once rather than twelve
+     * times. Many sources against one target would be a comparison sheet nobody asked
+     * for, and the cartesian product of both is a way to fill a phone by accident.
+     *
+     * ⚠ The visible target is NOT in here. It is targetFile, exactly as it has always
+     * been, so every pane, the trim slider and the frame-rate row keep working on the one
+     * clip they were written for. The queue is what happens AFTER it.
+     */
+    private var batchQueue by mutableStateOf<List<BatchItem>>(emptyList())
+
+    /**
      * Which lens Live uses. In memory only, deliberately: it is not a [SwapOptions] field
      * -- nothing about it reaches the pipeline -- and a camera choice that survived a
      * restart would be a surprise on an app that opens on the Swap tab.
@@ -397,9 +412,34 @@ class MainActivity : ComponentActivity() {
 
     // OpenDocument rather than GetContent: GetContent takes ONE mime filter, and the
     // target can now be a video or a still.
+    /**
+     * The target picker, which is also the BATCH picker.
+     *
+     * OpenMultipleDocuments rather than OpenDocument, deliberately: picking one file
+     * behaves exactly as it always did, and picking several queues the rest. There is no
+     * separate "batch mode" control to find, because selecting twelve clips is already an
+     * unambiguous statement that you want twelve clips done -- the app just has to stop
+     * throwing eleven of them away.
+     *
+     * The FIRST goes through loadTarget as the visible target, so the panes, the trim and
+     * the frame rate all behave as before; the rest are queue entries and nothing more.
+     */
     private val pickTarget = registerForActivityResult(
-        ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) loadTarget(uri)
+        ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNullOrEmpty()) return@registerForActivityResult
+        batchQueue = emptyList()
+        loadTarget(uris.first())
+        if (uris.size > 1) {
+            // ⚠ INCLUDING the first. The queue holds every item with the visible target at
+            // index 0, from the pick until the run ends -- one representation, so the UI
+            // and the runner cannot disagree about whether item one is in the list. The
+            // first version kept it out and had both of them add it back, which drew the
+            // visible clip twice.
+            batchQueue = uris.map {
+                BatchItem(it, displayName(it) ?: getString(R.string.batch_unnamed_clip))
+            }
+            status = getString(R.string.status_batch_queued, uris.size)
+        }
     }
     // Audio or video -- upstream's own `source_paths` takes either and reads whichever
     // track is there, so a dubbed line saved as a short video should not be rejected for
@@ -816,7 +856,26 @@ class MainActivity : ComponentActivity() {
                                 onClearVoice = ::clearVoice,
                                 recordingVoice = recordingVoice,
                                 onToggleRecordVoice = ::toggleVoiceRecording,
-                                onSwap = { runSwap() },
+                                // ONE button. A queue of one is a single run, and the
+                                // batch runner would only add a loop around it -- and its
+                                // own trim rule, which the single case must keep.
+                                onSwap = {
+                                    // ⚠ size > 1, not isEmpty. A queue of exactly one is
+                                    // the ordinary single-clip run and must keep its TRIM:
+                                    // the batch runner deliberately ignores trim, because
+                                    // one range cannot mean anything across clips of
+                                    // different lengths.
+                                    if (batchQueue.size > 1) runBatch() else runSwap()
+                                },
+                                batch = batchQueue,
+                                onRemoveFromBatch = { i ->
+                                    // ⚠ Index 0 is the VISIBLE target. It is removed by
+                                    // clearing the target, not from this list -- dropping
+                                    // it here would leave the panes showing a clip the run
+                                    // no longer includes.
+                                    if (i > 0)
+                                        batchQueue = batchQueue.filterIndexed { j, _ -> j != i }
+                                },
                                 onCancel = {
                                     cancelRequested = true
                                     status = getString(R.string.status_cancelling)
@@ -1691,6 +1750,22 @@ class MainActivity : ComponentActivity() {
         faceBoxes = null
     }
 
+    /**
+     * Copy a picked URI into the cache under [name], for the decoders that need a path.
+     *
+     * ⚠ The name is the caller's because the single-target path uses ONE fixed file --
+     * `cacheDir/target.mp4` -- and a batch item copied over that would destroy the target
+     * the panes, the trim slider and item one of the queue are all still pointing at. Each
+     * queued clip therefore gets its own name, and deletes it when it is done.
+     */
+    private fun copyToCache(uri: Uri, name: String): File? = runCatching {
+        val f = File(cacheDir, name)
+        contentResolver.openInputStream(uri).use { i ->
+            f.outputStream().use { o -> i!!.copyTo(o) }
+        }
+        f
+    }.getOrNull()
+
     private fun loadTarget(uri: Uri) {
         dropReferenceFace()
         if (contentResolver.getType(uri)?.startsWith("image/") == true) {
@@ -2013,6 +2088,10 @@ class MainActivity : ComponentActivity() {
 
     private fun clearTarget() {
         dropReferenceFace()
+        // The queue is a list of TARGETS and item 0 was this one. Keeping the rest after
+        // the visible clip goes away would leave a run that starts on a clip nothing on
+        // screen mentions.
+        batchQueue = emptyList()
         previews.closeTarget()
         targetFile = null
         targetImage = null
@@ -2371,6 +2450,197 @@ class MainActivity : ComponentActivity() {
                     appendLog(it.stackTraceToString().take(700))
                 }
             }
+            NativePipe.release()
+            PipeGuard.release()
+            busy = false
+        }
+    }
+
+    /**
+     * Every queued target, one after another, on one loaded pipeline -- roadmap 14.
+     *
+     * ⚠ THIS IS A SIXTH GATED PROCESSING PATH. `docs/gate.md` enumerates them and this is
+     * now on that list. Every item is checked with the SAME `ContentGate.checkVideo` a
+     * single run makes, and a refused clip is marked refused while the queue CONTINUES --
+     * one refusal is not a reason to abandon eleven other clips.
+     *
+     * The source is gated ONCE, at the top: it is the same image for every item, so
+     * checking it twelve times would be twelve identical answers. It was already checked
+     * when it was picked, too (setSourceFrom).
+     *
+     * What is hoisted out of the loop is what does not vary: the model check, init, and
+     * setSource. That is the entire performance argument for one-source-many-targets -- a
+     * twelve-clip batch loads ~266 MB of context binaries once rather than twelve times.
+     *
+     * ⚠ Trim and frame rate are NOT applied per item. A trim range means nothing across
+     * clips of different lengths, so the queue takes each clip whole; the visible target
+     * keeps its own trim only when it is run alone.
+     *
+     * ⚠ Lifetime: this runs in the Activity's scope, exactly as a single run does, so
+     * leaving the app is survivable but destroying the Activity is not. The foreground
+     * service that fixes that is the second half of roadmap 14 and is not written yet.
+     */
+    private fun runBatch() {
+        val src = sourceUri ?: return
+        val first = targetFile ?: return
+        if (opts.lipSync && voiceFile == null) return
+        invalidatePreview()
+        cancelRequested = false
+        busy = true; progress = 0f; log = ""
+        discardOutput()
+        preview = null; framesDone = 0; framesTotal = 0; elapsedS = 0.0
+
+        // Item 0 IS the visible target; the queue has held it since the pick. Only the
+        // per-item state is reset, so a second press of Swap re-runs the same list.
+        batchQueue = batchQueue.map {
+            it.copy(state = BatchState.Waiting, output = null, detail = null)
+        }
+
+        lifecycleScope.launch {
+            if (!PipeGuard.acquire("batch", 5000)) {
+                status = pipeBusyMessage(); busy = false; return@launch
+            }
+            val t0 = System.currentTimeMillis()
+            val setup = withContext(Dispatchers.Default) {
+                runCatching {
+                    val models = modelDir()
+                    val missing = ModelPaths.missing(this@MainActivity, tier, opts.swapper)
+                    if (missing.isNotEmpty())
+                        error("cannot read " + missing.joinToString() + " for tier " + tier)
+                    status = getString(R.string.status_loading_models)
+                    val libDir = applicationInfo.nativeLibraryDir
+                    val ok = NativePipe.init(libDir, libDir, models.absolutePath, opts)
+                    noteTierRejection()
+                    if (!ok) error("init: " + NativePipe.lastError())
+
+                    status = getString(R.string.status_reading_source)
+                    val bmp = decodeOriented(src) ?: error("cannot decode source image")
+                    status = getString(R.string.status_content_check)
+                    ContentGate.checkImage(bmp).let {
+                        appendLog("source content score %+.3f".format(it.score))
+                        if (!it.ok) throw ContentGate.Refused(
+                            ContentGate.message(this@MainActivity,
+                                                R.string.gate_subject_source_image, it))
+                    }
+                    val soft = bmp.copy(Bitmap.Config.ARGB_8888, false)
+                    val px = IntArray(soft.width * soft.height)
+                    soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
+                    if (!NativePipe.setSource(
+                            NativePipe.argbToBgr(px, soft.width, soft.height),
+                            soft.width, soft.height))
+                        error("source: " + NativePipe.lastError())
+                    appendLog("source ready for " + batchQueue.size + " clips")
+                }
+            }
+            if (setup.isFailure) {
+                val e = setup.exceptionOrNull()
+                status = if (e is ContentGate.Refused)
+                             e.message ?: getString(R.string.gate_blocked_generic)
+                         else getString(R.string.status_failed, e?.message ?: "")
+                NativePipe.release(); PipeGuard.release(); busy = false
+                return@launch
+            }
+
+            var done = 0
+            var refused = 0
+            var failed = 0
+            for ((i, item) in batchQueue.withIndex()) {
+                if (cancelRequested) {
+                    batchQueue = batchQueue.mapIndexed { j, it ->
+                        if (j >= i && it.state == BatchState.Waiting)
+                            it.copy(state = BatchState.Skipped) else it
+                    }
+                    break
+                }
+                batchQueue = batchQueue.mapIndexed { j, it ->
+                    if (j == i) it.copy(state = BatchState.Running) else it
+                }
+                status = getString(R.string.status_batch_item, i + 1, batchQueue.size, item.name)
+                framesDone = 0; framesTotal = 0; progress = 0f
+
+                val r = withContext(Dispatchers.Default) {
+                    runCatching {
+                        // Only the visible target is already a file; the queued ones are
+                        // URIs the picker handed back, and MediaExtractor wants a path.
+                        // Item 0 is already decoded at cacheDir/target.mp4 by loadTarget,
+                        // so it is used as it stands rather than copied a second time.
+                        val f = if (i == 0) first
+                                else if (item.uri.scheme == "file") File(item.uri.path!!)
+                                else copyToCache(item.uri, "batch_" + (i + 1) + ".mp4")
+                                    ?: error("cannot read " + item.name)
+
+                        // ⚠ THE GATE, PER ITEM. The same call a single run makes.
+                        ContentGate.checkVideo(f).let {
+                            appendLog(item.name + ": " + it.detail +
+                                      ", worst %+.3f".format(it.score))
+                            if (!it.ok) throw ContentGate.Refused(
+                                ContentGate.message(this@MainActivity,
+                                                    R.string.gate_subject_target_video, it))
+                        }
+
+                        val out = File(outputDir(),
+                                       "swapped_" + System.currentTimeMillis() +
+                                       "_" + (i + 1) + ".mp4")
+                        var lastPreview = 0L
+                        VideoSwapper(
+                            outputFps = opts.outputFps,
+                            trackPeriod = opts.trackPeriod,
+                            lipSync = opts.lipSync,
+                            voicePath = voiceFile?.absolutePath,
+                            trimStartUs = 0L,
+                            trimEndUs = Long.MAX_VALUE,
+                            onProgress = { d, total ->
+                                framesDone = d; framesTotal = total
+                                progress = if (total > 0) d.toFloat() / total else 0f
+                                elapsedS = (System.currentTimeMillis() - t0) / 1000.0
+                            },
+                            onFrame = { bgr, w, h ->
+                                val now = System.currentTimeMillis()
+                                if (now - lastPreview > 250) {
+                                    lastPreview = now
+                                    val pw = 480
+                                    val ph = (h.toLong() * pw / w).toInt().coerceAtLeast(1)
+                                    preview = Bitmap.createBitmap(
+                                        NativePipe.bgrToArgb(bgr, w, h, pw, ph),
+                                        pw, ph, Bitmap.Config.ARGB_8888)
+                                }
+                            },
+                            onLog = { appendLog(it) },
+                            isCancelled = { cancelRequested },
+                        ).swap(f.absolutePath, out.absolutePath).getOrThrow()
+                        out
+                    }
+                }
+                batchQueue = batchQueue.mapIndexed { j, it ->
+                    if (j != i) it else r.fold(
+                        { f -> done++; it.copy(state = BatchState.Done, output = f) },
+                        { e ->
+                            when {
+                                e.message == "cancelled" -> it.copy(state = BatchState.Skipped)
+                                e is ContentGate.Refused -> {
+                                    refused++
+                                    it.copy(state = BatchState.Refused, detail = e.message)
+                                }
+                                else -> {
+                                    failed++
+                                    it.copy(state = BatchState.Failed, detail = e.message)
+                                }
+                            }
+                        })
+                }
+                // The last finished clip is what the panes show, so the screen is not left
+                // on a frame from four clips ago.
+                r.getOrNull()?.let { outputFile = it }
+                // The COPY, not the output. A twelve-clip batch would otherwise leave
+                // twelve full-size videos in the cache behind the twelve it produced.
+                if (i > 0 && item.uri.scheme != "file")
+                    runCatching { File(cacheDir, "batch_" + (i + 1) + ".mp4").delete() }
+            }
+
+            status = getString(R.string.status_batch_done, done, refused + failed)
+            appendLog("batch: %d done, %d refused, %d failed, %.1f s total"
+                .format(done, refused, failed, (System.currentTimeMillis() - t0) / 1000.0))
+            outputPartial = cancelRequested
             NativePipe.release()
             PipeGuard.release()
             busy = false

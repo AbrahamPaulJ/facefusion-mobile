@@ -37,6 +37,8 @@ import androidx.compose.ui.unit.sp
 import com.facefusion.mobile.FaceDetectorCard
 import com.facefusion.mobile.FaceMaskerCard
 import com.facefusion.mobile.FaceSwapperCard
+import com.facefusion.mobile.BatchItem
+import com.facefusion.mobile.BatchState
 import com.facefusion.mobile.ModelDownload
 import com.facefusion.mobile.OptionSegments
 import com.facefusion.mobile.OptionSlider
@@ -148,6 +150,15 @@ fun SwapScreen(
      * upstream's `face_selector_mode = reference`. Tapping the chosen one again clears it.
      */
     onPickFace: (Float, Float) -> Unit,
+    /**
+     * The run queue, item one being the VISIBLE target -- roadmap 14.
+     *
+     * Size 1 is the ordinary single-clip screen and draws no queue at all: one source,
+     * many targets is a mode you enter by picking several files, not by finding a switch.
+     */
+    batch: List<BatchItem>,
+    /** Drop a queued clip. Only offered while it is still waiting. */
+    onRemoveFromBatch: (Int) -> Unit,
     openCard: String,
     onToggleCard: (String) -> Unit,
     /** There is something to save: a finished video, or a swapped still on the pane. */
@@ -752,8 +763,75 @@ fun SwapScreen(
             // 14.dp everywhere: the stadium default made the two primary buttons the only
             // fully-round things on a screen of 14.dp panes and cards.
             shape = RoundedCornerShape(14.dp),
-        ) { Text(stringResource(if (run.busy) R.string.swap_cancel else R.string.swap_action),
+        ) { Text(stringResource(
+                    if (run.busy) R.string.swap_cancel
+                    else if (batch.size > 1) R.string.swap_action_batch
+                    else R.string.swap_action,
+                    batch.size),
                  fontSize = 16.sp) }
+
+        // THE QUEUE. Only when there is one -- a list of length one is the normal
+        // single-clip screen, and drawing an empty container for it would add a row of
+        // furniture to the case that does not need it.
+        if (batch.size > 1) {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(vertical = 4.dp)) {
+                    batch.forEachIndexed { i, item ->
+                        if (i > 0) HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant)
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(item.name, style = MaterialTheme.typography.bodySmall,
+                                     maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                // A refusal says so in the gate's own words. It is not an
+                                // error and must not read like one -- see BatchState.
+                                if (item.detail != null) Text(
+                                    item.detail!!,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontSize = 10.sp,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = if (item.state == BatchState.Refused)
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            else MaterialTheme.colorScheme.error,
+                                )
+                            }
+                            Text(
+                                stringResource(when (item.state) {
+                                    BatchState.Waiting -> R.string.batch_waiting
+                                    BatchState.Running -> R.string.batch_running
+                                    BatchState.Done -> R.string.batch_done
+                                    BatchState.Refused -> R.string.batch_refused
+                                    BatchState.Failed -> R.string.batch_failed
+                                    BatchState.Skipped -> R.string.batch_skipped
+                                }),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = when (item.state) {
+                                    BatchState.Done -> FfRed
+                                    BatchState.Failed -> MaterialTheme.colorScheme.error
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                            if (idle && item.state == BatchState.Waiting) {
+                                IconButton({ onRemoveFromBatch(i) },
+                                           modifier = Modifier.size(32.dp)) {
+                                    Icon(Icons.Default.Delete,
+                                         stringResource(R.string.batch_remove),
+                                         Modifier.size(16.dp),
+                                         tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         if (run.busy || run.progress > 0f) {
             LinearProgressIndicator(
