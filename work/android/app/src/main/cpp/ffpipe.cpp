@@ -22,6 +22,20 @@ static bool ffdebug() { static bool v = getenv("FFDEBUG") != nullptr; return v; 
 // every time biases the other by ~20%, larger than most effects worth measuring).
 static bool ffNoMaskCache() { static bool v = getenv("FFNOMASKCACHE") != nullptr; return v; }
 
+// FFTRACK=N re-detects every N frames and reconstructs the box from the previous frame's
+// landmarks in between, skipping yoloface AND its whole-frame letterbox prep. 0 = off,
+// which is the shipping default and byte-for-byte the old behaviour.
+static int ffTrackPeriod() {
+  static const int v = [] { const char* e = getenv("FFTRACK"); return e ? atoi(e) : 0; }();
+  return v;
+}
+// Tracking is abandoned well ABOVE cfg.landmarkerScore (0.5). At 0.5 the landmarker has
+// already fallen back to landmark5 -- which, on a tracked frame, is the tracker's OWN
+// previous output, so the loop would feed on itself and drift with nothing to correct it.
+// Measured on the bench clip the score sits at 0.964-0.968, so 0.85 is far below anything
+// a healthy track produces and far above the point where the fallback engages.
+static const float kTrackMinScore = 0.85f;
+
 namespace ffpipe {
 namespace {
 
@@ -151,6 +165,21 @@ struct Pipeline::Impl {
   };
   BoxMaskCache lipBoxMask;    // at LS, for syncLip
   BoxMaskCache swapBoxMask;   // at swapSize*pixelBoost, for swapAll
+
+  // Detector tracking state. SINGLE FACE ONLY, deliberately: tracking two faces needs
+  // identity matching across frames, and a crossover that mis-assigns them swaps the wrong
+  // face onto the wrong person -- much worse than paying for the detector. 0 faces or 2+
+  // simply keeps detecting every frame.
+  struct Track {
+    bool valid = false;
+    int since = 0;                            // frames since the last real detection
+    float sw = 0, sh = 0, dcx = 0, dcy = 0;   // detector box <- landmark68 bbox
+    float lm68[136]{};
+    float lm5[10]{};
+    float detScore = 0;
+    void reset() { valid = false; since = 0; }
+  };
+  Track track;
 };
 
 Pipeline::Pipeline() = default;
@@ -500,7 +529,46 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame) {
   const Config& cfg = p_->cfg;
   const int S = cfg.detectorSize;
 
-  double t0 = nowMs();
+  // These are filled EITHER by the detector below, or -- when tracking is on and still
+  // valid -- reconstructed from the previous frame's landmarks, which skips yoloface and
+  // its whole-frame letterbox together (detector 6.1 + detprep 6.0 ms/frame measured).
+  std::vector<std::array<float, 4>> boxes;
+  std::vector<float> scores;
+  std::vector<std::array<float, 10>> lms;
+  std::vector<int> keep;
+
+  // Declared out here because the per-face loop below reuses it, and the detector block
+  // that used to declare it is now conditional.
+  double t0 = 0;
+
+  auto& tr = p_->track;
+  const int trackPeriod = ffTrackPeriod();
+  const bool useTrack = trackPeriod > 0 && tr.valid && tr.since < trackPeriod;
+
+  if (useTrack) {
+    // The landmarker still runs, every frame, on the reconstructed box. ONLY the search
+    // box is inherited -- the alignment itself is recomputed from the current frame, so
+    // the swap cannot lag the face. Skipping the landmarker too would save another ~4 ms
+    // and produce exactly the sliding-mask artefact this design exists to avoid.
+    float bx0 = 1e9f, by0 = 1e9f, bx1 = -1e9f, by1 = -1e9f;
+    for (int k = 0; k < 68; ++k) {
+      const float X = tr.lm68[2 * k], Y = tr.lm68[2 * k + 1];
+      if (X < bx0) bx0 = X;  if (X > bx1) bx1 = X;
+      if (Y < by0) by0 = Y;  if (Y > by1) by1 = Y;
+    }
+    const float lw = bx1 - bx0, lh = by1 - by0;
+    const float bw = tr.sw * lw, bh = tr.sh * lh;
+    const float cx = (bx0 + bx1) * 0.5f + tr.dcx * lw;
+    const float cy = (by0 + by1) * 0.5f + tr.dcy * lh;
+    boxes.push_back({cx - bw * 0.5f, cy - bh * 0.5f, cx + bw * 0.5f, cy + bh * 0.5f});
+    scores.push_back(tr.detScore);
+    std::array<float, 10> l{};
+    std::memcpy(l.data(), tr.lm5, sizeof(tr.lm5));
+    lms.push_back(l);
+    keep.push_back(0);
+  } else {
+
+  t0 = nowMs();
   // restrict_frame + zero-pad to SxS  (vision.py:222, face_detector.py:445)
   double scale = 1.0;
   if (frame.h > S || frame.w > S)
@@ -555,9 +623,6 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame) {
   t0 = nowMs();
   const int A = 8400;
   const float* d = out[0].data();
-  std::vector<std::array<float, 4>> boxes;
-  std::vector<float> scores;
-  std::vector<std::array<float, 10>> lms;
   for (int i = 0; i < A; ++i) {
     float sc = d[4 * A + i];
     if (sc <= cfg.detectorScore) continue;
@@ -572,8 +637,9 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame) {
     }
     lms.push_back(l);
   }
-  auto keep = ffcv::nmsBoxes(boxes, scores, cfg.detectorScore, cfg.nmsThreshold);
+  keep = ffcv::nmsBoxes(boxes, scores, cfg.detectorScore, cfg.nmsThreshold);
   msGeom += nowMs() - t0;
+  }  // end of the real-detection path
 
   for (int idx : keep) {
     Face f{};
@@ -653,10 +719,34 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame) {
     for (int k = 0; k < 68; ++k) meanPeak += peak[k];
     meanPeak /= 68.0;
     float score68 = (float)std::min(1.0, std::max(0.0, meanPeak / 0.9));  // numpy.interp
+    f.lmScore = score68;
     if (score68 > cfg.landmarkerScore)
       ffcv::toLandmark5(f.landmark68, f.landmark5_68);
     else
       std::memcpy(f.landmark5_68, f.landmark5, sizeof(f.landmark5_68));
+
+    // FFTRACKDBG reports what a tracked box would have to reproduce. The landmarker crops
+    // at 195/max(bw,bh), so a synthesized box that is systematically larger or smaller than
+    // the detector's would rescale every crop and shift every landmark -- the mapping from
+    // the 68 points BACK to a detector-shaped box has to be measured, not guessed.
+    if (getenv("FFTRACKDBG")) {
+      float bx0 = 1e9f, by0 = 1e9f, bx1 = -1e9f, by1 = -1e9f;
+      for (int k = 0; k < 68; ++k) {
+        const float X = f.landmark68[2 * k], Y = f.landmark68[2 * k + 1];
+        if (X < bx0) bx0 = X;  if (X > bx1) bx1 = X;
+        if (Y < by0) by0 = Y;  if (Y > by1) by1 = Y;
+      }
+      const float lw = bx1 - bx0, lh = by1 - by0;
+      fprintf(stderr,
+              "[track] det %.1f,%.1f %.0fx%.0f | lm68 %.1f,%.1f %.0fx%.0f | "
+              "sw %.4f sh %.4f | dcx %.4f dcy %.4f | s68 %.3f det %.3f" "\n",
+              f.box[0], f.box[1], f.box[2] - f.box[0], f.box[3] - f.box[1],
+              bx0, by0, lw, lh,
+              (f.box[2] - f.box[0]) / lw, (f.box[3] - f.box[1]) / lh,
+              ((f.box[0] + f.box[2]) * 0.5f - (bx0 + bx1) * 0.5f) / lw,
+              ((f.box[1] + f.box[3]) * 0.5f - (by0 + by1) * 0.5f) / lh,
+              score68, f.detScore);
+    }
 
     // ---- recogniser: warp to 112 on arcface_112_v2, BGR->RGB, /127.5-1
     const int RS = 112;
@@ -695,6 +785,46 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame) {
     faces.push_back(f);
     ++facesDone;
   }
+
+  if (trackPeriod > 0) {
+    // Exactly one face, and the landmarker still confident: keep tracking. Anything else
+    // -- no face, a second face, a low score -- drops back to detecting every frame.
+    if (faces.size() == 1 && faces[0].lmScore >= kTrackMinScore) {
+      const Face& f = faces[0];
+      float bx0 = 1e9f, by0 = 1e9f, bx1 = -1e9f, by1 = -1e9f;
+      for (int k = 0; k < 68; ++k) {
+        const float X = f.landmark68[2 * k], Y = f.landmark68[2 * k + 1];
+        if (X < bx0) bx0 = X;  if (X > bx1) bx1 = X;
+        if (Y < by0) by0 = Y;  if (Y > by1) by1 = Y;
+      }
+      const float lw = bx1 - bx0, lh = by1 - by0;
+      if (lw > 1.f && lh > 1.f) {
+        if (!useTrack) {
+          // Only a REAL detection may (re)learn the mapping -- relearning it from a
+          // reconstructed box would just re-derive the constants it was built from and
+          // launder drift into the model. Measured across a clip it holds to about 1%
+          // (sw 0.932-0.940, sh 1.240-1.269), but that is one face at one distance, not
+          // a constant of the detector, so it is relearned at every detection.
+          tr.sw  = (f.box[2] - f.box[0]) / lw;
+          tr.sh  = (f.box[3] - f.box[1]) / lh;
+          tr.dcx = ((f.box[0] + f.box[2]) * 0.5f - (bx0 + bx1) * 0.5f) / lw;
+          tr.dcy = ((f.box[1] + f.box[3]) * 0.5f - (by0 + by1) * 0.5f) / lh;
+          tr.detScore = f.detScore;
+          tr.since = 0;
+        } else {
+          ++tr.since;
+        }
+        std::memcpy(tr.lm68, f.landmark68, sizeof(tr.lm68));
+        std::memcpy(tr.lm5, f.landmark5_68, sizeof(tr.lm5));
+        tr.valid = true;
+      } else {
+        tr.reset();
+      }
+    } else {
+      tr.reset();
+    }
+  }
+
   ++framesDone;
   return faces;
 }
@@ -720,6 +850,10 @@ bool Pipeline::setSource(const ffcv::Image& img) {
   p_->haveSource = true;
   // the source frame's own analysis is bookkeeping, not output
   framesDone = 0; facesDone = 0;
+  // ⚠ And it must not seed the tracker. The source is a different image of a different
+  // face at a different scale; carrying its box mapping into the first target frame would
+  // reconstruct a box from the wrong geometry and skip the one detection that matters.
+  p_->track.reset();
   msDetect = msLandmark = msRecognise = msGeom = msEnhance = 0;
   return true;
 }

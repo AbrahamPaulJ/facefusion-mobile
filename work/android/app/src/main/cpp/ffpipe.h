@@ -24,6 +24,11 @@ struct Face {
   float landmark68[136];
   float box[4];
   float detScore = 0.f;
+  // The landmarker's own confidence for THIS face (mean heatmap peak / 0.9, as upstream).
+  // It was a local until the detector tracker needed a signal for "the box I reconstructed
+  // no longer finds the face" -- it is the only per-frame quality number the pipeline
+  // already computes, and it costs nothing to keep.
+  float lmScore = 0.f;
   float embedding[512];
   float embeddingNorm[512];
 };
