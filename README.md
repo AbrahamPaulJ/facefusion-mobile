@@ -23,11 +23,13 @@ Ruhs. The pipeline, the models, and the option names, defaults and ranges are Fa
 
 - Swaps faces in photos and video, fully offline.
 - Runs every neural network on the phone's Qualcomm Hexagon NPU. A 10 second 720p clip is
-  processed in about 15 seconds on a Snapdragon 8 Elite.
+  processed in about 13 seconds on a Snapdragon 8 Elite, or 11 with **Fast video** on.
 - Falls back to the GPU and CPU on phones without a Qualcomm NPU. Same result, about four
   times the time per frame.
 - Shows the target frame and the swapped frame side by side before you commit to a run.
 - Trims the clip, drops the frame rate if you want it faster, and lets you cancel mid run.
+- **Fast video** (Advanced → Face detector): tracks the face between frames instead of
+  finding it again every frame, for about 15% more speed. Off by default.
 - Saves to your gallery, or hands a still straight out of the preview.
 - Lip sync, optionally: redraws the mouth to match a voice you pick — a dub, a different
   take, any audio or video file — at about 1-2 ms per frame on the NPU.
@@ -35,9 +37,8 @@ Ruhs. The pipeline, the models, and the option names, defaults and ranges are Fa
 - Can be driven from a browser on your PC over the local network, if you turn that on.
 
 Optional extras, each a separate download: a face enhancer (`gpen_bfr_256`, about 2.5 ms
-more per face, 25 MB), a lip syncer — either `edtalk_256` (60 MB, sharper, no upscale) or
-`wav2lip_gan_96` (44 MB, the mouth is drawn smaller and scaled up) — and pixel boost, which
-renders the swapped face at 512, 768 or 1024 instead of 256 at a proportional cost in time.
+more per face, 25 MB), a lip syncer (`edtalk_256`, 60 MB) and pixel boost, which renders the
+swapped face at 512, 768 or 1024 instead of 256 at a proportional cost in time.
 
 The lip syncer needs a target video and a separate audio or video file to drive the mouth
 from — a photo, a silent clip, or a target with no voice picked has nothing to sync to. It
@@ -92,9 +93,13 @@ Measured on a Snapdragon 8 Elite, same clip through the same app.
 
 | | Hexagon NPU | GPU (Vulkan) + CPU |
 |---|---:|---:|
-| Per frame, 720p | 75 ms | 325 ms |
+| Per frame, 720p | 44 ms, or 38 with Fast video | 325 ms |
 | Model load, first run | 0.5 s | 15 s |
 | Same output | | yes, to 42.7 dB |
+
+The NPU figure is measured on the current release. The GPU one was measured before the CPU
+geometry was rewritten, and that work is shared by both paths, so expect it to be lower than
+this table says — it has not been re-measured on a phone that needs it.
 
 The GPU and CPU path produces the same swap rather than an approximation of it. Two stages
 stay on the CPU whatever the phone has, because on the GPU they come out measurably wrong:
