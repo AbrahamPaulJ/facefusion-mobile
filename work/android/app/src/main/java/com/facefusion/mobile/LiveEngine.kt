@@ -11,7 +11,8 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /**
- * The front camera, swapped, on screen. Dev builds only -- see [BuildConfig.DEV_BUILD].
+ * The front camera, swapped, on screen. On both build lines: the gated one samples the
+ * camera through [gateThreshold], which is what made shipping it possible.
  *
  * Preview ONLY: no encoder, no muxer, no audio. What it costs is therefore what the
  * pipeline costs, which is the point of having it -- 26.6 fps on a 720p file with tracking
@@ -41,8 +42,43 @@ import java.util.concurrent.Executors
  */
 class LiveEngine {
 
+    /**
+     * What the content check said about a frame.
+     *
+     * Deliberately an enum and not a message: `ContentGate.kt` does not exist on the dev
+     * line, so anything in this class that named it would fail to compile there. This class
+     * forwards a NUMBER down and reports a VERDICT up; the sentence is [MainActivity]'s.
+     */
+    enum class Gate { None, Blocked, Failed }
+
     /** One frame's worth of result, handed to the UI. */
-    data class Shot(val bitmap: Bitmap?, val faces: Int, val fps: Double, val error: String?)
+    data class Shot(val bitmap: Bitmap?, val faces: Int, val fps: Double, val error: String?,
+                    val gate: Gate = Gate.None)
+
+    /**
+     * Score above which a sampled frame is refused, and how often to sample.
+     *
+     * NaN disables the check, which is the dev line's configuration and the reason this
+     * class needs no #ifdef: the gated build sets a real threshold, the ungated one leaves
+     * it alone.
+     *
+     * ⚠ NaN, not a negative number. Gate scores are routinely negative, so a negative
+     * sentinel would disable the gate for exactly the low threshold someone sets while
+     * TESTING that it still blocks.
+     *
+     * ⚠ The gate is what makes a live camera swap shippable on the gated build at all. It
+     * is the FIFTH processing path in the app; see the list in ContentGate's doc.
+     */
+    @Volatile var gateThreshold: Float = Float.NaN
+    /**
+     * One check per this many frames. The gate costs 5.05 ms against a ~40 ms frame, so
+     * every frame would be a 12% tax for a scene that changes far slower than 25 times a
+     * second. At 30 it is under 0.2 ms/frame amortised and still samples ~1.2 times a
+     * second -- slightly OFTENER than the video path's one-per-second, because a live feed
+     * can be pointed somewhere new at any moment.
+     */
+    private val kGateEvery = 30
+    private var gateTick = 0
 
     // Per-stage cost, logged every 30 frames. Live was 6.5 fps on its first run against
     // 26.6 on a file, and no amount of reasoning about which stage was to blame beat
@@ -209,14 +245,30 @@ class LiveEngine {
             // ONE call: planes in, swapped preview written into bmp's own pixels. The four
             // it replaced spent 23 of Live's 62 ms/frame moving bytes across JNI -- see
             // liveFrame in ffjni.cpp for what each of them was copying.
+            // Sample the gate on one frame in kGateEvery, and on the very FIRST frame of a
+            // session -- gateTick starts at 0, so `% kGateEvery == 0` fires immediately.
+            // That matters: a run that is refused should be refused before it has shown
+            // anything, not 29 frames in.
+            val gateNow = !gateThreshold.isNaN() && (gateTick++ % kGateEvery == 0)
             val t = System.nanoTime()
             val faces = NativePipe.liveFrame(
                 p[0].buffer, p[0].rowStride,
                 p[1].buffer, p[1].rowStride, p[1].pixelStride,
                 p[2].buffer, p[2].rowStride, p[2].pixelStride,
                 w, h, bmp, dw, dh,
+                if (gateNow) gateThreshold else Float.NaN,
             )
             msPump += (System.nanoTime() - t) / 1e6
+            // -2 refused, -3 could not measure. Both STOP the pump rather than skipping a
+            // frame: the next frame of a live feed is the same scene, so continuing would
+            // be a refusal that refuses nothing. Stopping also releases the camera, which
+            // is the honest signal that the feature declined to run.
+            if (faces == -2 || faces == -3) {
+                running = false
+                onShot(Shot(null, 0, fps, null,
+                            if (faces == -2) Gate.Blocked else Gate.Failed))
+                return
+            }
             if (faces < 0) {
                 onShot(Shot(null, 0, fps, NativePipe.lastError()))
                 return

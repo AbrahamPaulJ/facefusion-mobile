@@ -725,7 +725,8 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
                                                 jobject jU, jint uRow, jint uPix,
                                                 jobject jV, jint vRow, jint vPix,
                                                 jint w, jint h,
-                                                jobject jBitmap, jint dstW, jint dstH) {
+                                                jobject jBitmap, jint dstW, jint dstH,
+                                                jfloat gateThreshold) {
   if (!g_pipe) { g_err = "pipeline not initialised"; return -1; }
   if (w <= 0 || h <= 0) { g_err = "liveFrame: empty frame"; return -1; }
 
@@ -763,6 +764,29 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
       p[1] = clamp8((c - 100 * Uv - 208 * Vv + 128) >> 8);   // G
       p[2] = clamp8((c + 409 * Vv + 128) >> 8);              // R
     }
+  }
+
+  // THE GATE, on the frame the camera produced and BEFORE anything swaps it.
+  //
+  // NaN means this frame is not a sample -- the caller decides which frames are, because
+  // the sampling rate is policy and policy is Kotlin's (see ContentGate). The NUMBER is
+  // Kotlin's too: it is passed in, never compiled in here, so there is exactly one
+  // definition of the threshold in the app.
+  //
+  // ⚠ NaN is the sentinel and NOT a negative value, which is what this first read. Gate
+  // scores are routinely negative -- a source frame logs around -2.4 -- so "negative means
+  // do not check" would silently disable the gate for any threshold below zero, which is
+  // exactly the threshold someone lowers it to when TESTING that the gate still blocks. A
+  // gate must never fail open, least of all while being verified.
+  //
+  // ⚠ Written as !(score <= t) rather than (score > t) on purpose: a NaN score -- the gate
+  // graph failed to run -- fails BOTH comparisons, and only this spelling refuses on it.
+  // `ok` is true for ALLOW alone, so a measurement that did not happen is a refusal, never
+  // a pass. Same rule as ContentGate.judge.
+  if (!std::isnan((float)gateThreshold)) {
+    ffpipe::ContentVerdict v = g_pipe->checkContent(frame);
+    if (!v.ok) { g_err = g_pipe->error(); return -3; }
+    if (!(v.score <= gateThreshold)) return -2;
   }
 
   auto faces = g_pipe->analyse(frame);

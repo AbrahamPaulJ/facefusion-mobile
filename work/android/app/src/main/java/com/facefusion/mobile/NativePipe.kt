@@ -290,7 +290,16 @@ object NativePipe {
      * ⚠ Single-pump: the native frame buffer is a static. One caller at a time, which is
      * what STRATEGY_KEEP_ONLY_LATEST already guarantees.
      *
-     * @return faces swapped, or -1 with [lastError] set.
+     * [gateThreshold] runs the content gate on the CAMERA frame, before anything swaps it,
+     * and refuses above that score. NaN skips the check -- NOT a negative number, since gate
+     * scores are themselves often negative -- which is how a caller says
+     * "this frame is not a sample": both the sampling rate and the threshold itself are
+     * policy, and policy lives in Kotlin -- nothing about the gate is compiled into the
+     * native side but the comparison.
+     *
+     * @return faces swapped; -1 with [lastError] set on a fault, **-2 when the gate
+     *         refused this frame**, **-3 when the gate could not be measured** -- which is
+     *         also a refusal, never a pass.
      */
     @JvmStatic external fun liveFrame(
         y: java.nio.ByteBuffer, yRow: Int,
@@ -298,6 +307,7 @@ object NativePipe {
         v: java.nio.ByteBuffer, vRow: Int, vPix: Int,
         w: Int, h: Int,
         bmp: android.graphics.Bitmap, dstW: Int, dstH: Int,
+        gateThreshold: Float,
     ): Int
 
     @JvmStatic external fun lastError(): String

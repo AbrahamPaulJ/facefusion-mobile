@@ -569,7 +569,10 @@ class MainActivity : ComponentActivity() {
                         if (screen == Screen.Live && it != Screen.Live) stopLive()
                         screen = it
                     },
-                    showLive = BuildConfig.DEV_BUILD,
+                    // Shown on BOTH lines now. It was dev-only for one reason -- the live
+                    // path had no content gate -- and that reason is gone: the camera is
+                    // sampled in LiveEngine and the source is checked where it is picked.
+                    showLive = true,
                 ) { pad ->
                     Box(Modifier.padding(pad)) {
                         when (screen) {
@@ -1710,10 +1713,28 @@ class MainActivity : ComponentActivity() {
                 NativePipe.release(); PipeGuard.release(); return@launch
             }
             liveRunning = true
+            // THE GATE, on the live path. The source is already checked where it is picked
+            // (see the source_image branch above), so what is left is the camera itself --
+            // and a camera is the one input the user can change without touching the app.
+            //
+            // The threshold is set HERE rather than inside LiveEngine because the dev line
+            // deletes ContentGate.kt: the engine takes a number and knows nothing about the
+            // gate, so this single assignment is the whole of what dev has to remove.
+            live.gateThreshold = ContentGate.THRESHOLD
             live.start(this@MainActivity, this@MainActivity) { shot ->
                 // The analyzer thread hands the result straight to Compose state, which is
                 // safe for snapshot state and avoids a per-frame main-thread post.
                 if (shot.error != null) liveNote = shot.error
+                // A refusal, or a check that could not run -- which is also a refusal: `ok`
+                // is ALLOW alone, here as everywhere else. The engine has already stopped
+                // its pump; this releases the pipeline and the camera, and says why.
+                if (shot.gate != LiveEngine.Gate.None) {
+                    liveNote = getString(
+                        if (shot.gate == LiveEngine.Gate.Blocked) R.string.gate_blocked
+                        else R.string.gate_error,
+                        getString(R.string.gate_subject_this_frame))
+                    runOnUiThread { stopLive() }
+                }
                 if (shot.bitmap != null) {
                     liveFrame = shot.bitmap
                     liveFaces = shot.faces
