@@ -54,6 +54,8 @@ class MainActivity : ComponentActivity() {
      */
     private var voiceFile by mutableStateOf<File?>(null)
     private var voiceName by mutableStateOf<String?>(null)
+    /** True while the microphone is capturing a driving voice. */
+    private var recordingVoice by mutableStateOf(false)
 
     /**
      * Bumped every time a target is loaded or cleared.
@@ -274,14 +276,31 @@ class MainActivity : ComponentActivity() {
      */
     private var lastPipeSeq = -2
 
+    /**
+     * The ONE place a URI becomes the source face.
+     *
+     * Extracted so the gallery picker and the camera capture cannot drift apart. They must
+     * not: the content gate runs on the source in refreshSwapped, and it gets there because
+     * previewOptionsChanged() is called here. A second path that set sourceUri and forgot
+     * this call would be an ungated source -- which is the failure mode the gate's path
+     * list exists to prevent, arriving by way of a convenience button.
+     */
+    private fun setSourceFrom(uri: Uri) {
+        sourceUri = uri
+        sourceThumb = decodeOriented(uri)
+        status = getString(R.string.status_source_set)
+        // A different face means the loaded pipeline is holding the wrong embedding.
+        previewOptionsChanged()
+    }
+
     private val pickSource = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) {
-            sourceUri = uri
-            sourceThumb = decodeOriented(uri)
-            status = getString(R.string.status_source_set)
-            // A different face means the loaded pipeline is holding the wrong embedding.
-            previewOptionsChanged()
-        }
+        if (uri != null) setSourceFrom(uri)
+    }
+
+    private val takeSourcePhoto = registerForActivityResult(
+        ActivityResultContracts.TakePicture()) { ok ->
+        val uri = pendingCapture; pendingCapture = null
+        if (ok && uri != null) setSourceFrom(uri)
     }
     /**
      * Where the system camera is writing, between launching it and its result arriving.
@@ -320,22 +339,30 @@ class MainActivity : ComponentActivity() {
      * start, or the intent fails. An app that never declared it would need no such thing,
      * which is why this looks unnecessary and is not.
      */
-    private fun capture(video: Boolean) {
+    private fun capture(video: Boolean, forSource: Boolean = false) {
         if (checkSelfPermission(android.Manifest.permission.CAMERA) !=
             android.content.pm.PackageManager.PERMISSION_GRANTED) {
             pendingCaptureIsVideo = video
+            pendingCaptureForSource = forSource
             askCameraForCapture.launch(android.Manifest.permission.CAMERA)
             return
         }
         val uri = newCaptureUri(if (video) "mp4" else "jpg")
         pendingCapture = uri
-        if (video) recordVideo.launch(uri) else takePhoto.launch(uri)
+        when {
+            // A source face is an identity, so there is no video form of it -- the source
+            // capture is stills only, and forSource is never combined with video.
+            forSource -> takeSourcePhoto.launch(uri)
+            video -> recordVideo.launch(uri)
+            else -> takePhoto.launch(uri)
+        }
     }
 
     private var pendingCaptureIsVideo = false
+    private var pendingCaptureForSource = false
     private val askCameraForCapture = registerForActivityResult(
         ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) capture(pendingCaptureIsVideo)
+        if (granted) capture(pendingCaptureIsVideo, pendingCaptureForSource)
         else status = getString(R.string.status_camera_denied)
     }
 
@@ -702,6 +729,7 @@ class MainActivity : ComponentActivity() {
                                     pickTarget.launch(arrayOf("video/*", "image/*"))
                                 },
                                 onClearSource = ::clearSource,
+                                onCaptureSource = { capture(video = false, forSource = true) },
                                 onCapturePhoto = { capture(video = false) },
                                 onCaptureVideo = { capture(video = true) },
                                 onClearTarget = ::clearTarget,
@@ -710,6 +738,8 @@ class MainActivity : ComponentActivity() {
                                 voiceName = voiceName,
                                 onPickVoice = { pickVoice.launch(arrayOf("audio/*", "video/*")) },
                                 onClearVoice = ::clearVoice,
+                                recordingVoice = recordingVoice,
+                                onToggleRecordVoice = ::toggleVoiceRecording,
                                 onSwap = { runSwap() },
                                 onCancel = {
                                     cancelRequested = true
@@ -730,6 +760,7 @@ class MainActivity : ComponentActivity() {
                                 sourceThumb = sourceThumb,
                                 onPickSource = { pickSource.launch("image/*") },
                                 onClearSource = ::clearSource,
+                                onCaptureSource = { capture(video = false, forSource = true) },
                                 frame = liveFrame,
                                 running = liveRunning,
                                 onToggleRun = { toggleLive() },
@@ -1621,6 +1652,75 @@ class MainActivity : ComponentActivity() {
             // refresh -- no reload, which is what `reloads = false` says.
             if (opts.lipSync) previewOptionsChanged(reloads = false)
         }
+    }
+
+    /**
+     * Record the driving voice with the phone's own microphone.
+     *
+     * The lip syncer needs a voice that is NOT the target's own audio, and until now the
+     * only way to supply one was to already have the file. Recording one is the obvious
+     * missing half, and it is the same shape as capturing a source face with the camera.
+     *
+     * ⚠ The result goes through [loadVoice] like any picked file rather than being assigned
+     * to voiceFile directly. That is what keeps the has_audio check, the duration read, the
+     * status line and the preview refresh in ONE place -- a recording that set voiceFile
+     * itself would be a second path that silently skips all four.
+     *
+     * MPEG_4 + AAC because that is what AudioDecoder already reads: a raw PCM or AMR file
+     * would decode, but through a different branch nobody measured.
+     */
+    private var recorder: android.media.MediaRecorder? = null
+
+    private fun toggleVoiceRecording() {
+        if (recordingVoice) { stopVoiceRecording(); return }
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            askMic.launch(android.Manifest.permission.RECORD_AUDIO)
+            return
+        }
+        val f = File(cacheDir, "voice_rec.m4a")
+        val r = android.media.MediaRecorder(this)
+        val ok = runCatching {
+            r.setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
+            r.setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
+            r.setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC)
+            r.setAudioSamplingRate(44100)
+            r.setAudioChannels(1)
+            r.setAudioEncodingBitRate(128_000)
+            r.setOutputFile(f.absolutePath)
+            r.prepare()
+            r.start()
+        }.isSuccess
+        if (!ok) {
+            runCatching { r.release() }
+            status = getString(R.string.status_record_failed)
+            return
+        }
+        recorder = r
+        recordedTo = f
+        recordingVoice = true
+        status = getString(R.string.status_recording)
+    }
+
+    private fun stopVoiceRecording() {
+        val r = recorder ?: return
+        recorder = null
+        recordingVoice = false
+        // stop() THROWS when nothing was captured -- a recording ended within a few tens of
+        // milliseconds of starting produces no frames and no valid file. Treated as "too
+        // short" rather than an error, because that is what the user did.
+        val ok = runCatching { r.stop() }.isSuccess
+        runCatching { r.release() }
+        val f = recordedTo
+        if (ok && f != null && f.length() > 0) loadVoice(Uri.fromFile(f))
+        else status = getString(R.string.status_record_too_short)
+    }
+
+    private var recordedTo: File? = null
+    private val askMic = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) toggleVoiceRecording()
+        else status = getString(R.string.status_mic_denied)
     }
 
     private fun clearVoice() {

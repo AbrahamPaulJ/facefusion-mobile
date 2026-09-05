@@ -410,4 +410,11 @@ Turning it off runs your own Swap settings instead. This is experimental: the en
     <string name="live_fast_confirm_ok">Turn it off</string>
     <string name="common_cancel">Cancel</string>
     <string name="common_delete">Delete</string>
+    <string name="swap_capture_source">Take a source photo</string>
+    <string name="swap_voice_record">Record a voice</string>
+    <string name="swap_voice_stop">Stop recording</string>
+    <string name="status_recording">Recording… tap stop when done</string>
+    <string name="status_record_too_short">Recording too short</string>
+    <string name="status_record_failed">Could not start recording</string>
+    <string name="status_mic_denied">Microphone permission is needed to record a voice</string>
 </resources>

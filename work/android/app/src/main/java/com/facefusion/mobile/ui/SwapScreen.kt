@@ -148,6 +148,9 @@ fun SwapScreen(
      */
     onPickVoice: () -> Unit,
     onClearVoice: () -> Unit,
+    /** Microphone capture of the driving voice, in-app. */
+    recordingVoice: Boolean,
+    onToggleRecordVoice: () -> Unit,
     /**
      * Save the frame currently shown in the SWAPPED pane, as an image.
      *
@@ -157,6 +160,8 @@ fun SwapScreen(
      */
     onSavePreviewFrame: () -> Unit,
     onClearSource: () -> Unit,
+    /** Shoot the source face with the camera. Stills only -- a source is an identity. */
+    onCaptureSource: () -> Unit,
     /** Take a still / record a clip with the system camera, as the target. */
     onCapturePhoto: () -> Unit,
     onCaptureVideo: () -> Unit,
@@ -399,9 +404,22 @@ fun SwapScreen(
             bitmap = null,
             placeholder = if (hasVoice) (voiceName ?: stringResource(R.string.swap_voice_picked))
                           else stringResource(R.string.swap_voice_add),
-            onClick = if (idle && !hasVoice) onPickVoice else null,
+            onClick = if (idle && !hasVoice && !recordingVoice) onPickVoice else null,
             actionIcon = if (hasVoice) null else Icons.Default.Add,
         ) {
+            // RECORD, beside the picker. The lip syncer needs a voice that is not the
+            // target's own audio, and until now the only way to give it one was to already
+            // have the file -- so the phone's own microphone, which every user has, was the
+            // one source the feature could not use.
+            IconButton(onToggleRecordVoice, enabled = idle, modifier = Modifier.size(36.dp)) {
+                Icon(painterResource(if (recordingVoice) R.drawable.ic_stop
+                                     else R.drawable.ic_mic),
+                     stringResource(if (recordingVoice) R.string.swap_voice_stop
+                                    else R.string.swap_voice_record),
+                     Modifier.size(20.dp),
+                     tint = if (recordingVoice) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             if (hasVoice) {
                 IconButton(onPickVoice, enabled = idle, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.Default.Add, stringResource(R.string.swap_choose_another_voice),
@@ -438,6 +456,14 @@ fun SwapScreen(
                 // panning them together would be a gesture with no meaning.
                 zoom = null,
             ) {
+                // Shoot a face instead of finding one. Stills only: a source is an
+                // identity, and there is no video form of that.
+                if (idle) {
+                    IconButton(onCaptureSource, Modifier.size(28.dp)) {
+                        Icon(painterResource(R.drawable.ic_photo_camera),
+                             stringResource(R.string.swap_capture_source), Modifier.size(16.dp))
+                    }
+                }
                 // Removing the source is not destructive -- it drops a reference to a photo
                 // the user still has -- so unlike the output it does not confirm.
                 if (hasSource && idle) {

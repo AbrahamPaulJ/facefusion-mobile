@@ -322,4 +322,11 @@
     <string name="pipe_holder_api">远程 API</string>
     <string name="pipe_holder_live">实时相机</string>
     <string name="pipe_holder_other">应用的其他部分</string>
+    <string name="swap_capture_source">拍摄源人脸</string>
+    <string name="swap_voice_record">录制语音</string>
+    <string name="swap_voice_stop">停止录制</string>
+    <string name="status_recording">正在录制…完成后点停止</string>
+    <string name="status_record_too_short">录制时间太短</string>
+    <string name="status_record_failed">无法开始录制</string>
+    <string name="status_mic_denied">录制语音需要麦克风权限</string>
 </resources>

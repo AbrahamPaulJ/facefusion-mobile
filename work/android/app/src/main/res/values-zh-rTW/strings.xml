@@ -325,4 +325,11 @@
     <string name="pipe_holder_api">遠端 API</string>
     <string name="pipe_holder_live">即時相機</string>
     <string name="pipe_holder_other">應用程式的其他部分</string>
+    <string name="swap_capture_source">拍攝來源人臉</string>
+    <string name="swap_voice_record">錄製語音</string>
+    <string name="swap_voice_stop">停止錄製</string>
+    <string name="status_recording">錄製中…完成後請點停止</string>
+    <string name="status_record_too_short">錄製時間太短</string>
+    <string name="status_record_failed">無法開始錄製</string>
+    <string name="status_mic_denied">錄製語音需要麥克風權限</string>
 </resources>

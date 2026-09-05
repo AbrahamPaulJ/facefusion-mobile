@@ -18,6 +18,9 @@
          face swapper on every other screen and must install on a device with no
          camera at all. -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Recording a driving voice for the lip syncer, in-app. Nothing is uploaded: the
+         recording lands in cacheDir and is decoded by AudioDecoder like any picked file. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
 <application

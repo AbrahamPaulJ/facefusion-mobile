@@ -306,4 +306,11 @@
     <string name="pipe_holder_api">удалённый API</string>
     <string name="pipe_holder_live">камера Live</string>
     <string name="pipe_holder_other">другая часть приложения</string>
+    <string name="swap_capture_source">Снять исходное лицо</string>
+    <string name="swap_voice_record">Записать голос</string>
+    <string name="swap_voice_stop">Остановить запись</string>
+    <string name="status_recording">Идёт запись… нажмите «стоп», когда закончите</string>
+    <string name="status_record_too_short">Запись слишком короткая</string>
+    <string name="status_record_failed">Не удалось начать запись</string>
+    <string name="status_mic_denied">Для записи голоса нужен доступ к микрофону</string>
 </resources>

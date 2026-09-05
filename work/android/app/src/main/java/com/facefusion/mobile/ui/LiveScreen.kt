@@ -22,6 +22,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -44,6 +45,7 @@ fun LiveScreen(
     sourceThumb: Bitmap?,
     onPickSource: () -> Unit,
     onClearSource: () -> Unit,
+    onCaptureSource: () -> Unit,
     frame: Bitmap?,
     running: Boolean,
     onToggleRun: () -> Unit,
@@ -87,6 +89,12 @@ fun LiveScreen(
                 actionIcon = if (sourceThumb != null) null else Icons.Default.Add,
                 zoom = null,
             ) {
+                if (!running) {
+                    IconButton(onCaptureSource, Modifier.size(28.dp)) {
+                        Icon(painterResource(R.drawable.ic_photo_camera),
+                             stringResource(R.string.swap_capture_source), Modifier.size(16.dp))
+                    }
+                }
                 if (sourceThumb != null && !running) {
                     IconButton(onClearSource, Modifier.size(28.dp)) {
                         Icon(Icons.Default.Delete,
