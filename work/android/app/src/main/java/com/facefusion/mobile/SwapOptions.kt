@@ -83,7 +83,7 @@ data class SwapOptions(
     val enhanceBlend: Float = 0.8f,
 
     /**
-     * `--processors lip_syncer`, wav2lip_gan_96. Off by default.
+     * `--processors lip_syncer`, edtalk_256. Off by default.
      *
      * Costs 1.95 ms per face on the NPU, which is small; the audio front end costs 28.4 ms
      * per SECOND of audio once per clip, which is where the time actually goes. Needs its
@@ -97,13 +97,13 @@ data class SwapOptions(
 
     /**
      * `--lip-syncer-weight`, 0.0-1.0 step 0.05, upstream default 0.5. ONE knob shared by
-     * both models, applied differently per `lip_syncer/core.py`:
+     * edtalk, per `lip_syncer/core.py`: the third model input, `weight` -- a lip-direction
+     * scale the generator reads directly. This app drove it at a hardcoded 1.0 until 0.4.34.
      *
-     *   edtalk    the third model input, `weight` -- a lip-direction scale the generator
-     *             reads directly. This app drove it at a hardcoded 1.0 until now.
-     *   wav2lip   scales the ALREADY-COMPUTED mel window by `weight * 2.0` right before it
-     *             reaches the model (`prepare_audio_frame`) -- not the raw audio, and not
-     *             the target crop. This app applied no scaling at all until now.
+     * (wav2lip, removed in 0.6.0, applied the same knob completely differently: it scaled
+     * the ALREADY-COMPUTED mel window by `weight * 2.0` in `prepare_audio_frame`, not the
+     * raw audio and not the target crop. One name, two meanings, which is part of why
+     * carrying both graphs cost more than it saved.)
      */
     val lipSyncWeight: Float = 0.5f,
 

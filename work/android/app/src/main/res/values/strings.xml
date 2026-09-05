@@ -174,7 +174,7 @@
     <string name="opt_blend_hint_mixed">mixed with the unenhanced swap (default 0.80)</string>
     <!-- %1$s is the resolution the enhancer runs at, e.g. "512" -->
     <string name="opt_enhancer_note">runs on the swapped face at %1$s, before it is pasted back</string>
-    <!-- Shared by edtalk and wav2lip. -->
+    <!-- The lip syncer strength slider. -->
     <string name="opt_lip_sync_weight_hint">how strongly the audio drives the mouth (default 0.50)</string>
 
     <!-- ==================================================== settings: models -->

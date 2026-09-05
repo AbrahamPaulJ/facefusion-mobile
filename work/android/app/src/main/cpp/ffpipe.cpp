@@ -287,15 +287,18 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
     // The lip syncer. Same rule as the enhancer: a separate download, absent on every
     // install that has not asked for it, and never an init failure when missing.
     //
-    // edtalk FIRST, and wav2lip only if it is absent. Both are supported on purpose: an
-    // install that already has wav2lip keeps working and is not silently downgraded to
-    // "no lip syncer" by an app update, and the two can be compared on one device. edtalk
-    // wins where both are present because it is the reason the other one is still here --
-    // it draws the mouth at 256 where wav2lip draws it at 96, and the measured box is
-    // 274x285, so wav2lip upscales it ~3x and edtalk does not.
+    // edtalk ONLY. wav2lip used to be opened as a fallback so an install that had it was
+    // not silently downgraded to "no lip syncer" by an app update; it is gone now, and an
+    // install with only wav2lip therefore reports no lip syncer and is offered edtalk in
+    // Settings. That is a visible, recoverable state rather than a quiet one.
+    //
+    // The two were never interchangeable, which is why keeping both cost more than it
+    // saved: wav2lip is an INPAINTER that warps the 68-point mouth box (~274x285 in the
+    // 512 crop) down to 96 and draws the mouth back at ~3x upscale; edtalk is a full-face
+    // 256 GENERATOR with no mouth box at all. Two geometries, two calibrations, one of
+    // which shipped wrong once already.
     p_->n.lip = open("edtalk");
     p_->n.lipIsEdtalk = (p_->n.lip != nullptr);
-    if (!p_->n.lip) p_->n.lip = open("wav2lip");
 
     // The content gate is MANDATORY, because it blocks. A gate that silently does not run
     // is worse than no gate: it reports "checked" to every caller above it.
@@ -336,7 +339,7 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
     const Probe probes[] = {
         {"yoloface", p_->n.det},   {"fan2d", p_->n.fan},  {"arcface", p_->n.arc},
         {swapperName, p_->n.swap}, {"fan685", p_->n.fan685},
-        {p_->n.lipIsEdtalk ? "edtalk" : "wav2lip", p_->n.lip},
+        {"edtalk", p_->n.lip},
         {"gpen", p_->n.enh},       {"gate", p_->n.nsfw},
     };
     std::string report;
@@ -876,13 +879,13 @@ void Pipeline::resetStats() {
   framesDone = facesDone = 0;
 }
 
-// ---------------------------------------------------- lip syncer (wav2lip_gan_96)
+// ---------------------------------------------------- lip syncer (edtalk_256)
 //
-// lip_syncer/core.py:sync_lip, the wav2lip branch, in order. The one thing to keep in
-// mind reading it: NOTHING here reuses the swapper's crop. The swapper works on
-// arcface_128 at 256; this works on ffhq_512 at 512 and then on a 96x96 mouth box taken
-// from the 68 landmarks INSIDE that crop. Handing it the swapper's crop would run a
-// numerically perfect graph over the wrong pixels, which is trap #9.
+// lip_syncer/core.py:sync_lip, the edtalk branch. The one thing to keep in mind reading
+// it: NOTHING here reuses the swapper's crop. The swapper works on arcface_128 at 256;
+// this works on ffhq_512 at 512, resized -- not warped -- to the model's 256. Handing it
+// the swapper's crop would run a numerically perfect graph over the wrong pixels, which
+// is trap #9.
 bool Pipeline::syncLip(ffcv::Image& frame, const std::vector<Face>& faces,
                        const float* melWindow) {
   if (!p_ || !p_->n.lip || !melWindow) return true;   // absent is not a failure
@@ -982,114 +985,13 @@ bool Pipeline::syncLip(ffcv::Image& frame, const std::vector<Face>& faces,
       continue;
     }
 
-    // wav2lip below. MS=96 is the size the 68-landmark mouth box is warped to, and it IS
-    // the resolution the mouth gets drawn at -- the box measures ~274x285 inside the 512
-    // crop, so this upscales the mouth about 3x on the way back. wav2lip stays BGR
-    // in and out (upstream's prepare_crop_frame never flips it for this model).
-    const int MS = 96;
-
-    // cv2.transform(landmark_68, affine_matrix) -- the 68 points INTO crop space. Every
-    // step below reads these, not the frame-space ones. Taken BEFORE the crop, because
-    // the crop is now built only where these say it will be read.
-    float lm[136];
-    ffcv::transformPoints(f.landmark68, 68, am, lm);
-
-    float box[4];
-    ffcv::createBoundingBox(lm, box);
-
-    // Only a rectangle of the 512 crop is ever read: the box comes from these same 68
-    // points, and the lower-face hull is built from a SUBSET of them, so hull ⊆ box. The
-    // margin is two blur radii, because createAreaMask blurs at sigma 5 and the mask can
-    // therefore be non-zero up to ~20 px outside the hull.
-    //
-    // Warping the whole 512x512 measured 6.66 ms on the host and this is the same picture
-    // wherever anything looks at it. Outside the rectangle both the crop and the pasted
-    // result are multiplied by a mask that is zero.
-    const int kBlurMargin = 2 * ((int)std::lround(5.0 * 4.0 * 2.0 + 1.0) / 2);
-    const int rx0 = (int)box[0] - kBlurMargin, ry0 = (int)box[1] - kBlurMargin;
-    const int rx1 = (int)box[2] + kBlurMargin + 1, ry1 = (int)box[3] + kBlurMargin + 1;
-    double tc = nowMs();
-    ffcv::Image crop = ffcv::warpAffineRoi(frame, am, LS, LS, ffcv::BORDER_REPLICATE,
-                                           rx0, ry0, rx1, ry1);
-    msLipCrop += nowMs() - tc;
-
-    tc = nowMs();
-    ffcv::MatF areaMask = ffcv::createAreaMask(LS, LS, lm, ffcv::AREA_LOWER_FACE);
-    ffcv::Affine areaM;
-    ffcv::Image area = ffcv::warpFaceByBoundingBox(crop, box, MS, &areaM);
-    msLipMask += nowMs() - tc;
-    msGeom += nowMs() - t0;
-
-    // prepare_crop_frame: the masked copy CONCATENATED with the reference on the channel
-    // axis, masked first. Upstream zeroes rows 48.. of the HWC frame, i.e. the BOTTOM
-    // half -- the mouth is what the model is asked to INVENT, so it must not be shown it.
-    t0 = nowMs();
-    std::vector<float> in((size_t)6 * MS * MS);
-    for (int y = 0; y < MS; ++y) {
-      const uint8_t* row = area.row(y);
-      const bool masked = y >= MS / 2;
-      for (int x = 0; x < MS; ++x) {
-        for (int c = 0; c < 3; ++c) {
-          const float v = row[x * 3 + c] / 255.0f;
-          in[(size_t)c * MS * MS + (size_t)y * MS + x] = masked ? 0.0f : v;
-          in[(size_t)(c + 3) * MS * MS + (size_t)y * MS + x] = v;
-        }
-      }
-    }
-    msGeom += nowMs() - t0;
-    msLipPrep += nowMs() - t0;
-
-    t0 = nowMs();
-    std::vector<std::vector<float>> out;
-    // prepare_audio_frame (wav2lip branch): scale the ALREADY-COMPUTED mel window by
-    // weight*2.0, not the target crop and not the raw audio. `melWindow` is shared, owned
-    // storage read again for other faces/frames, so this copies rather than scaling it in
-    // place. Upstream's default 0.5 makes this a *1.0 no-op, which is why the missing knob
-    // was invisible until it was looked for.
-    std::vector<float> scaledMel(melWindow, melWindow + 80 * 16);
-    const float melScale = cfg.lipSyncWeight * 2.0f;
-    for (float& v : scaledMel) v *= melScale;
-    if (!ffnn::execute(p_->n.lip, {"source", "target"}, {scaledMel.data(), in.data()}, out) ||
-        out.empty() || out[0].size() < (size_t)3 * MS * MS) {
-      err_ = std::string("lip syncer: ") + ffnn::lastError();
-      return false;
-    }
-    msLipSync += nowMs() - t0;
-
-    // normalize_crop_frame: clip(0, 1) * 255, back to interleaved BGR.
-    t0 = nowMs();
-    ffcv::Image synced(MS, MS, 3);
-    for (int y = 0; y < MS; ++y) {
-      uint8_t* row = synced.row(y);
-      for (int x = 0; x < MS; ++x) {
-        for (int c = 0; c < 3; ++c) {
-          float v = out[0][(size_t)c * MS * MS + (size_t)y * MS + x];
-          v = v < 0.f ? 0.f : (v > 1.f ? 1.f : v);
-          row[x * 3 + c] = (uint8_t)(v * 255.0f);
-        }
-      }
-    }
-
-    // Back into the 512 crop through the inverse box warp, BORDER_REPLICATE, then paste
-    // the crop into the frame through the lower-face mask.
-    ffcv::Image back = ffcv::warpAffineRoi(synced, ffcv::invertAffine(areaM), LS, LS,
-                                           ffcv::BORDER_REPLICATE, rx0, ry0, rx1, ry1);
-    // Only the rectangle, for the same reason the warp above fills only the rectangle:
-    // `back` is zero outside it and MatF value-initialises, so the two agree pixel for
-    // pixel and pasteBack multiplies the difference by a mask that is zero there anyway.
-    // The full-canvas version converted 786432 pixels to reach a mouth about 300 across,
-    // and this block MEASURED 10.71 ms/frame, 49% of the lip syncer's geometry.
-    ffcv::MatF backF(LS, LS, 3);
-    const int cy0 = std::max(ry0, 0), cy1 = std::min(ry1, LS);
-    const int cx0 = std::max(rx0, 0), cx1 = std::min(rx1, LS);
-    for (int y = cy0; y < cy1; ++y) {
-      const uint8_t* srow = back.row(y) + (size_t)cx0 * 3;
-      float* drow = backF.row(y) + (size_t)cx0 * 3;
-      for (int i = 0, n = (cx1 - cx0) * 3; i < n; ++i) drow[i] = srow[i];
-    }
-    ffcv::pasteBackRoi(frame, backF, areaMask, am, cx0, cy0, cx1, cy1);
-    msGeom += nowMs() - t0;
-    msLipPaste += nowMs() - t0;
+    // wav2lip was the FIRST lip syncer here and is gone: an inpainter that warped the
+    // 68-point mouth box to 96 and drew the mouth at 3x upscale, against edtalk's
+    // full-face 256 generator. Only edtalk is opened now, so reaching this point means
+    // the graph is loaded but is not the one this code understands -- refuse rather than
+    // run edtalk's crop chain through a model that wants a different one.
+    err_ = "lip syncer: unsupported graph";
+    return false;
   }
   return true;
 }

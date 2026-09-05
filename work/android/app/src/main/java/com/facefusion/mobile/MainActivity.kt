@@ -387,13 +387,10 @@ class MainActivity : ComponentActivity() {
      * at execution time.
      */
     private val hasLipSyncer: Boolean
-        // EITHER graph satisfies it. ffpipe prefers edtalk and falls back to wav2lip, so
-        // the chip has to be offered whenever one of them is installed -- asking only for
-        // wav2lip would hide the processor from an install that has the BETTER model, and
-        // asking only for edtalk would take the feature away from everyone who already had
-        // the other one.
-        get() = ModelPaths.present(modelDir(), tier, "edtalk") ||
-                ModelPaths.present(modelDir(), tier, "wav2lip")
+        // edtalk only. wav2lip was accepted here while ffpipe still fell back to it; both
+        // went together, deliberately, because offering Lip Sync for a model the pipeline
+        // now refuses is worse than saying the model is missing.
+        get() = ModelPaths.present(modelDir(), tier, "edtalk")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -1019,10 +1016,10 @@ class MainActivity : ComponentActivity() {
             // beside a manifest-driven downloader will drift again -- what saves it is
             // that `row()` reads ModelPaths and `hostedFiles`, so a name added here is
             // enough and a name forgotten is invisible rather than broken.
-            "wav2lip" to getString(R.string.model_lip_syncer),
-            // Both lip syncers get a row, because both can be installed and the Settings
-            // screen's job is to say what IS installed -- not what the pipeline would
-            // pick. Which one runs is ffpipe's choice and it prefers edtalk.
+            // wav2lip gets no row: ffpipe no longer opens it, so it is neither a download
+            // that would ever run nor an installed capability the screen can honestly
+            // claim. A device that still holds the file keeps a dead ~44 MB until the
+            // app's data is cleared.
             "edtalk" to getString(R.string.model_lip_syncer_256),
             "fan685" to getString(R.string.model_landmark_refiner),
         )
@@ -1059,16 +1056,7 @@ class MainActivity : ComponentActivity() {
         }
         return (required.map { (n, l) -> row(n, l, true) } +
             gate.map { (n, l) -> row(n, l, !gateOk) }.filter { it.present || it.downloadable } +
-            optional.mapNotNull { (n, l) ->
-                val r = row(n, l, false)
-                // wav2lip cannot RUN while edtalk is installed: ffpipe opens edtalk first
-                // and only falls back, so offering it as a fresh download offers a 43.7 MB
-                // file the pipeline is guaranteed to ignore. It is still listed once it IS
-                // on the device -- that row is how it gets deleted, and an install that has
-                // only wav2lip genuinely uses it.
-                if (n == "wav2lip" && !r.present &&
-                    ModelPaths.present(modelDir(), tier, "edtalk")) null else r
-            }.filter { it.present || it.downloadable })
+            optional.map { (n, l) -> row(n, l, false) }.filter { it.present || it.downloadable })
             // One row per FILE SET, not per logical name. The two gate names resolve to two
             // different context binaries on QNN and to the SAME `nsfw_2_sim` pair on ncnn --
             // the quantised build exists because a QNN tier below v79 cannot finalize the

@@ -204,7 +204,7 @@ object NativePipe {
     /** Swaps every face in place; returns the face count, or -1 on error. */
     @JvmStatic external fun processFrame(bgr: ByteArray, w: Int, h: Int): Int
 
-    /** True when wav2lip_<tier>.bin was on the device at init. Gates the UI switch. */
+    /** True when edtalk_<tier>.bin was on the device at init. Gates the UI switch. */
     @JvmStatic external fun hasLipSyncer(): Boolean
 
     /**
