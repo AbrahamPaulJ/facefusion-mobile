@@ -731,13 +731,27 @@ void pasteBackRoi(Image& frame, const MatF& crop, const MatF& mask, const Affine
   static const bool neonOff = getenv("FFPASTESCALAR") != nullptr || neonDisabled();
 #endif
 
+  // FFPASTENOFULL=1 keeps the unconditional blend, for the A/B.
+  //
+  // MEASURED before it was written, because the last two guesses at this loop were both
+  // wrong: 33.0% of blended pixels carry alpha EXACTLY 1.0f (29.4% of the whole box), so a
+  // third of the work loads the destination, multiplies it by zero and adds it back. The
+  // mask is a box blurred at sigma 9.6, and its interior really is a flat 1.0.
+  //
+  // Bit-exact rather than close: with a == 1, ia == 0, and the blend it replaces is
+  // `d*0 + cv*1` -- +0 added to a finite cv, which IEEE returns as cv unchanged. Only
+  // EXACT equality qualifies, so the interior pixels whose four weights sum to 0.99999994
+  // instead take the ordinary path and are unaffected. That is also why this is 33% and
+  // not the ~60% the mask's flat interior would suggest geometrically.
+  static const bool noFull = getenv("FFPASTENOFULL") != nullptr;
+
   // FFPASTEDBG reports the box actually being blended. Guessing at it produced two wrong
   // hypotheses in a row -- a working set that would thrash the cache, then a tile size to
   // fix it -- and the tiling measured as nothing at all.
   static const bool kDbg = getenv("FFPASTEDBG") != nullptr;
   static int dbgLeft = 3;
   const bool dbg = kDbg && dbgLeft > 0;
-  long nOutside = 0, nZero = 0, nBlend = 0;
+  long nOutside = 0, nZero = 0, nBlend = 0, nFull = 0;
 
   for (int ty = 0; ty < ph; ty += tile) {
   const int tyEnd = ty + tile < ph ? ty + tile : ph;
@@ -779,7 +793,7 @@ void pasteBackRoi(Image& frame, const MatF& crop, const MatF& mask, const Affine
       }
       a = clampf(a, 0.f, 1.f);
       if (a == 0.f) { if (dbg) ++nZero; continue; }   // exact identity: skip the crop sampler
-      if (dbg) ++nBlend;
+      if (dbg) { ++nBlend; if (a == 1.f) ++nFull; }
 
       // BORDER_REPLICATE: clamp the taps, which is what cv2 does and what the templated
       // sampler did for this border.
@@ -807,9 +821,14 @@ void pasteBackRoi(Image& frame, const MatF& crop, const MatF& mask, const Affine
         acc = vfmaq_n_f32(acc, vld1q_f32(p10), w10);
         acc = vfmaq_n_f32(acc, vld1q_f32(p01), w01);
         acc = vfmaq_n_f32(acc, vld1q_f32(p11), w11);
-        float32x4_t dv = {(float)d[0], (float)d[1], (float)d[2], 0.f};
-        float32x4_t res = vmulq_n_f32(dv, ia);
-        res = vfmaq_n_f32(res, acc, a);
+        float32x4_t res;
+        if (a == 1.f && !noFull) {
+          res = acc;                    // d*0 + acc*1, without touching d
+        } else {
+          float32x4_t dv = {(float)d[0], (float)d[1], (float)d[2], 0.f};
+          res = vmulq_n_f32(dv, ia);
+          res = vfmaq_n_f32(res, acc, a);
+        }
         // vcvtq_s32_f32 truncates toward zero, which is the numpy astype this mirrors.
         int32x4_t vi = vcvtq_s32_f32(res);
         vi = vminq_s32(vmaxq_s32(vi, vdupq_n_s32(0)), vdupq_n_s32(255));
@@ -820,7 +839,7 @@ void pasteBackRoi(Image& frame, const MatF& crop, const MatF& mask, const Affine
 #endif
       for (int c = 0; c < 3; ++c) {
         const float cv = w00 * p00[c] + w10 * p10[c] + w01 * p01[c] + w11 * p11[c];
-        const float v = d[c] * ia + cv * a;
+        const float v = (a == 1.f && !noFull) ? cv : d[c] * ia + cv * a;
         d[c] = (uint8_t)iclamp((int)v, 0, 255);   // numpy astype = truncate
       }
     }
@@ -832,10 +851,12 @@ void pasteBackRoi(Image& frame, const MatF& crop, const MatF& mask, const Affine
     const long tot = (long)pw * ph;
     fprintf(stderr,
             "[paste] box %dx%d = %ld px  crop %dx%d  |  outside %ld (%.1f%%)  "
-            "zero-alpha %ld (%.1f%%)  blended %ld (%.1f%%)\n",
+            "zero-alpha %ld (%.1f%%)  blended %ld (%.1f%%)  of which FULL-alpha "
+            "%ld (%.1f%% of frame, %.1f%% of blended)\n",
             pw, ph, tot, cw, ch_,
             nOutside, 100.0 * nOutside / tot, nZero, 100.0 * nZero / tot,
-            nBlend, 100.0 * nBlend / tot);
+            nBlend, 100.0 * nBlend / tot,
+            nFull, 100.0 * nFull / tot, nBlend ? 100.0 * nFull / nBlend : 0.0);
   }
 }
 
