@@ -559,7 +559,18 @@ class MainActivity : ComponentActivity() {
                         refreshSwapped(force = true)
                     }
                 }
-                AppScaffold(screen, { screen = it }, showLive = BuildConfig.DEV_BUILD) { pad ->
+                AppScaffold(
+                    screen,
+                    {
+                        // Leaving the tab stops the feed. Without this the camera keeps
+                        // running behind the Swap screen, PipeGuard stays held so a swap
+                        // reports the NPU busy, and the pipeline Live configured is still
+                        // the loaded one.
+                        if (screen == Screen.Live && it != Screen.Live) stopLive()
+                        screen = it
+                    },
+                    showLive = BuildConfig.DEV_BUILD,
+                ) { pad ->
                     Box(Modifier.padding(pad)) {
                         when (screen) {
                             Screen.Swap -> SwapScreen(
@@ -1643,6 +1654,17 @@ class MainActivity : ComponentActivity() {
      * and the screen contend for -- a camera pump and a preview refresh both calling
      * processFrame on one global is exactly what that guard exists to prevent.
      */
+    /**
+     * ⚠ Live must not survive the activity leaving the foreground. CameraX unbinds itself
+     * -- it is lifecycle-bound -- but nothing else does: the pipeline would stay loaded and
+     * PipeGuard would stay HELD, so the next run anywhere in the app reports the NPU busy
+     * with no way to clear it short of killing the process.
+     */
+    override fun onStop() {
+        super.onStop()
+        if (liveRunning) stopLive()
+    }
+
     private fun toggleLive() {
         if (liveRunning) { stopLive(); return }
         liveNote = null
@@ -1704,6 +1726,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun stopLive() {
+        // Idempotent: reached from the button, from leaving the tab, and from onStop, and
+        // two of those can fire for one user action. Releasing the pipeline twice is a
+        // crash of exactly the kind this method was written to fix.
+        if (!liveRunning) return
         live.stop()
         liveRunning = false
         NativePipe.setTrackPeriod(0)

@@ -148,11 +148,34 @@ class LiveEngine {
         }, androidx.core.content.ContextCompat.getMainExecutor(ctx))
     }
 
+    /**
+     * Stop the pump, and DO NOT RETURN until no frame is still inside [onImage].
+     *
+     * ⚠ This is why the caller may free the pipeline afterwards. `shutdown()` alone only
+     * refuses NEW work -- it does not wait for the task already running -- so the first
+     * version returned while a frame was mid-`processFrame`, MainActivity called
+     * NativePipe.release() underneath it, and the analyzer thread dereferenced a pipeline
+     * that no longer existed:
+     *
+     *     SIGSEGV, null pointer dereference, fault addr 0x88
+     *     #00 ffpipe::Pipeline::enhance
+     *     #01 Java_..._processFrame
+     *     #03 LiveEngine.onImage
+     *
+     * A frame takes ~60 ms, so the wait is imperceptible; 2 s is a bound, not an
+     * expectation. Blocking the caller here is the entire point -- "stopped" has to mean
+     * the native side is idle, not that it was asked to be.
+     */
     fun stop() {
         running = false
+        // Unbind FIRST so no further frames are dispatched, then drain what is in flight.
         runCatching { provider?.unbindAll() }
         provider = null
-        exec?.shutdown(); exec = null
+        exec?.let { e ->
+            e.shutdown()
+            runCatching { e.awaitTermination(2, java.util.concurrent.TimeUnit.SECONDS) }
+        }
+        exec = null
         bufs[0] = null; bufs[1] = null
         fps = 0.0
     }
