@@ -358,4 +358,10 @@
     <string name="batch_skipped">已略過</string>
     <string name="batch_remove">從佇列移除</string>
     <string name="batch_unnamed_clip">片段</string>
+    <string name="live_rec_start">錄製</string>
+    <string name="live_rec_stop">停止錄製</string>
+    <string name="live_rec_badge">錄製</string>
+    <string name="status_live_recording">正在錄製即時畫面。</string>
+    <string name="status_live_rec_saved">錄製已儲存，共 %1$d 影格。</string>
+    <string name="status_live_rec_empty">沒有錄製到任何內容。</string>
 </resources>

@@ -102,6 +102,29 @@ class LiveEngine {
      */
     @Volatile var frontCamera: Boolean = true
 
+    /**
+     * Set to record what the pump produces — roadmap 13b. Null is not recording.
+     *
+     * Owned by the caller, which starts and stops it; this class only feeds it. That split
+     * is deliberate: where the file goes, what it is called and when it is saved are all
+     * MainActivity's business, and this class has stayed free of them for the same reason
+     * it takes a gate THRESHOLD rather than knowing what a gate is.
+     *
+     * ⚠ Fed from the analyzer thread, in line with the pump. See LiveRecorder.frame for
+     * why it drops a frame rather than blocking: the recording is the guest here, and a
+     * preview that stutters because a recording is running is the wrong trade.
+     */
+    @Volatile var recorder: LiveRecorder? = null
+
+    /**
+     * Where liveFrame writes the full-resolution swapped BGR while recording.
+     *
+     * Allocated once per resolution and reused, like the display bitmaps above and for the
+     * same reason: at 720p this is 2.7 MB, and a fresh one per frame would be ~40 MB/s of
+     * churn to hand the encoder bytes it copies again anyway.
+     */
+    private var recBuf: ByteArray? = null
+
     // Per-stage cost, logged every 30 frames. Live was 6.5 fps on its first run against
     // 26.6 on a file, and no amount of reasoning about which stage was to blame beat
     // asking -- the same lesson the geometry buckets taught.
@@ -255,6 +278,7 @@ class LiveEngine {
         }
         exec = null
         bufs[0] = null; bufs[1] = null
+        recBuf = null
         fps = 0.0
     }
 
@@ -292,6 +316,10 @@ class LiveEngine {
             // Sample on the first frame of a session and every kGateIntervalMs after.
             // lastGateMs is zeroed in start(), so the first frame always samples: a session
             // that will be refused should be refused before it has shown anything.
+            // Read ONCE per frame. It is volatile and the caller may clear it at any
+            // moment; testing it twice could hand liveFrame a buffer and then find no
+            // recorder to give the result to, or the reverse.
+            val rec = recorder
             val nowMs = System.currentTimeMillis()
             val gateNow = !gateThreshold.isNaN() && (nowMs - lastGateMs >= kGateIntervalMs)
             if (gateNow) lastGateMs = nowMs
@@ -302,6 +330,13 @@ class LiveEngine {
                 p[2].buffer, p[2].rowStride, p[2].pixelStride,
                 w, h, bmp, dw, dh,
                 if (gateNow) gateThreshold else Float.NaN,
+                // Only while recording: null costs the native side one branch.
+                if (rec != null) {
+                    val need = w * h * 3
+                    var b = recBuf
+                    if (b == null || b.size != need) { b = ByteArray(need); recBuf = b }
+                    b
+                } else null,
             )
             msPump += (System.nanoTime() - t) / 1e6
             // -2 refused, -3 could not measure. Both STOP the pump rather than skipping a
@@ -318,6 +353,11 @@ class LiveEngine {
                 onShot(Shot(null, 0, fps, NativePipe.lastError()))
                 return
             }
+
+            // AFTER the error checks, so a refused or failed frame is never recorded. The
+            // gate stops the pump on a refusal, and the file must not contain the frame
+            // that caused it.
+            if (rec != null) recBuf?.let { rec.frame(it, w, h) }
 
             if (++nStat == 30) {
                 // One bucket, because there is one call -- but one number cannot say

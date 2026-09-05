@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -61,6 +62,10 @@ fun LiveScreen(
     frontCamera: Boolean = true,
     /** Flip the lens. Stops and restarts the pump when it is running. */
     onSwitchCamera: () -> Unit = {},
+    /** Whether a recording is in flight -- roadmap 13b. */
+    recording: Boolean = false,
+    /** Start or finish recording the feed. Only meaningful while it is running. */
+    onToggleRecord: () -> Unit = {},
 ) {
     // SCROLLS. Without this the controls below the feed are simply clipped: the first build
     // put the settings switch behind the navigation bar, where the only clue it existed was
@@ -197,6 +202,25 @@ fun LiveScreen(
                 )
             }
 
+            // The one thing that does belong over the picture: whether this is being
+            // recorded. It is the state a user must be able to check without looking away
+            // from what they are pointing the camera at.
+            if (recording) {
+                Surface(
+                    color = FfRed,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.live_rec_badge),
+                        color = Color.White,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
+            }
+
             // Frame rate over the feed, where it is read while looking at the result rather
             // than after it. Only while running: a stale rate on a stopped feed is a lie.
             if (running) {
@@ -218,11 +242,26 @@ fun LiveScreen(
             }
         }
 
-        Button(
-            onClick = onToggleRun,
-            enabled = modelsReady && sourceThumb != null,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(stringResource(if (running) R.string.live_stop else R.string.live_start)) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = onToggleRun,
+                enabled = modelsReady && sourceThumb != null,
+                modifier = Modifier.weight(1f),
+            ) { Text(stringResource(if (running) R.string.live_stop else R.string.live_start)) }
+            // RECORD, beside Start rather than over the feed: it writes a file, which is
+            // the kind of thing that belongs with the other button that commits something,
+            // not floating over the picture as an ornament. Only enabled while the pump is
+            // running -- arming a recorder before the camera produces a zero-frame file.
+            OutlinedButton(
+                onClick = onToggleRecord,
+                enabled = running,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(stringResource(if (recording) R.string.live_rec_stop
+                                    else R.string.live_rec_start),
+                     color = if (recording) FfRed else Color.Unspecified)
+            }
+        }
 
         // ---------------------------------------------------------------- fast mode
         //

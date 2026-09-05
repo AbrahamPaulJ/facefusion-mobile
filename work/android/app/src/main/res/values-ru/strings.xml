@@ -339,4 +339,10 @@
     <string name="batch_skipped">пропущено</string>
     <string name="batch_remove">Убрать из очереди</string>
     <string name="batch_unnamed_clip">клип</string>
+    <string name="live_rec_start">Запись</string>
+    <string name="live_rec_stop">Остановить запись</string>
+    <string name="live_rec_badge">ЗАП</string>
+    <string name="status_live_recording">Идёт запись трансляции.</string>
+    <string name="status_live_rec_saved">Запись сохранена, кадров: %1$d.</string>
+    <string name="status_live_rec_empty">Записать ничего не удалось.</string>
 </resources>

@@ -193,6 +193,10 @@ class MainActivity : ComponentActivity() {
      */
     private var liveFrontCamera by mutableStateOf(true)
 
+    /** The Live recording in flight, and whether the UI should say so -- roadmap 13b. */
+    private var liveRecorder: LiveRecorder? = null
+    private var liveRecording by mutableStateOf(false)
+
     // ⚠ Compose state, NOT live.isRunning. A plain field on the engine is invisible to
     // recomposition, so the first build showed a running feed under a button still saying
     // "Start" -- the pixels updated because the bitmap reference changed and nothing else
@@ -908,6 +912,8 @@ class MainActivity : ComponentActivity() {
                                 onDownload = { onDownloadTapped() },
                                 frontCamera = liveFrontCamera,
                                 onSwitchCamera = ::switchLiveCamera,
+                                recording = liveRecording,
+                                onToggleRecord = ::toggleLiveRecording,
                             )
                             Screen.Settings -> SettingsScreen(
                                 sections = modelSections(),
@@ -2201,6 +2207,55 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Start or finish recording what Live is showing -- roadmap 13b.
+     *
+     * Only while the pump is running: there is nothing to record otherwise, and a recorder
+     * armed before the camera would produce a zero-frame file.
+     */
+    private fun toggleLiveRecording() {
+        if (liveRecording) { finishLiveRecording(discard = false); return }
+        if (!liveRunning) return
+        val f = File(outputDir(), "live_" + System.currentTimeMillis() + ".mp4")
+        val rec = LiveRecorder(f) { appendLog(it) }
+        liveRecorder = rec
+        live.recorder = rec
+        liveRecording = true
+        status = getString(R.string.status_live_recording)
+    }
+
+    /**
+     * Close the recording and say where it went.
+     *
+     * ⚠ `discard` is TRUE on a gate refusal, and the file is deleted. A refused run
+     * produces no output anywhere else in this app -- runSwap throws before it writes one
+     * -- and a recording is not an exception just because some of its frames were checked
+     * before the refusal happened. Live samples once a second, so the seconds either side
+     * of the frame that was refused were never checked at all.
+     */
+    private fun finishLiveRecording(discard: Boolean) {
+        val rec = liveRecorder ?: return
+        live.recorder = null
+        liveRecorder = null
+        liveRecording = false
+        val out = rec.stop()
+        if (discard) {
+            out?.delete()
+            return
+        }
+        val err = rec.error
+        when {
+            err != null -> status = getString(R.string.status_failed, err)
+            out == null -> status = getString(R.string.status_live_rec_empty)
+            else -> {
+                outputFile = out
+                outputPartial = false
+                status = getString(R.string.status_live_rec_saved, rec.frameCount)
+                saveToGallery(out)
+            }
+        }
+    }
+
     private fun switchLiveCamera() {
         val wasRunning = liveRunning
         if (wasRunning) stopLive()
@@ -2267,7 +2322,9 @@ class MainActivity : ComponentActivity() {
                         if (shot.gate == LiveEngine.Gate.Blocked) R.string.gate_blocked
                         else R.string.gate_error,
                         getString(R.string.gate_subject_this_frame))
-                    runOnUiThread { stopLive() }
+                    // The recording goes with it. See finishLiveRecording: a refused
+                    // run leaves no output anywhere else in this app.
+                    runOnUiThread { finishLiveRecording(discard = true); stopLive() }
                 }
                 if (shot.bitmap != null) {
                     liveFrame = shot.bitmap
@@ -2283,6 +2340,9 @@ class MainActivity : ComponentActivity() {
         // two of those can fire for one user action. Releasing the pipeline twice is a
         // crash of exactly the kind this method was written to fix.
         if (!liveRunning) return
+        // BEFORE live.stop(): stop() drains the analyzer thread, so finishing here means
+        // no frame can arrive at a recorder that is being torn down.
+        finishLiveRecording(discard = false)
         live.stop()
         liveRunning = false
         NativePipe.setTrackPeriod(0)

@@ -808,7 +808,7 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
                                                 jobject jV, jint vRow, jint vPix,
                                                 jint w, jint h,
                                                 jobject jBitmap, jint dstW, jint dstH,
-                                                jfloat gateThreshold) {
+                                                jfloat gateThreshold, jbyteArray jBgrOut) {
   if (!g_pipe) { g_err = "pipeline not initialised"; return -1; }
   if (w <= 0 || h <= 0) { g_err = "liveFrame: empty frame"; return -1; }
 
@@ -876,6 +876,19 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
     if (!g_pipe->swapAll(frame, faces)) { g_err = g_pipe->error(); return -1; }
     // Its own pass, after the swap, never fused -- see Pipeline::enhance's doc.
     if (!g_pipe->enhance(frame, faces)) { g_err = g_pipe->error(); return -1; }
+  }
+
+  // RECORDING taps the swapped frame here, at FULL resolution, before it is downsampled
+  // for the display. Only while a recording is running: jBgrOut is null otherwise and this
+  // costs a branch. One w*h*3 copy is the whole price of recording -- the alternative,
+  // re-reading the display Bitmap and converting it back, would both cost more and record
+  // the downsampled picture instead of the one that was computed.
+  if (jBgrOut) {
+    const jsize want = (jsize)(w * h * 3);
+    if (env->GetArrayLength(jBgrOut) == want)
+      env->SetByteArrayRegion(jBgrOut, 0, want, (const jbyte*)frame.data.data());
+    // A wrong-sized array is the caller's bug and must not be half-filled: a partial frame
+    // would be recorded as a torn picture rather than reported.
   }
 
   if (dstW <= 0 || dstH <= 0) { dstW = w; dstH = h; }

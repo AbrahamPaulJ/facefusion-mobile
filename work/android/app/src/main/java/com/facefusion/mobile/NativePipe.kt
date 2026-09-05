@@ -342,6 +342,14 @@ object NativePipe {
         w: Int, h: Int,
         bmp: android.graphics.Bitmap, dstW: Int, dstH: Int,
         gateThreshold: Float,
+        /**
+         * Where to copy the FULL-RESOLUTION swapped frame as BGR, or null.
+         *
+         * Non-null only while a recording is running (roadmap 13b). It must be exactly
+         * w*h*3 bytes; a wrong size is ignored rather than partly filled, because half a
+         * frame would be recorded as a torn picture instead of reported as a bug.
+         */
+        bgrOut: ByteArray?,
     ): Int
 
     @JvmStatic external fun lastError(): String
