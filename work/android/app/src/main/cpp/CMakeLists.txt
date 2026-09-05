@@ -14,7 +14,10 @@ target_include_directories(ffnative PRIVATE
 
 # The QNN backend is dlopen'd at runtime from the app's nativeLibraryDir, never linked, so
 # no QNN .so is needed at build time and the build is independent of the HTP variant.
-target_link_libraries(ffnative android log dl)
+# jnigraphics is for AndroidBitmap_lockPixels: the live pump writes its ARGB output
+# straight into the Bitmap the compositor draws, rather than through an IntArray and
+# setPixels. See liveFrame in ffjni.cpp.
+target_link_libraries(ffnative android log dl jnigraphics)
 target_compile_options(ffnative PRIVATE -O3 -fvisibility=hidden -Wall)
 
 # ---------------------------------------------------------------------------

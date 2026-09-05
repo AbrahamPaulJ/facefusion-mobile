@@ -8,6 +8,7 @@
 // frame -- 2.95 M pixels at 720p -- and a Kotlin loop over that is not viable.
 
 #include <jni.h>
+#include <android/bitmap.h>
 
 #include <cmath>
 #include <cstdio>    // snprintf, for stageMillis
@@ -685,6 +686,137 @@ Java_com_facefusion_mobile_NativePipe_bgrToArgb(JNIEnv* env, jclass, jbyteArray 
   jintArray ja = env->NewIntArray((jsize)out.size());
   env->SetIntArrayRegion(ja, 0, (jsize)out.size(), (const jint*)out.data());
   return ja;
+}
+
+/**
+ * One live camera frame, end to end, without a single Java array.
+ *
+ * ## Why this exists
+ *
+ * Live was `yuvToBgr` -> `processFrame` -> `bgrToArgb` -> `setPixels`, four JNI calls that
+ * between them moved about 21 MB per frame at 720p and allocated six large buffers, purely
+ * to hand the same picture back and forth across the JNI boundary:
+ *
+ *   * the three planes were copied out of CameraX's DIRECT ByteBuffers into Java byte[]s,
+ *     then copied AGAIN into std::vectors by yuvToBgr,
+ *   * the BGR frame was allocated and copied into a Java byte[], copied back out into an
+ *     ffcv::Image by processFrame, and copied back in again after the swap,
+ *   * and the display path copied the BGR out once more, built a 2.6 MB IntArray, copied
+ *     that to Java, and let Bitmap.setPixels copy it a fourth time.
+ *
+ * That was `yuv 11.9 / display 10.9` of Live's 62 ms/frame -- 23 ms in which nothing was
+ * computed. This does the same work against ONE reusable frame: the planes are read where
+ * CameraX put them, the pipeline runs in place, and the downsampled ARGB is written
+ * straight into the Bitmap's own pixels.
+ *
+ * ⚠ The Bitmap must be ARGB_8888 and exactly dstW x dstH, and the caller must not be
+ * drawing it -- [LiveEngine] alternates two for exactly that reason. AndroidBitmap_lockPixels
+ * pins it, so the window between lock and unlock is kept to the downsample loop alone.
+ *
+ * ⚠ The frame buffer is a file-scope static, so this is single-pump by construction. That
+ * matches PipeGuard's one-owner rule for g_pipe and the analyzer's one-frame-in-flight
+ * backpressure; a second concurrent caller would corrupt the frame, not merely contend.
+ *
+ * @return the number of faces swapped, or -1 with [lastError] set.
+ */
+JNIEXPORT jint JNICALL
+Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
+                                                jobject jY, jint yRow,
+                                                jobject jU, jint uRow, jint uPix,
+                                                jobject jV, jint vRow, jint vPix,
+                                                jint w, jint h,
+                                                jobject jBitmap, jint dstW, jint dstH) {
+  if (!g_pipe) { g_err = "pipeline not initialised"; return -1; }
+  if (w <= 0 || h <= 0) { g_err = "liveFrame: empty frame"; return -1; }
+
+  // CameraX's ImageProxy planes are direct buffers over the HAL allocation. If any of them
+  // is not, there is nothing to point at and copying would silently reintroduce the cost
+  // this function exists to remove -- so it is an error rather than a fallback.
+  const uint8_t* Y = (const uint8_t*)env->GetDirectBufferAddress(jY);
+  const uint8_t* U = (const uint8_t*)env->GetDirectBufferAddress(jU);
+  const uint8_t* V = (const uint8_t*)env->GetDirectBufferAddress(jV);
+  if (!Y || !U || !V) { g_err = "liveFrame: camera planes are not direct buffers"; return -1; }
+  const size_t nY = (size_t)env->GetDirectBufferCapacity(jY);
+  const size_t nU = (size_t)env->GetDirectBufferCapacity(jU);
+  const size_t nV = (size_t)env->GetDirectBufferCapacity(jV);
+
+  // ONE frame, reused. ffcv::Image owns a vector, so resizing to the same size on every
+  // subsequent frame is a no-op and the 2.7 MB allocation happens once per resolution.
+  static ffcv::Image frame;
+  if (frame.w != w || frame.h != h) frame = ffcv::Image(w, h, 3);
+
+  // Identical arithmetic to yuvToBgr -- the same BT.601 fixed-point coefficients and the
+  // same out-of-range fallbacks -- so the live path and the file path cannot disagree
+  // about colour. Only where the bytes come from and where they go has changed.
+  for (int y = 0; y < h; ++y) {
+    uint8_t* dst = frame.row(y);
+    for (int x = 0; x < w; ++x) {
+      const size_t yi = (size_t)y * yRow + x;
+      const size_t ci = (size_t)(y / 2) * uRow + (size_t)(x / 2) * uPix;
+      const size_t vi = (size_t)(y / 2) * vRow + (size_t)(x / 2) * vPix;
+      const int Yv = (yi < nY ? Y[yi] : 16) - 16;
+      const int Uv = (ci < nU ? U[ci] : 128) - 128;
+      const int Vv = (vi < nV ? V[vi] : 128) - 128;
+      const int c = 298 * Yv;
+      uint8_t* p = dst + (size_t)x * 3;
+      p[0] = clamp8((c + 516 * Uv + 128) >> 8);              // B
+      p[1] = clamp8((c - 100 * Uv - 208 * Vv + 128) >> 8);   // G
+      p[2] = clamp8((c + 409 * Vv + 128) >> 8);              // R
+    }
+  }
+
+  auto faces = g_pipe->analyse(frame);
+  if (!faces.empty()) {
+    if (!g_pipe->swapAll(frame, faces)) { g_err = g_pipe->error(); return -1; }
+    // Its own pass, after the swap, never fused -- see Pipeline::enhance's doc.
+    if (!g_pipe->enhance(frame, faces)) { g_err = g_pipe->error(); return -1; }
+  }
+
+  if (dstW <= 0 || dstH <= 0) { dstW = w; dstH = h; }
+  AndroidBitmapInfo info{};
+  if (AndroidBitmap_getInfo(env, jBitmap, &info) != ANDROID_BITMAP_RESULT_SUCCESS) {
+    g_err = "liveFrame: cannot read the bitmap";
+    return -1;
+  }
+  if (info.format != ANDROID_BITMAP_FORMAT_RGBA_8888 ||
+      (jint)info.width != dstW || (jint)info.height != dstH) {
+    g_err = "liveFrame: bitmap is not an ARGB_8888 of the requested size";
+    return -1;
+  }
+  void* pixels = nullptr;
+  if (AndroidBitmap_lockPixels(env, jBitmap, &pixels) != ANDROID_BITMAP_RESULT_SUCCESS ||
+      !pixels) {
+    g_err = "liveFrame: cannot lock the bitmap";
+    return -1;
+  }
+
+  // The same box downsample bgrToArgb does, written straight into the locked pixels.
+  // ⚠ stride is in BYTES and is not always 4*width -- a Bitmap may be row-padded.
+  const uint8_t* src = frame.data.data();
+  for (int y = 0; y < dstH; ++y) {
+    int sy0 = (int)((int64_t)y * h / dstH), sy1 = (int)((int64_t)(y + 1) * h / dstH);
+    if (sy1 <= sy0) sy1 = sy0 + 1;
+    if (sy1 > h) sy1 = h;
+    uint32_t* orow = (uint32_t*)((uint8_t*)pixels + (size_t)y * info.stride);
+    for (int x = 0; x < dstW; ++x) {
+      int sx0 = (int)((int64_t)x * w / dstW), sx1 = (int)((int64_t)(x + 1) * w / dstW);
+      if (sx1 <= sx0) sx1 = sx0 + 1;
+      if (sx1 > w) sx1 = w;
+      uint32_t B = 0, G = 0, R = 0, n = 0;
+      for (int sy = sy0; sy < sy1; ++sy) {
+        const uint8_t* p = src + ((size_t)sy * w + sx0) * 3;
+        for (int sx = sx0; sx < sx1; ++sx, p += 3) { B += p[0]; G += p[1]; R += p[2]; ++n; }
+      }
+      if (!n) n = 1;
+      // ⚠ RGBA_8888 in AndroidBitmap terms is little-endian ABGR as a uint32: R is the LOW
+      // byte, not the high one. This is the opposite packing from bgrToArgb's IntArray,
+      // whose ints Bitmap.setPixels reads as ARGB -- write that layout here and the preview
+      // comes out with red and blue swapped.
+      orow[x] = 0xFF000000u | ((B / n) << 16) | ((G / n) << 8) | (R / n);
+    }
+  }
+  AndroidBitmap_unlockPixels(env, jBitmap);
+  return (jint)faces.size();
 }
 
 /**

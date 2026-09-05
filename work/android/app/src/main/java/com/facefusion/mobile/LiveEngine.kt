@@ -48,9 +48,7 @@ class LiveEngine {
     // 26.6 on a file, and no amount of reasoning about which stage was to blame beat
     // asking -- the same lesson the geometry buckets taught.
     private var nStat = 0
-    private var msYuv = 0.0
-    private var msSwap = 0.0
-    private var msOut = 0.0
+    private var msPump = 0.0
 
     private var provider: ProcessCameraProvider? = null
     private var exec: ExecutorService? = null
@@ -180,18 +178,6 @@ class LiveEngine {
         fps = 0.0
     }
 
-    // One reusable array per plane. CameraX rotates in place into a fixed buffer pool, so
-    // the sizes are stable after the first frame and this allocates exactly three times.
-    private val planes = arrayOfNulls<ByteArray>(3)
-
-    private fun plane(i: Int, b: java.nio.ByteBuffer): ByteArray {
-        val n = b.remaining()
-        var a = planes[i]
-        if (a == null || a.size != n) { a = ByteArray(n); planes[i] = a }
-        b.get(a)
-        return a
-    }
-
     /**
      * One camera frame, all the way through, on the analyzer thread.
      *
@@ -205,32 +191,11 @@ class LiveEngine {
             val w = img.width
             val h = img.height
             val p = img.planes
-            // The same converter VideoSwapper feeds from MediaCodec: native, stride-aware,
-            // and already carrying the 720p cost this feature is budgeted against. It takes
-            // ByteArrays, so the planes are copied out -- the buffers are reused, and the
-            // arrays are reused too rather than allocating ~1.4 MB per frame here.
-            var t = System.nanoTime()
-            val bgr = NativePipe.yuvToBgr(
-                plane(0, p[0].buffer), p[0].rowStride,
-                plane(1, p[1].buffer), p[1].rowStride, p[1].pixelStride,
-                plane(2, p[2].buffer), p[2].rowStride, p[2].pixelStride,
-                w, h,
-            )
-            msYuv += (System.nanoTime() - t) / 1e6; t = System.nanoTime()
 
-            val faces = NativePipe.processFrame(bgr, w, h)
-            msSwap += (System.nanoTime() - t) / 1e6; t = System.nanoTime()
-            if (faces < 0) {
-                onShot(Shot(null, 0, fps, NativePipe.lastError()))
-                return
-            }
-
-            // DOWNSCALE FOR DISPLAY. bgrToArgb already box-downsamples -- it exists for
-            // exactly this -- and the pane is under 1100 px wide on this phone, so
-            // converting at full sensor resolution and letting the GPU shrink it afterwards
-            // was pure waste: at 2736x2736 the IntArray alone is 30 MB PER FRAME, allocated
-            // and copied, which is why `out` was the most expensive stage of the three.
-            // The swap still runs at full frame resolution; only what is drawn shrinks.
+            // DOWNSCALE FOR DISPLAY. The swap still runs at full frame resolution; only
+            // what is DRAWN shrinks, and the pane is under 1100 px wide on this phone.
+            // Converting at full sensor resolution and letting the GPU shrink it afterwards
+            // was pure waste: at 2736x2736 the pixel buffer alone is 30 MB per frame.
             val scale = maxOf(1, (maxOf(w, h) + kMaxPreview - 1) / kMaxPreview)
             val dw = w / scale
             val dh = h / scale
@@ -240,13 +205,31 @@ class LiveEngine {
                 bmp = Bitmap.createBitmap(dw, dh, Bitmap.Config.ARGB_8888)
                 bufs[bufIx] = bmp
             }
-            bmp.setPixels(NativePipe.bgrToArgb(bgr, w, h, dw, dh), 0, dw, 0, 0, dw, dh)
-            msOut += (System.nanoTime() - t) / 1e6
+
+            // ONE call: planes in, swapped preview written into bmp's own pixels. The four
+            // it replaced spent 23 of Live's 62 ms/frame moving bytes across JNI -- see
+            // liveFrame in ffjni.cpp for what each of them was copying.
+            val t = System.nanoTime()
+            val faces = NativePipe.liveFrame(
+                p[0].buffer, p[0].rowStride,
+                p[1].buffer, p[1].rowStride, p[1].pixelStride,
+                p[2].buffer, p[2].rowStride, p[2].pixelStride,
+                w, h, bmp, dw, dh,
+            )
+            msPump += (System.nanoTime() - t) / 1e6
+            if (faces < 0) {
+                onShot(Shot(null, 0, fps, NativePipe.lastError()))
+                return
+            }
 
             if (++nStat == 30) {
-                android.util.Log.i("fflive", "%dx%d  yuv %.1f  swap %.1f  out %.1f  ms/frame"
-                    .format(w, h, msYuv / 30, msSwap / 30, msOut / 30))
-                nStat = 0; msYuv = 0.0; msSwap = 0.0; msOut = 0.0
+                // One bucket now, because there is one call. The split that found the YUV
+                // and display costs lives in the native stage timers (stageMillis) --
+                // keeping a Kotlin-side breakdown would mean keeping the boundary crossings
+                // that made it worth measuring.
+                android.util.Log.i("fflive", "%dx%d -> %dx%d  pump %.1f ms/frame"
+                    .format(w, h, dw, dh, msPump / 30))
+                nStat = 0; msPump = 0.0
             }
 
             ++windowFrames

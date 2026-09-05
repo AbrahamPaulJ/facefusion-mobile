@@ -276,5 +276,29 @@ object NativePipe {
     @JvmStatic external fun bgrToArgb(bgr: ByteArray, w: Int, h: Int,
                                       dstW: Int, dstH: Int): IntArray
 
+    /**
+     * The whole live pump in one call: camera planes in, swapped preview in [bmp] out.
+     *
+     * Replaces yuvToBgr + processFrame + bgrToArgb + Bitmap.setPixels, which moved ~21 MB
+     * per frame across JNI to compute nothing. The planes are read where CameraX put them
+     * (they must be DIRECT buffers), the pipeline runs against one reusable native frame,
+     * and the downsampled result is written into [bmp]'s own pixels.
+     *
+     * ⚠ [bmp] must be ARGB_8888, exactly [dstW] x [dstH], and NOT the bitmap currently on
+     * screen -- it is written in place. [LiveEngine] alternates two.
+     *
+     * ⚠ Single-pump: the native frame buffer is a static. One caller at a time, which is
+     * what STRATEGY_KEEP_ONLY_LATEST already guarantees.
+     *
+     * @return faces swapped, or -1 with [lastError] set.
+     */
+    @JvmStatic external fun liveFrame(
+        y: java.nio.ByteBuffer, yRow: Int,
+        u: java.nio.ByteBuffer, uRow: Int, uPix: Int,
+        v: java.nio.ByteBuffer, vRow: Int, vPix: Int,
+        w: Int, h: Int,
+        bmp: android.graphics.Bitmap, dstW: Int, dstH: Int,
+    ): Int
+
     @JvmStatic external fun lastError(): String
 }
