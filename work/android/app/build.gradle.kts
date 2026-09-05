@@ -349,7 +349,7 @@ android {
         // must stop calling itself one -- a bug report naming "0.7.0" has to mean the
         // thing on GitHub. Features from here (roadmap 13a, 2b, 12b, 14, 13b) bump
         // the CODE only; the name moves again when 0.8.0 is actually released.
-        versionCode = 67
+        versionCode = 68
         versionName = "0.8.0$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel

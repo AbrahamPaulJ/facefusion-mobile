@@ -267,19 +267,48 @@ class LiveEngine {
      * expectation. Blocking the caller here is the entire point -- "stopped" has to mean
      * the native side is idle, not that it was asked to be.
      */
-    fun stop() {
+    fun stop(onDrained: (() -> Unit)? = null) {
         running = false
         // Unbind FIRST so no further frames are dispatched, then drain what is in flight.
         runCatching { provider?.unbindAll() }
         provider = null
-        exec?.let { e ->
-            e.shutdown()
-            runCatching { e.awaitTermination(2, java.util.concurrent.TimeUnit.SECONDS) }
-        }
+        val e = exec
         exec = null
         bufs[0] = null; bufs[1] = null
         recBuf = null
         fps = 0.0
+        if (e == null) { onDrained?.invoke(); return }
+        e.shutdown()
+
+        // ⚠ THE RETURN VALUE OF awaitTermination IS THE WHOLE POINT, and it was being
+        // discarded. `runCatching { e.awaitTermination(2, SECONDS) }` reports a TIMEOUT as
+        // success, so stop() returned claiming the native side was idle while a frame was
+        // still inside processFrame -- and the caller then released the pipeline under it.
+        // That is the SIGSEGV quoted above, reachable again by a different door.
+        //
+        // The doc said "a frame takes ~60 ms, so the wait is imperceptible; 2 s is a bound,
+        // not an expectation". The premise is not always true: on the ncnn backend a frame
+        // is 240-540 ms, "use my Swap settings" can turn the enhancer on at pixel boost
+        // 1024, and a hot phone is slower again. 2 s is reachable, and when it was reached
+        // nothing said so.
+        val drained = runCatching {
+            e.awaitTermination(2, java.util.concurrent.TimeUnit.SECONDS)
+        }.getOrDefault(false)
+        if (drained) { onDrained?.invoke(); return }
+
+        // It did NOT drain. The caller must not free anything the analyzer thread is still
+        // using, so the teardown is DEFERRED rather than skipped: this thread waits for the
+        // frame to finish and runs it then. Stopping stays instant for the UI, and the
+        // native release happens when it is actually safe.
+        //
+        // PipeGuard is what makes the late release safe against a restart: startLive
+        // acquires it before init, and the caller releases it only inside onDrained, so a
+        // user who presses Start again waits rather than racing.
+        android.util.Log.w("fflive", "pump did not drain in 2 s; deferring teardown")
+        Thread({
+            runCatching { e.awaitTermination(30, java.util.concurrent.TimeUnit.SECONDS) }
+            onDrained?.invoke()
+        }, "live-drain").start()
     }
 
     /**

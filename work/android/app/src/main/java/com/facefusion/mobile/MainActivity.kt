@@ -2367,12 +2367,21 @@ class MainActivity : ComponentActivity() {
         // earlier comment here claimed the ordering was the protection; it is not, and a
         // late frame would have built a second encoder over the same file.
         finishLiveRecording(discard = false)
-        live.stop()
         liveRunning = false
         NativePipe.setTrackPeriod(0)
-        NativePipe.release()
-        PipeGuard.release()
         liveFrame = null; liveFps = 0.0; liveFaces = 0
+        // ⚠ The pipeline is freed by the ENGINE's callback, not here. stop() runs it inline
+        // when the pump drains (the normal case, ~60 ms) and from a watchdog thread when it
+        // does not -- and it is exactly the "does not" case that used to free the pipeline
+        // out from under a frame still inside processFrame. See LiveEngine.stop.
+        //
+        // Order matters: the native release first, PipeGuard second, because startLive
+        // acquires the guard before it inits. Releasing the guard first would let a restart
+        // begin against a pipeline this teardown is about to destroy.
+        live.stop {
+            NativePipe.release()
+            PipeGuard.release()
+        }
     }
 
     private fun runSwap() {
