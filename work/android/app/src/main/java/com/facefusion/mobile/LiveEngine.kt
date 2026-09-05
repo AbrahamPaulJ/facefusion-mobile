@@ -223,12 +223,21 @@ class LiveEngine {
             }
 
             if (++nStat == 30) {
-                // One bucket now, because there is one call. The split that found the YUV
-                // and display costs lives in the native stage timers (stageMillis) --
-                // keeping a Kotlin-side breakdown would mean keeping the boundary crossings
-                // that made it worth measuring.
-                android.util.Log.i("fflive", "%dx%d -> %dx%d  pump %.1f ms/frame"
-                    .format(w, h, dw, dh, msPump / 30))
+                // One bucket, because there is one call -- but one number cannot say
+                // whether a slow window is the swap or the YUV/display work wrapped around
+                // it, and those differ by ~30 ms: a face in frame took this pump from 25 to
+                // 62 ms and the single figure read as a regression either way.
+                //
+                // The native stage timers already carry that split and the app never asked
+                // for them, so pump MINUS the stage sum is what liveFrame's own two scalar
+                // loops cost. Reset per window, so each line is its own 30 frames.
+                // `faces` is this frame's count, not the window's -- an indicator of which
+                // regime the window was in, not a measurement.
+                android.util.Log.i("fflive", "%dx%d -> %dx%d  pump %.1f ms/frame  faces %d"
+                    .format(w, h, dw, dh, msPump / 30, faces))
+                NativePipe.stageMillis().takeIf { it.isNotEmpty() }
+                    ?.let { android.util.Log.i("fflive", "  $it") }
+                NativePipe.resetStats()
                 nStat = 0; msPump = 0.0
             }
 
