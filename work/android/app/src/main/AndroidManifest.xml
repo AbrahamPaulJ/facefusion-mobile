@@ -31,6 +31,25 @@
         android:allowBackup="false">
 
         <!--
+            Receives CAMERA CAPTURES. ACTION_IMAGE_CAPTURE / ACTION_VIDEO_CAPTURE write into
+            a URI we supply, and file:// across that boundary has thrown FileUriExposedException
+            since Android 7.
+
+            ⚠ The authority is derived from ${applicationId}, NOT hardcoded. main and dev are
+            two applicationIds installed side by side, and two providers claiming one
+            authority makes the SECOND install fail outright with INSTALL_FAILED_CONFLICTING_PROVIDER.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!--
             The Hexagon DSP is reached through libcdsprpc.so, a VENDOR library.  It is
             listed in /vendor/etc/public.libraries.txt on this device, so it is linkable in
             principle, but from targetSdk 31 an app must ALSO name it here or the linker

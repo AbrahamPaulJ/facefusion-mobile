@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  What the FileProvider is allowed to hand out, for CAMERA CAPTURE.
+
+  ACTION_IMAGE_CAPTURE and ACTION_VIDEO_CAPTURE write into a URI this app supplies, and a
+  raw file:// URI has been illegal to pass across that boundary since Android 7. So captures
+  land in files/captures/ and the camera app is granted a content:// URI for that one file.
+
+  Scoped to that ONE subdirectory on purpose. `files/` also holds the models and every
+  rendered output; a provider rooted there would let any app this URI leaked to read a
+  275 MB model set or somebody's finished video.
+-->
+<paths>
+    <files-path name="captures" path="captures/" />
+</paths>

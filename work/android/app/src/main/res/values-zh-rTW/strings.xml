@@ -279,4 +279,45 @@
     <string name="gate_error_detail">%1$s（%2$s）</string>
     <string name="gate_blocked_generic">不允許處理成人內容</string>
 
+
+    <!-- ==================== 新增：即時、拍攝、每個處理器的設定 ==================== -->
+    <string name="swap_remove_source">移除來源人臉</string>
+    <string name="status_camera_denied">拍攝照片或影片需要相機權限</string>
+    <string name="swap_capture_photo">拍照</string>
+    <string name="swap_capture_video">錄製影片</string>
+    <string name="swap_proc_settings">%1$s 設定</string>
+    <string name="swap_close">關閉</string>
+    <string name="out_delete">刪除輸出</string>
+    <string name="out_delete_title">刪除這個輸出？</string>
+    <string name="out_delete_body">算好的檔案將從這支手機上刪除。已經儲存到相簿的內容會保留。</string>
+    <string name="opt_fast_video">快速影片</string>
+    <string name="opt_fast_video_hint">兩次人臉偵測之間相隔的影格數。中間的影格改為追蹤人臉而非重新偵測，速度較快，但頭部快速移動時略欠精確。僅用於影片處理 — 預覽一律重新偵測人臉。</string>
+    <string name="opt_fast_video_off">關閉</string>
+    <string name="live_title">即時</string>
+    <string name="live_models_missing">未安裝模型</string>
+    <string name="live_pick_source">選擇來源人臉</string>
+    <string name="live_ready">就緒</string>
+    <string name="live_starting">正在啟動相機…</string>
+    <string name="live_start">開始</string>
+    <string name="live_stop">停止</string>
+    <string name="live_stat">%1$s fps   %2$s</string>
+    <string name="live_faces">%1$d 張人臉</string>
+    <string name="live_no_face">沒有人臉</string>
+    <string name="live_stop_to_change">停止後才能更換來源人臉</string>
+    <string name="live_source_hint">要疊加到即時畫面上的人臉</string>
+    <string name="live_fast_mode">快速模式</string>
+    <string name="live_fast_on">追蹤開啟，增強關閉，256，不同步嘴型</string>
+    <string name="live_fast_off">你自己的替換設定，包括人臉增強</string>
+    <string name="live_fast_confirm_title">關閉快速模式？</string>
+    <string name="live_fast_confirm_body">快速模式是即時畫面能夠流暢的原因。它會強制使用相機跟得上的設定：
+
+• 人臉追蹤開啟 — 每四個影格偵測一次
+• 人臉增強關閉
+• pixel boost 256（不放大）
+• 嘴型同步關閉
+
+關閉後將改用你自己的替換設定。這屬於實驗性功能：1024 的人臉增強會把影格率拉到個位數，而嘴型同步在即時畫面下沒有音訊可跟隨。</string>
+    <string name="live_fast_confirm_ok">關閉</string>
+    <string name="common_cancel">取消</string>
+    <string name="common_delete">刪除</string>
 </resources>

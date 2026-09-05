@@ -276,4 +276,45 @@
     <string name="gate_error_detail">%1$s（%2$s）</string>
     <string name="gate_blocked_generic">不允许处理成人内容</string>
 
+
+    <!-- ==================== 新增：实时、拍摄、每个处理器的设置 ==================== -->
+    <string name="swap_remove_source">移除源人脸</string>
+    <string name="status_camera_denied">拍摄照片或视频需要相机权限</string>
+    <string name="swap_capture_photo">拍照</string>
+    <string name="swap_capture_video">录制视频</string>
+    <string name="swap_proc_settings">%1$s 设置</string>
+    <string name="swap_close">关闭</string>
+    <string name="out_delete">删除输出</string>
+    <string name="out_delete_title">删除这个输出？</string>
+    <string name="out_delete_body">渲染好的文件将从这部手机上删除。已经保存到相册的内容会保留。</string>
+    <string name="opt_fast_video">快速视频</string>
+    <string name="opt_fast_video_hint">两次人脸检测之间相隔的帧数。中间的帧改为跟踪人脸而不是重新检测，速度更快，但头部快速移动时略欠精确。仅用于视频处理 — 预览始终重新检测人脸。</string>
+    <string name="opt_fast_video_off">关闭</string>
+    <string name="live_title">实时</string>
+    <string name="live_models_missing">未安装模型</string>
+    <string name="live_pick_source">选择源人脸</string>
+    <string name="live_ready">就绪</string>
+    <string name="live_starting">正在启动相机…</string>
+    <string name="live_start">开始</string>
+    <string name="live_stop">停止</string>
+    <string name="live_stat">%1$s fps   %2$s</string>
+    <string name="live_faces">%1$d 张人脸</string>
+    <string name="live_no_face">无人脸</string>
+    <string name="live_stop_to_change">停止后才能更换源人脸</string>
+    <string name="live_source_hint">要叠加到实时画面上的人脸</string>
+    <string name="live_fast_mode">快速模式</string>
+    <string name="live_fast_on">跟踪开启，增强关闭，256，不同步口型</string>
+    <string name="live_fast_off">你自己的替换设置，包括人脸增强</string>
+    <string name="live_fast_confirm_title">关闭快速模式？</string>
+    <string name="live_fast_confirm_body">快速模式是实时画面能够流畅的原因。它会强制使用相机跟得上的设置：
+
+• 人脸跟踪开启 — 每四帧检测一次
+• 人脸增强关闭
+• pixel boost 256（不放大）
+• 口型同步关闭
+
+关闭后将改用你自己的替换设置。这属于实验性功能：1024 的人脸增强会把帧率拉到个位数，而口型同步在实时画面下没有音频可跟随。</string>
+    <string name="live_fast_confirm_ok">关闭</string>
+    <string name="common_cancel">取消</string>
+    <string name="common_delete">删除</string>
 </resources>

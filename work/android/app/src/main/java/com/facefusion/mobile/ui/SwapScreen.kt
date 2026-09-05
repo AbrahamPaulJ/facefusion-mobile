@@ -43,6 +43,7 @@ import com.facefusion.mobile.OptionSteps
 import com.facefusion.mobile.SwapOptions
 import java.io.File
 import kotlin.math.roundToInt
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import com.facefusion.mobile.R
 import androidx.compose.material.icons.filled.Check
@@ -154,7 +155,13 @@ fun SwapScreen(
      * screen, and it works before any run has happened.
      */
     onSavePreviewFrame: () -> Unit,
+    onClearSource: () -> Unit,
+    /** Take a still / record a clip with the system camera, as the target. */
+    onCapturePhoto: () -> Unit,
+    onCaptureVideo: () -> Unit,
     onClearTarget: () -> Unit,
+    /** Delete the rendered file. Confirms first -- see the dialog at the end of this file. */
+    onDeleteOutput: () -> Unit,
     onSwap: () -> Unit,
     onCancel: () -> Unit,
     modelsMissing: Boolean,
@@ -185,6 +192,7 @@ fun SwapScreen(
     // needs to know, and which sheet is showing is not that. rememberSaveable so a rotation
     // does not close it mid-adjustment.
     var settingsFor by rememberSaveable { mutableStateOf<String?>(null) }
+    var confirmDeleteOutput by rememberSaveable { mutableStateOf(false) }
     Column(
         modifier
             .fillMaxSize()
@@ -408,7 +416,17 @@ fun SwapScreen(
                 // NOT the shared zoom. The source is a different image from the target, so
                 // panning them together would be a gesture with no meaning.
                 zoom = null,
-            )
+            ) {
+                // Removing the source is not destructive -- it drops a reference to a photo
+                // the user still has -- so unlike the output it does not confirm.
+                if (hasSource && idle) {
+                    IconButton(onClearSource, Modifier.size(28.dp)) {
+                        Icon(Icons.Default.Delete,
+                             stringResource(R.string.swap_remove_source),
+                             Modifier.size(16.dp))
+                    }
+                }
+            }
         }
         // ---------------------------------------------------------------- previews
         //
@@ -445,6 +463,22 @@ fun SwapScreen(
                 actionIcon = if (hasTarget) null else Icons.Default.Add,
                 zoom = zoom,
             ) {
+                // CAMERA, beside the gallery pick, and shown while the pane is EMPTY --
+                // which is when someone deciding what to swap needs it. Two buttons because
+                // a still and a clip take different routes through the system camera, and
+                // one button that then asks which is a tap for a question the icons answer.
+                if (!hasTarget) {
+                    IconButton(onCapturePhoto, enabled = idle, modifier = Modifier.size(36.dp)) {
+                        Icon(painterResource(R.drawable.ic_photo_camera),
+                             stringResource(R.string.swap_capture_photo), Modifier.size(20.dp),
+                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    IconButton(onCaptureVideo, enabled = idle, modifier = Modifier.size(36.dp)) {
+                        Icon(painterResource(R.drawable.ic_videocam),
+                             stringResource(R.string.swap_capture_video), Modifier.size(20.dp),
+                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 if (hasTarget) {
                     // Icons rather than the word "Change": two actions fit where one word
                     // did, and the pane itself is already the picker, so the word was
@@ -671,6 +705,14 @@ fun SwapScreen(
                                shape = RoundedCornerShape(14.dp)) {
                         Text(stringResource(R.string.swap_share))
                     }
+                // Deleting a render IS destructive -- minutes of NPU time, and the file is
+                // gone from the phone -- so this one asks, unlike the source and target
+                // buttons, which only drop a reference to a file the user still has.
+                OutlinedButton({ confirmDeleteOutput = true }, enabled = idle,
+                               shape = RoundedCornerShape(14.dp)) {
+                    Icon(Icons.Default.Delete, stringResource(R.string.out_delete),
+                         Modifier.size(18.dp))
+                }
             }
             if (savedPath != null)
                 Text(
@@ -684,6 +726,24 @@ fun SwapScreen(
         if (log.isNotEmpty()) LogBox(log)
 
         Spacer(Modifier.height(8.dp))
+    }
+
+    if (confirmDeleteOutput) {
+        AlertDialog(
+            onDismissRequest = { confirmDeleteOutput = false },
+            title = { Text(stringResource(R.string.out_delete_title)) },
+            text = { Text(stringResource(R.string.out_delete_body)) },
+            confirmButton = {
+                TextButton({ confirmDeleteOutput = false; onDeleteOutput() }) {
+                    Text(stringResource(R.string.common_delete))
+                }
+            },
+            dismissButton = {
+                TextButton({ confirmDeleteOutput = false }) {
+                    Text(stringResource(R.string.common_cancel))
+                }
+            },
+        )
     }
 
     // ---------------------------------------------------------------- settings sheets

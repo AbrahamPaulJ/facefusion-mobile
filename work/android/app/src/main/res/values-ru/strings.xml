@@ -1,0 +1,304 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Russian. Follows the same rules the English table states:
+
+   * MODEL AND TIER NAMES and FaceFusion's own option vocabulary stay as they are
+     (hyperswap, inswapper, arcface, gpen_bfr_256, v79, "pixel boost"). They are the words
+     upstream's documentation uses, and a translated model name is a name nobody can search
+     for and nothing can be compared against.
+   * The PROCESSOR chips (face_swapper, face_enhancer, lip_syncer) are identifiers, not
+     words. Untranslated on purpose, exactly as in Chinese.
+   * The LOG and the BUG REPORT are not here at all. They are read by whoever fixes the
+     bug, and a translated tier-fallback trace helps no one.
+-->
+<resources>
+
+    <string name="nav_swap">Замена</string>
+    <string name="nav_settings">Настройки</string>
+
+    <string name="swap_source_face">Исходное лицо</string>
+    <string name="swap_source_pick">Выберите исходное лицо</string>
+    <string name="swap_pane_original">Оригинал</string>
+    <string name="swap_pane_target">Цель</string>
+    <string name="swap_pane_original_at">Оригинал  %1$s</string>
+    <string name="swap_pane_swapped">Результат</string>
+    <string name="swap_reading_video">Чтение видео…</string>
+    <string name="swap_seeking">Перемотка…</string>
+    <string name="swap_add_target">Добавьте цель</string>
+    <string name="swap_choose_another_target">Выбрать другую цель</string>
+    <string name="swap_remove_target">Удалить цель</string>
+    <string name="swap_remove_source">Удалить исходное лицо</string>
+    <string name="status_camera_denied">Для съёмки фото или видео нужен доступ к камере</string>
+    <string name="swap_capture_photo">Сделать фото</string>
+    <string name="swap_capture_video">Записать видео</string>
+    <string name="out_delete">Удалить результат</string>
+    <string name="out_delete_title">Удалить этот результат?</string>
+    <string name="out_delete_body">Готовый файл будет удалён с этого телефона. То, что уже сохранено в галерею, останется.</string>
+    <string name="swap_pane_voice">Голос</string>
+    <string name="swap_voice_add">Добавьте аудио для управления губами</string>
+    <string name="swap_voice_picked">Аудио готово</string>
+    <string name="swap_choose_another_voice">Выбрать другой голос</string>
+    <string name="swap_remove_voice">Удалить голос</string>
+    <string name="swap_loading_models">Загрузка моделей, это займёт несколько секунд…</string>
+    <string name="swap_swapping_frame">Замена на этом кадре…</string>
+    <string name="swap_pick_a_source">Выберите исходное лицо</string>
+    <string name="swap_preparing_preview">Подготовка предпросмотра…</string>
+
+    <string name="swap_processors">Процессоры</string>
+    <string name="swap_proc_swapper">face_swapper</string>
+    <string name="swap_proc_enhancer">face_enhancer</string>
+    <string name="swap_proc_lip_syncer">lip_syncer</string>
+    <string name="proc_get_title">Скачать %1$s?</string>
+    <string name="proc_get_body">Этому процессору нужна модель, которой пока нет на телефоне. Она скачается вместе с остальными недостающими.</string>
+    <string name="proc_get_confirm">Скачать</string>
+    <string name="proc_get_cancel">Не сейчас</string>
+
+    <string name="swap_clip">Клип</string>
+    <string name="swap_clip_summary">%1$d кадров из %2$s   %3$d fps</string>
+    <string name="swap_frame_rate">Частота кадров</string>
+    <string name="swap_rate_same">Как в исходнике (%1$d)</string>
+    <string name="swap_rate_hint_every">каждый кадр исходника</string>
+    <string name="swap_rate_hint_drop">отбрасывает кадры до замены, поэтому ещё и быстрее</string>
+
+    <string name="swap_action">Заменить</string>
+    <string name="swap_cancel">Отмена</string>
+    <string name="swap_progress">Кадр %1$d / %2$d   %3$s fps   осталось %4$d с</string>
+    <string name="swap_share_bug_report">Отправить отчёт об ошибке</string>
+    <string name="swap_save_to_gallery">Сохранить в галерею</string>
+    <string name="swap_saved_to_gallery">Сохранено в галерею</string>
+    <string name="swap_share">Поделиться</string>
+
+    <string name="swap_advanced">Дополнительно</string>
+    <string name="swap_defaults">Значения FaceFusion по умолчанию</string>
+    <string name="swap_advanced_summary">вес %1$s   %2$s   размытие %3$s</string>
+    <string name="swap_reset_defaults">Сбросить к значениям по умолчанию</string>
+    <string name="swap_proc_settings">Настройки %1$s</string>
+    <string name="swap_close">Закрыть</string>
+
+    <string name="out_output">Результат</string>
+    <string name="out_output_partial">Результат  (частичный)</string>
+    <string name="out_save_frame">Сохранить кадр</string>
+    <string name="out_play">Воспроизвести</string>
+    <string name="out_pause">Пауза</string>
+    <string name="out_log">Журнал</string>
+    <string name="out_expand">Развернуть</string>
+    <string name="out_collapse">Свернуть</string>
+
+    <string name="dl_models_required">Нужны модели</string>
+    <string name="dl_not_on_device">Моделей лиц пока нет на этом устройстве.</string>
+    <string name="dl_download">Скачать модели</string>
+    <string name="dl_retry">Повторить загрузку</string>
+    <string name="dl_progress">%1$d / %2$d МБ   файл %3$d из %4$d</string>
+    <string name="dl_metered_title">Скачать через мобильный интернет?</string>
+    <string name="dl_metered_body">Модели весят около 275 МБ. Похоже, соединение с ограничением трафика, поэтому загрузка может израсходовать ваш пакет данных.</string>
+    <string name="dl_metered_confirm">Всё равно скачать</string>
+    <string name="dl_metered_wait">Подождать Wi‑Fi</string>
+
+    <string name="opt_face_swapper">Замена лица</string>
+    <string name="opt_swapper_summary">вес %1$s   %2$s   %3$s</string>
+    <string name="opt_weight">Вес</string>
+    <string name="opt_weight_hint_high">исходное лицо усилено, собственная личность цели вычтена</string>
+    <string name="opt_weight_hint_low">часть собственной личности цели сохранена</string>
+    <string name="opt_weight_hint_default">эмбеддинг исходника без изменений (по умолчанию)</string>
+    <string name="opt_pixel_boost">Pixel boost</string>
+    <string name="opt_pixel_boost_native">собственный размер модели</string>
+    <string name="opt_pixel_boost_cost">в %1$d раз дороже на лицо — нормально для фото, медленно для видео</string>
+    <string name="opt_model">Модель</string>
+    <string name="opt_model_hint">hyperswap — 256², inswapper — 128² и медленнее</string>
+    <string name="opt_face_masker">Маска лица</string>
+    <string name="opt_masker_summary">размытие %1$s   отступ %2$s</string>
+    <string name="opt_blur">Размытие</string>
+    <string name="opt_blur_hint">насколько мягкий край у заменённой области</string>
+    <string name="opt_padding">Отступ</string>
+    <string name="opt_padding_hint">уменьшает заменяемую область, оставляя больше оригинала</string>
+    <string name="opt_padding_per_edge">Отступ по краям</string>
+    <string name="opt_edge_top">Сверху</string>
+    <string name="opt_edge_right">Справа</string>
+    <string name="opt_edge_bottom">Снизу</string>
+    <string name="opt_edge_left">Слева</string>
+    <string name="opt_face_detector">Детектор лиц</string>
+    <string name="opt_detector_summary">порог %1$s   лендмарки %2$s   %3$s</string>
+    <string name="opt_find_faces">Поиск лиц</string>
+    <string name="opt_find_faces_hint">выше: заменяются только чёткие, очевидные лица. ниже: приложение старается сильнее на мелких или повёрнутых</string>
+    <string name="opt_face_alignment">Выравнивание лица</string>
+    <string name="opt_face_alignment_hint">насколько приложение должно быть уверено в точной форме лица, прежде чем его использовать. поднимите, если замена выглядит растянутой или кривой</string>
+    <string name="opt_faces">Лица</string>
+    <string name="opt_faces_every">Все лица</string>
+    <string name="opt_faces_largest">Только самое крупное</string>
+    <string name="opt_faces_every_short">все лица</string>
+    <string name="opt_faces_largest_short">самое крупное лицо</string>
+    <string name="opt_faces_hint">заменять все лица в кадре или только самое крупное</string>
+    <string name="opt_fast_video">Быстрое видео</string>
+    <string name="opt_fast_video_hint">Сколько кадров между обнаружениями лица. В промежутке лицо отслеживается, а не ищется заново: быстрее, но чуть менее точно при быстрых движениях головы. Работает только для видео — в предпросмотре лицо ищется всегда.</string>
+    <string name="opt_fast_video_off">Выкл.</string>
+    <string name="opt_detector_note">размер детектора зафиксирован на 640, а свопера на 256 — оба вшиты в бинарники NPU</string>
+    <string name="opt_face_enhancer">Улучшение лица</string>
+    <string name="opt_enhancer_summary">gpen_bfr_256   смешивание %1$s</string>
+    <string name="opt_enhancer_off_summary">выкл.</string>
+    <string name="opt_blend">Смешивание</string>
+    <string name="opt_blend_hint_full">только результат улучшения</string>
+    <string name="opt_blend_hint_none">без эффекта — замена остаётся нетронутой</string>
+    <string name="opt_blend_hint_mixed">смешано с неулучшенной заменой (по умолчанию 0,80)</string>
+    <string name="opt_enhancer_note">работает на заменённом лице в %1$s, до вставки обратно</string>
+    <string name="opt_lip_sync_weight_hint">насколько сильно аудио управляет ртом (по умолчанию 0,50)</string>
+
+    <string name="set_models">Модели</string>
+    <string name="set_models_summary">%1$d из %2$d на месте, %3$s на диске</string>
+    <string name="set_models_updates">, доступно обновлений: %1$d</string>
+    <string name="set_update_available">доступно обновление</string>
+    <string name="set_not_installed">не установлено</string>
+    <string name="set_required_suffix">(обязательно)</string>
+    <string name="set_update">Обновить</string>
+    <string name="set_updating">Обновление</string>
+    <string name="set_delete">Удалить</string>
+    <string name="set_download">Скачать</string>
+    <string name="set_downloading">Загрузка</string>
+    <string name="set_delete_title">Удалить %1$s?</string>
+    <string name="set_delete_body">%1$s занимает %2$s. Удаление освободит это место; приложение сможет скачать модель снова при следующей замене.</string>
+    <string name="set_delete_required_warning">\n\nЗамена не будет работать, пока модель не вернётся.</string>
+    <string name="set_cancel">Отмена</string>
+
+    <string name="model_detector">Детектор лиц</string>
+    <string name="model_landmarker">Детектор лендмарок</string>
+    <string name="model_recogniser">Распознаватель лиц</string>
+    <string name="model_swapper">Замена лица</string>
+    <string name="model_swapper_alt">Замена лица (альтернативная)</string>
+    <string name="model_content_checker">Проверка контента</string>
+    <string name="model_content_checker_quantised">Проверка контента (квантованная)</string>
+    <string name="model_enhancer">Улучшение лица</string>
+    <string name="model_lip_syncer">Синхронизация губ</string>
+    <string name="model_lip_syncer_256">Синхронизация губ 256</string>
+    <string name="model_landmark_refiner">Уточнение лендмарок</string>
+
+    <string name="set_models_npu">Модели NPU (%1$s)</string>
+    <string name="set_models_gpu">Модели GPU + CPU</string>
+    <string name="set_models_inactive_note">Сейчас на этом телефоне не используются. Оставлены, чтобы их можно было удалить или снова задействовать при смене среды выполнения.</string>
+    <string name="set_models_none">ничего не установлено</string>
+    <string name="set_this_device">Это устройство</string>
+    <string name="set_runtime">Среда выполнения</string>
+    <string name="set_runtime_npu">Hexagon NPU</string>
+    <string name="set_runtime_gpu_cpu">GPU (Vulkan) + CPU</string>
+    <string name="set_runtime_cpu">CPU</string>
+    <string name="set_runtime_none">ничего не запустилось</string>
+    <string name="set_unknown_dash">-</string>
+    <string name="set_ncnn_note">На этом устройстве нет NPU Qualcomm, поэтому замена выполняется на GPU и CPU: ожидайте примерно в 13 раз больше времени на кадр. Улучшение лица и проверка контента здесь всегда идут на CPU — на GPU они дают измеримо неверный результат, а не просто работают медленнее.</string>
+    <string name="set_htp_unmeasured">HTP не удалось измерить. Приложение откатывается к самой нетребовательной сборке, так что это не обязательно означает, что запуск не удастся.</string>
+    <string name="set_hexagon_arch">Архитектура Hexagon</string>
+    <string name="set_vtcm">VTCM</string>
+    <string name="set_soc_model">Модель SoC</string>
+    <string name="set_fp16">Выполнение fp16</string>
+    <string name="set_fp16_yes">поддерживается</string>
+    <string name="set_fp16_no">не поддерживается</string>
+    <string name="set_fp16_unknown">не удалось измерить</string>
+    <string name="set_context_binaries">Контекстные бинарники</string>
+    <string name="set_supported_devices">Поддерживаемые устройства</string>
+    <string name="set_in_use">используется</string>
+    <string name="set_runtime_override_note">В этом телефоне есть Hexagon NPU, и он используется. Принудительный путь GPU/CPU показывает, как работает устройство не на Qualcomm — ему нужен собственный набор моделей, и он значительно медленнее.</string>
+    <string name="set_runtime_pinned_note">Среда выполнения закреплена вручную, а не выбрана для этого телефона. «Автоматически» вернёт всё как было: NPU там, где он есть, GPU и CPU там, где его нет.</string>
+    <string name="set_runtime_auto">Автоматически</string>
+    <string name="set_runtime_force_npu">NPU</string>
+    <string name="set_runtime_force_gpu">GPU + CPU</string>
+    <string name="set_runtime_forced">Принудительно: %1$s. Это средство для тестирования: оно перезапускает конвейер, а модели другой среды выполнения — отдельная загрузка.</string>
+
+    <string name="set_remote_api">Удалённый API</string>
+    <string name="set_api_title">Использовать с компьютера</string>
+    <string name="set_api_body">Включите это и откройте адрес ниже в браузере на компьютере. Всё по-прежнему выполняется на этом телефоне.</string>
+    <string name="set_api_lan_title">Разрешить подключение другим устройствам</string>
+    <string name="set_api_lan_on">Включено. Любой, кто может достучаться до этого телефона в вашей сети, может открыть страницу и менять лица.</string>
+    <string name="set_api_lan_on_pending">Включено. Пока никто не слушает — заработает, когда вы включите сервер выше.</string>
+    <string name="set_api_lan_off">Выключено. Только этот телефон или компьютер, подключённый по USB.</string>
+    <string name="set_api_open_this">Откройте это</string>
+    <string name="set_api_over_usb">Или по USB</string>
+    <string name="set_api_failed">Не удалось запустить: %1$s</string>
+
+    <string name="set_about">О приложении</string>
+    <string name="set_about_body">Это приложение — офлайн-порт стандартного пути замены лиц FaceFusion на Qualcomm Hexagon NPU. Конвейер, модели, названия параметров, значения по умолчанию и диапазоны — всё из FaceFusion.</string>
+    <string name="set_about_author">Создано Henry Ruhs.</string>
+    <string name="set_link_project">Этот проект на GitHub</string>
+    <string name="set_link_upstream">FaceFusion (оригинал) на GitHub</string>
+    <string name="set_link_licence">Лицензия оригинала (OpenRAIL-AS)</string>
+    <string name="set_licence_note">Лицензии моделей различаются и не все разрешительные: yoloface_8n — GPL-3.0, arcface_w600k_r50 и inswapper_128 — некоммерческие, а hyperswap_1a_256 — ResearchRAIL.</string>
+
+    <string name="tier_v68">Snapdragon 888 и старее (v68), 8 Gen 1 (v69) или любой чип с VTCM меньше 8 МБ</string>
+    <string name="tier_v73">8 Gen 2 (v73), 8 Gen 3 (v75) и чипы v79, кроме SM8750</string>
+    <string name="tier_v79">Snapdragon 8 Elite (SM8750)</string>
+    <string name="tier_v81">Snapdragon 8 Elite Gen 5 (v81) и новее</string>
+
+    <string name="notif_channel_name">Загрузка моделей</string>
+    <string name="notif_channel_desc">Ход загрузки моделей NPU</string>
+    <string name="notif_title_downloading">Загрузка моделей</string>
+    <string name="notif_title_ready">Модели готовы</string>
+    <string name="notif_title_failed">Загрузка не удалась</string>
+    <string name="notif_preparing">Подготовка…</string>
+    <string name="notif_progress">%1$s  (%2$d / %3$d МБ)</string>
+    <string name="notif_file_of">Файл %1$d из %2$d</string>
+    <string name="notif_cancel">Отмена</string>
+    <string name="notif_ready_text">Модели лиц загружены на это устройство.</string>
+
+    <string name="set_bug_report">Отчёт об ошибке</string>
+    <string name="set_bug_report_body">Отправляет версию приложения, ваше устройство, список установленных моделей и журнал запуска. Ни фото, ни видео; и ничего никуда не отправляется, пока вы не выберете приложение для отправки.</string>
+    <string name="set_bug_report_button">Отправить отчёт об ошибке</string>
+    <string name="status_share_failed">Не удалось отправить отчёт: %1$s</string>
+
+    <string name="status_source_set">Исходное лицо выбрано</string>
+    <string name="status_cancelling">Отмена…</string>
+    <string name="status_cancelled">Отменено</string>
+    <string name="status_loading_models">Загрузка моделей…</string>
+    <string name="status_reading_source">Чтение исходного лица…</string>
+    <string name="status_content_check">проверка контента…</string>
+    <string name="status_swapping">Замена…</string>
+    <string name="status_done">Готово - %1$d КБ</string>
+    <string name="status_failed">Ошибка: %1$s</string>
+    <string name="status_target_ready_video">Цель готова: %1$d x %2$d, %3$s</string>
+    <string name="status_voice_ready">Аудио голоса готово (%1$s)</string>
+    <string name="status_voice_no_audio">в этом файле нет звуковой дорожки</string>
+    <string name="status_cannot_read_audio">Не удалось прочитать аудио: %1$s</string>
+    <string name="status_target_ready_image">Цель готова: %1$d x %2$d</string>
+    <string name="status_cannot_read_video">Не удалось прочитать видео: %1$s</string>
+    <string name="status_cannot_read_image">Не удалось прочитать изображение</string>
+    <string name="status_saved_movies">Сохранено в Movies/FaceFusion</string>
+    <string name="status_saved_pictures">Сохранено в Pictures/FaceFusion</string>
+    <string name="toast_saved_to">Сохранено в %1$s</string>
+    <string name="toast_models_ready">Модели готовы</string>
+    <string name="status_frame_saved">Кадр сохранён в Pictures/FaceFusion</string>
+    <string name="status_save_failed">Не удалось сохранить: %1$s</string>
+    <string name="status_save_frame_failed">Не удалось сохранить кадр: %1$s</string>
+    <string name="status_save_first">Сначала сохраните в галерею, затем поделитесь</string>
+    <string name="status_api_busy">Удалённый API сейчас использует NPU</string>
+    <string name="status_no_face">В этом кадре лицо не найдено</string>
+    <string name="status_cannot_read_frame">Не удалось прочитать этот кадр</string>
+    <string name="status_cannot_read_source">Не удалось прочитать исходное изображение</string>
+    <string name="share_swapped_image">Поделиться изображением</string>
+    <string name="share_swapped_video">Поделиться видео</string>
+
+    <string name="gate_subject_source_image">исходном изображении</string>
+    <string name="gate_subject_target_image">целевом изображении</string>
+    <string name="gate_subject_target_video">целевом видео</string>
+    <string name="gate_subject_this_frame">этом кадре</string>
+    <string name="gate_blocked">Откровенный контент не допускается в %1$s</string>
+    <string name="gate_error">Проверку контента не удалось выполнить на %1$s, поэтому обработка невозможна</string>
+    <string name="gate_error_detail">%1$s (%2$s)</string>
+    <string name="gate_blocked_generic">Откровенный контент не допускается</string>
+
+    <string name="live_title">Live</string>
+    <string name="live_models_missing">Модели не установлены</string>
+    <string name="live_pick_source">Выберите исходное лицо</string>
+    <string name="live_ready">Готово</string>
+    <string name="live_starting">Запуск камеры…</string>
+    <string name="live_start">Пуск</string>
+    <string name="live_stop">Стоп</string>
+    <string name="live_stat">%1$s fps   %2$s</string>
+    <string name="live_faces">лиц: %1$d</string>
+    <string name="live_no_face">нет лица</string>
+    <string name="live_stop_to_change">Остановите, чтобы сменить исходное лицо</string>
+    <string name="live_source_hint">Лицо, которое накладывается НА живое видео</string>
+    <string name="live_fast_mode">Быстрый режим</string>
+    <string name="live_fast_on">Отслеживание вкл., улучшение выкл., 256, без синхронизации губ</string>
+    <string name="live_fast_off">Ваши настройки замены, включая улучшение лица</string>
+    <string name="live_fast_confirm_title">Выключить быстрый режим?</string>
+    <string name="live_fast_confirm_body">Быстрый режим — это то, что делает живое видео смотрибельным. Он принудительно задаёт настройки, за которыми камера успевает:\n\n• отслеживание лица ВКЛ. — детектор работает на каждом четвёртом кадре\n• улучшение лица ВЫКЛ.\n• pixel boost 256 (без увеличения)\n• синхронизация губ ВЫКЛ.\n\nЕсли выключить, будут применяться ваши собственные настройки замены. Это экспериментально: улучшение лица на 1024 может опустить частоту кадров до однозначных значений, а синхронизации губ вживую нечего отслеживать — аудио нет.</string>
+    <string name="live_fast_confirm_ok">Выключить</string>
+    <string name="common_cancel">Отмена</string>
+    <string name="common_delete">Удалить</string>
+
+</resources>

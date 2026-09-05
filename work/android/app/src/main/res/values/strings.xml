@@ -47,6 +47,14 @@
     <string name="swap_add_target">Add a target</string>
     <string name="swap_choose_another_target">Choose another target</string>
     <string name="swap_remove_target">Remove target</string>
+    <string name="swap_remove_source">Remove source face</string>
+    <string name="status_camera_denied">Camera permission is needed to take a photo or video</string>
+    <string name="swap_capture_photo">Take a photo</string>
+    <string name="swap_capture_video">Record a video</string>
+    <!-- Deleting a finished render is not undoable, so unlike the inputs it confirms. -->
+    <string name="out_delete">Delete output</string>
+    <string name="out_delete_title">Delete this output?</string>
+    <string name="out_delete_body">The rendered file is deleted from this phone. Anything already saved to your gallery is kept.</string>
     <!-- The lip syncer's driving audio, shown only while Lip Sync is on. Deliberately not
          called "Source", which is the identity image: a different input entirely. -->
     <string name="swap_pane_voice">Voice</string>
@@ -361,4 +369,36 @@
     <string name="gate_error_detail">%1$s (%2$s)</string>
     <string name="gate_blocked_generic">Explicit content not allowed</string>
 
+
+    <!-- ==================== Live ====================
+         Was hardcoded English inside LiveScreen.kt, which meant the tab could not be
+         translated at all. -->
+    <string name="live_title">Live</string>
+    <string name="live_models_missing">Models not installed</string>
+    <string name="live_pick_source">Pick a source face</string>
+    <string name="live_ready">Ready</string>
+    <string name="live_starting">Starting camera…</string>
+    <string name="live_start">Start</string>
+    <string name="live_stop">Stop</string>
+    <!-- %1$s frames per second, %2$s the face count phrase below -->
+    <string name="live_stat">%1$s fps   %2$s</string>
+    <string name="live_faces">%1$d face(s)</string>
+    <string name="live_no_face">no face</string>
+    <string name="live_stop_to_change">Stop to change the source</string>
+    <string name="live_source_hint">The face to swap ONTO the live feed</string>
+    <string name="live_fast_mode">Fast mode</string>
+    <string name="live_fast_on">Tracking on, enhancer off, 256, no lip sync</string>
+    <string name="live_fast_off">Your Swap settings, including the enhancer</string>
+    <string name="live_fast_confirm_title">Turn off Fast mode?</string>
+    <string name="live_fast_confirm_body">Fast mode is what makes the live feed watchable. It forces the settings a camera can keep up with:
+
+• face tracking ON — the detector runs on one frame in four
+• face enhancer OFF
+• pixel boost 256 (no upscale)
+• lip sync OFF
+
+Turning it off runs your own Swap settings instead. This is experimental: the enhancer at 1024 can take the feed into single-figure frame rates, and lip sync has no audio to follow live.</string>
+    <string name="live_fast_confirm_ok">Turn it off</string>
+    <string name="common_cancel">Cancel</string>
+    <string name="common_delete">Delete</string>
 </resources>

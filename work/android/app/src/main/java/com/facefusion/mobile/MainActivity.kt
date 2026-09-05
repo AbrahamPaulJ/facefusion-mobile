@@ -283,6 +283,62 @@ class MainActivity : ComponentActivity() {
             previewOptionsChanged()
         }
     }
+    /**
+     * Where the system camera is writing, between launching it and its result arriving.
+     *
+     * The contracts report only success/failure -- the URI is the one WE supplied, so it
+     * has to survive the round trip here. Cleared on the way out either way, so a cancelled
+     * capture cannot be mistaken for the next one.
+     */
+    private var pendingCapture: Uri? = null
+
+    /** A content:// URI for a new file under files/captures, via the manifest's provider. */
+    private fun newCaptureUri(ext: String): Uri {
+        val dir = File(filesDir, "captures").apply { mkdirs() }
+        val f = File(dir, "cap_${System.currentTimeMillis()}.$ext")
+        return androidx.core.content.FileProvider.getUriForFile(
+            this, "$packageName.fileprovider", f)
+    }
+
+    private val takePhoto = registerForActivityResult(
+        ActivityResultContracts.TakePicture()) { ok ->
+        val uri = pendingCapture; pendingCapture = null
+        if (ok && uri != null) loadTarget(uri)
+    }
+    private val recordVideo = registerForActivityResult(
+        ActivityResultContracts.CaptureVideo()) { ok ->
+        val uri = pendingCapture; pendingCapture = null
+        if (ok && uri != null) loadTarget(uri)
+    }
+
+    /**
+     * Launch the system camera for a target.
+     *
+     * ⚠ The CAMERA permission is REQUESTED first even though the system camera app is what
+     * actually opens the lens. An app that DECLARES android.permission.CAMERA -- which this
+     * one does, for the Live tab -- must also hold it before ACTION_IMAGE_CAPTURE will
+     * start, or the intent fails. An app that never declared it would need no such thing,
+     * which is why this looks unnecessary and is not.
+     */
+    private fun capture(video: Boolean) {
+        if (checkSelfPermission(android.Manifest.permission.CAMERA) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            pendingCaptureIsVideo = video
+            askCameraForCapture.launch(android.Manifest.permission.CAMERA)
+            return
+        }
+        val uri = newCaptureUri(if (video) "mp4" else "jpg")
+        pendingCapture = uri
+        if (video) recordVideo.launch(uri) else takePhoto.launch(uri)
+    }
+
+    private var pendingCaptureIsVideo = false
+    private val askCameraForCapture = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) capture(pendingCaptureIsVideo)
+        else status = getString(R.string.status_camera_denied)
+    }
+
     // OpenDocument rather than GetContent: GetContent takes ONE mime filter, and the
     // target can now be a video or a still.
     private val pickTarget = registerForActivityResult(
@@ -645,7 +701,11 @@ class MainActivity : ComponentActivity() {
                                 onPickTarget = {
                                     pickTarget.launch(arrayOf("video/*", "image/*"))
                                 },
+                                onClearSource = ::clearSource,
+                                onCapturePhoto = { capture(video = false) },
+                                onCaptureVideo = { capture(video = true) },
                                 onClearTarget = ::clearTarget,
+                                onDeleteOutput = ::discardOutput,
                                 hasVoice = voiceFile != null,
                                 voiceName = voiceName,
                                 onPickVoice = { pickVoice.launch(arrayOf("audio/*", "video/*")) },
@@ -669,6 +729,7 @@ class MainActivity : ComponentActivity() {
                             Screen.Live -> LiveScreen(
                                 sourceThumb = sourceThumb,
                                 onPickSource = { pickSource.launch("image/*") },
+                                onClearSource = ::clearSource,
                                 frame = liveFrame,
                                 running = liveRunning,
                                 onToggleRun = { toggleLive() },
@@ -1624,6 +1685,20 @@ class MainActivity : ComponentActivity() {
      * The file is still not leaked: it goes when a new target is picked, when the next run
      * starts, or in [sweepOrphanedOutputs] on the next launch. At most one can be waiting.
      */
+    /**
+     * Drop the source face.
+     *
+     * The warm pipeline is holding this face's EMBEDDING, so the preview has to be
+     * invalidated for exactly the reason picking a different source does: otherwise the
+     * swapped pane keeps showing a face the user has just removed.
+     */
+    private fun clearSource() {
+        sourceUri = null
+        sourceThumb = null
+        status = ""
+        previewOptionsChanged()
+    }
+
     private fun clearTarget() {
         previews.closeTarget()
         targetFile = null
