@@ -44,6 +44,14 @@ class LiveEngine {
     /** One frame's worth of result, handed to the UI. */
     data class Shot(val bitmap: Bitmap?, val faces: Int, val fps: Double, val error: String?)
 
+    // Per-stage cost, logged every 30 frames. Live was 6.5 fps on its first run against
+    // 26.6 on a file, and no amount of reasoning about which stage was to blame beat
+    // asking -- the same lesson the geometry buckets taught.
+    private var nStat = 0
+    private var msYuv = 0.0
+    private var msSwap = 0.0
+    private var msOut = 0.0
+
     private var provider: ProcessCameraProvider? = null
     private var exec: ExecutorService? = null
 
@@ -153,14 +161,17 @@ class LiveEngine {
             // and already carrying the 720p cost this feature is budgeted against. It takes
             // ByteArrays, so the planes are copied out -- the buffers are reused, and the
             // arrays are reused too rather than allocating ~1.4 MB per frame here.
+            var t = System.nanoTime()
             val bgr = NativePipe.yuvToBgr(
                 plane(0, p[0].buffer), p[0].rowStride,
                 plane(1, p[1].buffer), p[1].rowStride, p[1].pixelStride,
                 plane(2, p[2].buffer), p[2].rowStride, p[2].pixelStride,
                 w, h,
             )
+            msYuv += (System.nanoTime() - t) / 1e6; t = System.nanoTime()
 
             val faces = NativePipe.processFrame(bgr, w, h)
+            msSwap += (System.nanoTime() - t) / 1e6; t = System.nanoTime()
             if (faces < 0) {
                 onShot(Shot(null, 0, fps, NativePipe.lastError()))
                 return
@@ -173,6 +184,13 @@ class LiveEngine {
                 bufs[bufIx] = bmp
             }
             bmp.setPixels(NativePipe.bgrToArgb(bgr, w, h, w, h), 0, w, 0, 0, w, h)
+            msOut += (System.nanoTime() - t) / 1e6
+
+            if (++nStat == 30) {
+                android.util.Log.i("fflive", "%dx%d  yuv %.1f  swap %.1f  out %.1f  ms/frame"
+                    .format(w, h, msYuv / 30, msSwap / 30, msOut / 30))
+                nStat = 0; msYuv = 0.0; msSwap = 0.0; msOut = 0.0
+            }
 
             ++windowFrames
             val now = System.nanoTime()

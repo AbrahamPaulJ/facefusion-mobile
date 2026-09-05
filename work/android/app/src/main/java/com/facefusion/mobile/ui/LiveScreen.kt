@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -38,9 +40,13 @@ fun LiveScreen(
     note: String?,
     modelsReady: Boolean,
 ) {
+    // SCROLLS. Without this the controls below the feed are simply clipped: the first build
+    // put the "Use my Swap settings" switch behind the navigation bar, where the only clue
+    // it existed was a few pixels of its track poking out under the Start button.
     Column(
         Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -51,7 +57,10 @@ fun LiveScreen(
         Box(
             Modifier
                 .fillMaxWidth()
-                .aspectRatio(4f / 5f)
+                // The FRAME's own ratio once one has arrived, so the feed fills the pane
+                // instead of sitting in grey bands. 3:4 until then, which is roughly what
+                // a front camera returns and stops the pane resizing under the first frame.
+                .aspectRatio(frame?.let { it.width.toFloat() / it.height } ?: (3f / 4f))
                 .clip(RoundedCornerShape(12.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center,

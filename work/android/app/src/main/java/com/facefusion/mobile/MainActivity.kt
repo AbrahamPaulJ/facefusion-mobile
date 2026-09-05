@@ -150,6 +150,11 @@ class MainActivity : ComponentActivity() {
     private var liveFps by mutableStateOf(0.0)
     private var liveFaces by mutableStateOf(0)
     private var liveNote by mutableStateOf<String?>(null)
+    // ⚠ Compose state, NOT live.isRunning. A plain field on the engine is invisible to
+    // recomposition, so the first build showed a running feed under a button still saying
+    // "Start" -- the pixels updated because the bitmap reference changed and nothing else
+    // did.
+    private var liveRunning by mutableStateOf(false)
     // Off = the forced fast preset. Kept out of SwapOptions on purpose: it is a property of
     // this screen, not of a swap, and persisting it would let a Live choice change what a
     // file run does.
@@ -653,7 +658,7 @@ class MainActivity : ComponentActivity() {
                                 sourceThumb = sourceThumb,
                                 onPickSource = { pickSource.launch("image/*") },
                                 frame = liveFrame,
-                                running = live.isRunning,
+                                running = liveRunning,
                                 onToggleRun = { toggleLive() },
                                 fps = liveFps,
                                 faces = liveFaces,
@@ -1639,7 +1644,7 @@ class MainActivity : ComponentActivity() {
      * processFrame on one global is exactly what that guard exists to prevent.
      */
     private fun toggleLive() {
-        if (live.isRunning) { stopLive(); return }
+        if (liveRunning) { stopLive(); return }
         liveNote = null
         if (checkSelfPermission(android.Manifest.permission.CAMERA) !=
             android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -1684,6 +1689,7 @@ class MainActivity : ComponentActivity() {
                 liveNote = "cannot start: ${NativePipe.lastError()}"
                 NativePipe.release(); PipeGuard.release(); return@launch
             }
+            liveRunning = true
             live.start(this@MainActivity, this@MainActivity) { shot ->
                 // The analyzer thread hands the result straight to Compose state, which is
                 // safe for snapshot state and avoids a per-frame main-thread post.
@@ -1699,6 +1705,7 @@ class MainActivity : ComponentActivity() {
 
     private fun stopLive() {
         live.stop()
+        liveRunning = false
         NativePipe.setTrackPeriod(0)
         NativePipe.release()
         PipeGuard.release()
