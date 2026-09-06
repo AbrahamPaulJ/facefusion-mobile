@@ -150,16 +150,29 @@ struct Pipeline::Impl {
     int source = 0;
     bool pinned = false;
     int missed = 0;   // consecutive frames without an association; drops when large
+    int id = 0;       // stable identity across erases/reorders (see selectedId)
   };
   std::vector<TrackedFace> tracked;
+  int nextTrackedId = 1;
+  // The SELECTED person (assign mode): the last one tapped. They follow the source
+  // chip until an empty tap deselects them. Stored by id, not index: tracked entries
+  // are erased and reordered every frame, so an index would go stale; the id lookup
+  // simply fails (deselects) when the person is no longer tracked.
+  int selectedId = -1;
   // The per-face source decision for the CURRENT frame, filled by updateLiveTracking
   // and read by swapAll when assignEnabled. Same length as the faces vector it was
   // built for; swapAll falls back to the active slot when the lengths disagree (no
   // tracking ran for this frame).
   std::vector<int> frameSources;
+  // The source every UNPINNED face keeps while assign mode is on. Captured when the
+  // mode is turned on, so flipping the chip afterwards changes nothing on the feed --
+  // in assign mode the chip is a BRUSH: only tapping a face applies it. Without the
+  // freeze, every untapped face switched source the moment the user changed the chip,
+  // which is not what the mode is for.
+  int assignDefaultSource = 0;
   // Live's per-person assignment switch. OFF is the default behaviour (active slot for
-  // every face); ON lets a pinned face keep its own source, and a session with no
-  // assignments yet behaves exactly as OFF.
+  // every face); ON lets a pinned face keep its own source, and untapped faces keep
+  // [assignDefaultSource] until a tap pins them.
   bool assignEnabled = false;
   // The TARGET face to swap, when the user has pointed at one. Normalised, because that is
   // what upstream's distance is defined over. Not in Config -- see setReferenceFaceAt.
@@ -942,7 +955,7 @@ bool Pipeline::setSource(const ffcv::Image& img) {
   p_->sourceSlots.push_back(slot);
   p_->activeSource = 0;
   p_->faceAssignments.clear();
-  p_->tracked.clear(); p_->frameSources.clear();
+  p_->tracked.clear(); p_->frameSources.clear(); p_->selectedId = -1;
   p_->haveSource = true;
   // the source frame's own analysis is bookkeeping, not output
   framesDone = 0; facesDone = 0;
@@ -982,12 +995,40 @@ int Pipeline::addSource(const ffcv::Image& img) {
 
 void Pipeline::clearSourceSlots() {
   p_->sourceSlots.clear(); p_->faceAssignments.clear();
-  p_->tracked.clear(); p_->frameSources.clear();
+  p_->tracked.clear(); p_->frameSources.clear(); p_->selectedId = -1;
   p_->haveSource = false;
 }
 
+// Forward: defined below with the other distance helpers; setActiveSource needs it to
+// dedupe the selected person's assignment.
+static float faceDistance(const float* a, const float* b);
+
 void Pipeline::setActiveSource(int index) {
-  if (index >= 0 && index < (int)p_->sourceSlots.size()) p_->activeSource = index;
+  if (index < 0 || index >= (int)p_->sourceSlots.size()) return;
+  p_->activeSource = index;
+  // The SELECTED person follows the chip: re-applying here is the select-then-choose
+  // flow (and makes the reverse tap order work -- tap the person first, then pick the
+  // source from the chips). Nobody selected: the chip only matters for the NEXT tap.
+  if (p_->assignEnabled && p_->selectedId >= 0) {
+    for (auto& t : p_->tracked) {
+      if (t.id == p_->selectedId) {
+        t.source = index; t.pinned = true; t.missed = 0;
+        // One assignment per person, newest wins -- see updateLiveTracking's pin.
+        const float kSamePerson = 0.15f;
+        p_->faceAssignments.erase(
+            std::remove_if(p_->faceAssignments.begin(), p_->faceAssignments.end(),
+                [&](const Pipeline::Impl::FaceAssignment& a) {
+                  return faceDistance(t.embeddingNorm, a.embedding.data()) < kSamePerson;
+                }),
+            p_->faceAssignments.end());
+        Pipeline::Impl::FaceAssignment a{};
+        std::memcpy(a.embedding.data(), t.embeddingNorm, sizeof(float) * 512);
+        a.source = index;
+        p_->faceAssignments.push_back(a);
+        break;
+      }
+    }
+  }
 }
 
 bool Pipeline::setFaceSourceAt(const ffcv::Image& frame, float x, float y, int sourceIndex,
@@ -1015,11 +1056,38 @@ bool Pipeline::setFaceSourceAt(const ffcv::Image& frame, float x, float y, int s
 void Pipeline::clearFaceSourceAssignments() {
   p_->faceAssignments.clear();
   // The people being tracked are only "who has which source" because of the
-  // assignments; clearing the memory clears the presence table too.
-  p_->tracked.clear(); p_->frameSources.clear();
+  // assignments; clearing the memory clears the presence table too, and the selection
+  // with it.
+  p_->tracked.clear(); p_->frameSources.clear(); p_->selectedId = -1;
 }
 
-void Pipeline::setFaceAssignEnabled(bool enabled) { p_->assignEnabled = enabled; }
+void Pipeline::setFaceAssignEnabled(bool enabled) {
+  p_->assignEnabled = enabled;
+  // Enabling drops whatever the detector tracker was holding: assign mode analyses with
+  // noTrack (fresh detections), and a stale tracker learned on the OLD frame would only
+  // confuse the first noTrack call or a later switch back to tracking.
+  if (enabled) {
+    p_->track.reset();
+    // The feed FREEZES to the current chip the moment the mode turns on: untapped faces
+    // keep this source no matter how the chip is moved afterwards. The chip only takes
+    // effect through a tap (or through a SELECTED person, who follows it).
+    p_->assignDefaultSource = p_->activeSource;
+  } else {
+    p_->selectedId = -1;   // selection is an assign-mode concept
+  }
+}
+
+bool Pipeline::selectedFaceBox(float* out, int* outSource) const {
+  if (!p_ || p_->selectedId < 0) return false;
+  for (const auto& t : p_->tracked) {
+    if (t.id == p_->selectedId) {
+      if (out) std::memcpy(out, t.box, sizeof(float) * 4);
+      if (outSource) *outSource = t.source;
+      return true;
+    }
+  }
+  return false;
+}
 
 void Pipeline::setSwapLargestOnly(bool enabled) {
   p_->cfg.swapLargestOnly = enabled;
@@ -1050,13 +1118,14 @@ static float faceDistance(const float* a, const float* b) {
   return (float)((1.0 - dot) * 0.5);
 }
 
-// How close a face must be to an assignment before it counts as THAT person -- used
-// ONLY when a NEW face enters tracking, to adopt the assignment of the same person
-// re-entering after being out of frame. The decision is made once, at creation, and is
-// then sticky; it is never re-scored per frame. faceDistance is 0 for identical, ~0.5
-// for unrelated, and same-person pairs across the frames of one camera session sit
-// well under 0.3; 0.5 is the same line upstream's face_selector draws.
-static constexpr float kAssignDistance = 0.5f;
+// How long a tracked person survives without being seen, in frames. Pinned people get
+// the long end -- someone who steps out of frame for a few seconds keeps their source
+// when they come back -- while unpinned entries carry no identity and die fast so their
+// slot is reused. At 20 fps these are 12 s and 4.5 s; at the slowest ncnn frame rates
+// they are minutes, which is harmless: a stale entry can only be matched again by the
+// person it belongs to (geometry or embedding), never stolen by proximity alone.
+static constexpr int kAssignDropPinned = 240;
+static constexpr int kAssignDropUnpinned = 90;
 
 // Intersection-over-union of two detector boxes, 0 when they do not overlap.
 static float boxIoU(const float* a, const float* b) {
@@ -1078,99 +1147,208 @@ bool Pipeline::updateLiveTracking(const std::vector<Face>& faces,
     return false;
   }
   err_.clear();
-  const int kMaxTracked = 16, kDropAfterMissed = 30;
-  const float kMatchIoU = 0.2f, kMatchEmb = 0.25f;
+  const int kMaxTracked = 16;
+  const float kMatchDist = 1.3f;     // centre distance, in box-dimension units
+  const float kTapDist = 1.0f;       // how far a tap may be from a box centre
+  const float kMatchEmb = 0.25f;     // identity re-attach after a gap
+  const float kAdoptEmb = 0.30f, kAdoptMargin = 0.08f;
 
   const size_t oldCount = trk.size();
   std::vector<int> faceTrack(faces.size(), -1);   // face index -> tracked entry index
   std::vector<char> used(oldCount, 0);
 
-  // Pass 1 -- box overlap. A person's box moves little between two frames of the same
-  // camera, so IoU is the reliable association; the embedding fallback below only
-  // catches the fast move that breaks it.
-  for (size_t i = 0; i < faces.size(); ++i) {
-    int best = -1; float bestIoU = kMatchIoU;
+  // ---- TAP resolution, BEFORE association: the user pointed at what the DISPLAYED
+  // frame showed, and the tracked entries' boxes ARE the last analysed (displayed)
+  // frame's geometry. Hit-test those, not the current frame's detections -- a person
+  // who moved between the display and this frame is still the person the finger meant,
+  // and the pin carries forward through the association below. The hit is by radius
+  // around the box centre (inside the box always wins), not strict containment: the
+  // reconstructed boxes of a moving face and a finger that lands slightly off the nose
+  // are exactly why strict containment needed several tries.
+  int tappedEntry = -1, tappedFace = -1;
+  if (tapSource >= 0 && tapSource >= (int)p_->sourceSlots.size()) {
+    err_ = "source index out of range";
+    tapSource = -1;                  // report the miss below, pin nothing
+  }
+  if (tapSource >= 0) {
+    float best = kTapDist;
     for (size_t j = 0; j < oldCount; ++j) {
-      if (used[j] || trk[j].missed >= kDropAfterMissed) continue;
+      if (trk[j].missed >= (trk[j].pinned ? kAssignDropPinned : kAssignDropUnpinned))
+        continue;
+      const float* b = trk[j].box;
+      const float cw = std::max(1.f, b[2] - b[0]), ch = std::max(1.f, b[3] - b[1]);
+      float d = std::hypot(tapX - (b[0] + b[2]) * 0.5f, tapY - (b[1] + b[3]) * 0.5f)
+                / std::max(cw, ch);
+      if (tapX >= b[0] && tapX <= b[2] && tapY >= b[1] && tapY <= b[3]) d = 0.f;
+      if (d < best) { best = d; tappedEntry = (int)j; }
+    }
+    // No tracked person near the tap -- try the CURRENT detections: a person who just
+    // appeared, or the first frame after the mode was switched on (table empty).
+    if (tappedEntry < 0) {
+      for (size_t i = 0; i < faces.size(); ++i) {
+        const float* b = faces[i].box;
+        const float cw = std::max(1.f, b[2] - b[0]), ch = std::max(1.f, b[3] - b[1]);
+        float d = std::hypot(tapX - (b[0] + b[2]) * 0.5f, tapY - (b[1] + b[3]) * 0.5f)
+                  / std::max(cw, ch);
+        if (tapX >= b[0] && tapX <= b[2] && tapY >= b[1] && tapY <= b[3]) d = 0.f;
+        if (d < best) { best = d; tappedFace = (int)i; }
+      }
+    }
+    if (tappedEntry < 0 && tappedFace < 0) {
+      err_ = "no face at selected point";
+      // An EMPTY tap is the deselect gesture: the selected person keeps their last
+      // source and stops following the chip, so nothing can change them by accident.
+      p_->selectedId = -1;
+    }
+  }
+
+  // FORCE-CLAIM for a tapped person: the tap found them where the DISPLAYED frame had
+  // them, but they may have moved since. The current face nearest the tap -- within a
+  // couple of box sizes of where they were one frame ago -- is almost certainly them;
+  // reserving it for the tapped entry NOW keeps the regular association from handing it
+  // to a fresh unpinned entry, so the pin applies on this very frame instead of when
+  // the two happen to re-attach (which was a delayed, flip-flopping application).
+  int claimedFace = -1;
+  if (tappedEntry >= 0) {
+    const float* tb = trk[(size_t)tappedEntry].box;
+    const float tsize = std::max(1.f, std::max(tb[2] - tb[0], tb[3] - tb[1]));
+    float bestD = 2.5f;
+    for (size_t i = 0; i < faces.size(); ++i) {
+      const float* b = faces[i].box;
+      const float d = std::hypot(tapX - (b[0] + b[2]) * 0.5f, tapY - (b[1] + b[3]) * 0.5f)
+                      / tsize;
+      if (d < bestD) { bestD = d; claimedFace = (int)i; }
+    }
+    if (claimedFace >= 0) {
+      faceTrack[(size_t)claimedFace] = tappedEntry;
+      used[(size_t)tappedEntry] = 1;
+    }
+  }
+
+  // ---- ASSOCIATION. A face owns an entry by geometry first -- strong overlap, then
+  // centre distance, which together survive any motion between two frames of the same
+  // camera -- and by embedding when geometry fails (a face reappearing after a gap is
+  // still the person it matches). Greedy, one entry per face. The centre-distance pass
+  // is the anti-flicker core: a face that merely MOVED must not become "new", because
+  // a new unpinned entry would win the following frames and the pinned one would age
+  // out -- the churn that made an assigned face flip between its own source and the
+  // active slot.
+  for (size_t i = 0; i < faces.size(); ++i) {        // Pass 1a: strong overlap
+    int best = -1; float bestS = 0.15f;
+    for (size_t j = 0; j < oldCount; ++j) {
+      if (used[j] || trk[j].missed >= (trk[j].pinned ? kAssignDropPinned : kAssignDropUnpinned))
+        continue;
       const float s = boxIoU(faces[i].box, trk[j].box);
-      if (s > bestIoU) { bestIoU = s; best = (int)j; }
+      if (s > bestS) { bestS = s; best = (int)j; }
     }
     if (best >= 0) { faceTrack[i] = best; used[(size_t)best] = 1; }
   }
-  // Pass 2 -- embedding fallback for the faces a fast move broke the IoU on.
-  // Consecutive frames of ONE person are far closer than this threshold, so it
-  // re-attaches the right person without re-deciding anything about their source.
-  for (size_t i = 0; i < faces.size(); ++i) {
+  for (size_t i = 0; i < faces.size(); ++i) {        // Pass 1b: centre distance
+    if (faceTrack[i] >= 0) continue;
+    int best = -1; float bestD = kMatchDist;
+    for (size_t j = 0; j < oldCount; ++j) {
+      if (used[j] || trk[j].missed >= (trk[j].pinned ? kAssignDropPinned : kAssignDropUnpinned))
+        continue;
+      const float* b = trk[j].box;
+      const float d = std::hypot(
+              faces[i].box[0] + faces[i].box[2] - b[0] - b[2],
+              faces[i].box[1] + faces[i].box[3] - b[1] - b[3]) * 0.5f
+              / std::max(1.f, std::max(b[2] - b[0], b[3] - b[1]));
+      if (d < bestD) { bestD = d; best = (int)j; }
+    }
+    if (best >= 0) { faceTrack[i] = best; used[(size_t)best] = 1; }
+  }
+  for (size_t i = 0; i < faces.size(); ++i) {        // Pass 2: embedding
     if (faceTrack[i] >= 0) continue;
     int best = -1; float bestD = kMatchEmb;
     for (size_t j = 0; j < oldCount; ++j) {
-      if (used[j] || trk[j].missed >= kDropAfterMissed) continue;
+      if (used[j] || trk[j].missed >= (trk[j].pinned ? kAssignDropPinned : kAssignDropUnpinned))
+        continue;
       const float d = faceDistance(faces[i].embeddingNorm, trk[j].embeddingNorm);
       if (d < bestD) { bestD = d; best = (int)j; }
     }
     if (best >= 0) { faceTrack[i] = best; used[(size_t)best] = 1; }
   }
 
-  // The tapped face (tapSource >= 0 means a tap): pin it NOW, on the PRE-SWAP
-  // detections, so the swap on this very frame already applies the new source. A pin
-  // replaces whatever the face had -- re-tapping the same person with another chip
-  // re-assigns them -- and the persistent assignment list is updated so a later
-  // re-entry adopts the newest choice. A tap that misses is still reported (returns
-  // false) but must not abort the tracking: the per-face table stays valid.
-  int tappedFace = -1;
-  if (tapSource >= 0) {
-    if (tapSource >= (int)p_->sourceSlots.size()) {
-      err_ = "source index out of range";
-    } else {
-      float bestArea = -1.f;
-      for (size_t i = 0; i < faces.size(); ++i) {
-        const float* b = faces[i].box;
-        if (tapX >= b[0] && tapX <= b[2] && tapY >= b[1] && tapY <= b[3]) {
-          const float a = (b[2] - b[0]) * (b[3] - b[1]);
-          if (a > bestArea) { bestArea = a; tappedFace = (int)i; }
-        }
-      }
-      if (tappedFace >= 0) {
-        if (outTapBox) std::memcpy(outTapBox, faces[(size_t)tappedFace].box, sizeof(float) * 4);
-        int idx = faceTrack[(size_t)tappedFace];
-        if (idx < 0) {               // a brand-new face: start tracking it from here
-          trk.push_back(Pipeline::Impl::TrackedFace{});
-          idx = (int)trk.size() - 1;
-          faceTrack[(size_t)tappedFace] = idx;
-        }
-        Pipeline::Impl::TrackedFace& t = trk[(size_t)idx];
-        std::memcpy(t.box, faces[(size_t)tappedFace].box, sizeof(float) * 4);
-        std::memcpy(t.embeddingNorm, faces[(size_t)tappedFace].embeddingNorm,
-                    sizeof(float) * 512);
-        t.source = tapSource; t.pinned = true; t.missed = 0;
-        addFaceAssignment(faces[(size_t)tappedFace], tapSource);
-      } else {
-        err_ = "no face at selected point";
-      }
-    }
-  }
-
-  // Every remaining new face: a fresh entry. Adopt an existing assignment ONCE (the
-  // same person re-entering after a drop keeps their source); otherwise it follows the
-  // active slot until a tap pins it. Either way the source is then sticky.
+  // ---- NEW faces: an entry each, following the active slot. Adopt an assignment ONLY
+  // on a strong, unambiguous match (the same person returning after a long absence) and
+  // only here, once -- the loose 0.5 adoption of the first version re-pinned the wrong
+  // face whenever an entry churned, which was half of the flicker.
   for (size_t i = 0; i < faces.size(); ++i) {
     if (faceTrack[i] >= 0) continue;
     Pipeline::Impl::TrackedFace t{};
     std::memcpy(t.box, faces[i].box, sizeof(float) * 4);
     std::memcpy(t.embeddingNorm, faces[i].embeddingNorm, sizeof(float) * 512);
-    t.source = p_->activeSource;
+    t.source = p_->assignDefaultSource;
     const Pipeline::Impl::FaceAssignment* hit = nullptr;
-    float bestD = kAssignDistance;
+    float bestD = kAdoptEmb, secondD = 1e9f;
     for (const auto& a : p_->faceAssignments) {
       if (a.disabled) continue;
       const float d = faceDistance(faces[i].embeddingNorm, a.embedding.data());
-      if (d < bestD) { bestD = d; hit = &a; }
+      if (d < bestD) { secondD = bestD; bestD = d; hit = &a; }
+      else if (d < secondD) secondD = d;
     }
-    if (hit && hit->source >= 0 && hit->source < (int)p_->sourceSlots.size()) {
+    if (hit && secondD - bestD > kAdoptMargin &&
+        hit->source >= 0 && hit->source < (int)p_->sourceSlots.size()) {
       t.source = hit->source; t.pinned = true;
     }
+    t.id = p_->nextTrackedId++;
     trk.push_back(t);
     faceTrack[i] = (int)trk.size() - 1;
+  }
+
+  // ---- The pin. A tap on an entry pins THAT person (reviving a missed one -- they
+  // are the person the user saw even if detection lost them this frame); a tap that
+  // only found a current face pins the entry that face has (creating it if the tap
+  // preceded the association). The pin lands in the table the swap on THIS frame reads,
+  // so the new source applies immediately.
+  if (tapSource >= 0 && (tappedEntry >= 0 || tappedFace >= 0)) {
+    int idx = tappedEntry;
+    if (idx < 0) {
+      idx = faceTrack[(size_t)tappedFace];
+      if (idx < 0) {
+        Pipeline::Impl::TrackedFace fresh{};
+        fresh.id = p_->nextTrackedId++;
+        trk.push_back(fresh);
+        faceTrack[(size_t)tappedFace] = (int)trk.size() - 1;
+        idx = (int)trk.size() - 1;
+      }
+    }
+    Pipeline::Impl::TrackedFace& t = trk[(size_t)idx];
+    t.source = tapSource; t.pinned = true; t.missed = 0;
+    // The tapped person becomes the SELECTED one: they follow the chip until an empty
+    // tap deselects them (see the miss branch above).
+    p_->selectedId = t.id;
+    // Just pinned = seen this frame, even when the person is momentarily undetected:
+    // the user just confirmed they are there, so the entry must not start aging.
+    if (idx >= 0 && idx < (int)oldCount) used[(size_t)idx] = 1;
+    if (tappedFace >= 0) {           // refresh from the current detection when we have one
+      std::memcpy(t.box, faces[(size_t)tappedFace].box, sizeof(float) * 4);
+      std::memcpy(t.embeddingNorm, faces[(size_t)tappedFace].embeddingNorm,
+                  sizeof(float) * 512);
+    } else if (claimedFace >= 0) {   // ... or from the face the tap just force-claimed
+      std::memcpy(t.box, faces[(size_t)claimedFace].box, sizeof(float) * 4);
+      std::memcpy(t.embeddingNorm, faces[(size_t)claimedFace].embeddingNorm,
+                  sizeof(float) * 512);
+    }
+    // Persistent memory of the assignment, so a later re-entry adopts the newest choice.
+    // ONE per person: a re-tap with another chip REPLACES the earlier assignment rather
+    // than joining it. Two assignments of the same face is what made a later re-entry
+    // adoption flip between the two sources -- the flicker the reverse tap order
+    // produced. Same person is decided by the same tight embedding line the association
+    // itself uses for identity.
+    const float kSamePerson = 0.15f;
+    p_->faceAssignments.erase(
+        std::remove_if(p_->faceAssignments.begin(), p_->faceAssignments.end(),
+            [&](const Pipeline::Impl::FaceAssignment& a) {
+              return faceDistance(t.embeddingNorm, a.embedding.data()) < kSamePerson;
+            }),
+        p_->faceAssignments.end());
+    Pipeline::Impl::FaceAssignment a{};
+    std::memcpy(a.embedding.data(), t.embeddingNorm, sizeof(float) * 512);
+    a.source = tapSource;
+    p_->faceAssignments.push_back(a);
+    if (outTapBox) std::memcpy(outTapBox, t.box, sizeof(float) * 4);
   }
 
   // Refresh the matched entries, age the missing ones, drop the long-gone. Erase keeps
@@ -1179,18 +1357,22 @@ bool Pipeline::updateLiveTracking(const std::vector<Face>& faces,
   for (size_t j = 0; j < oldCount; ++j)
     trk[j].missed = used[j] ? 0 : trk[j].missed + 1;
   trk.erase(std::remove_if(trk.begin(), trk.end(),
-              [](const Pipeline::Impl::TrackedFace& t) { return t.missed >= kDropAfterMissed; }),
+              [](const Pipeline::Impl::TrackedFace& t) {
+                return t.missed >= (t.pinned ? kAssignDropPinned : kAssignDropUnpinned);
+              }),
             trk.end());
   while (trk.size() > (size_t)kMaxTracked) trk.pop_back();
 
   // The per-face source table for swapAll: pinned faces keep THEIR source, everyone
-  // else follows the active slot.
+  // else keeps the frozen default -- NOT the active slot. The active slot is what the
+  // NEXT tap will pin, not what the feed does now: in assign mode the chip is a brush,
+  // and no face changes until one is tapped.
   p_->frameSources.resize(faces.size());
   for (size_t i = 0; i < faces.size(); ++i) {
     const Pipeline::Impl::TrackedFace& t = trk[(size_t)faceTrack[i]];
-    p_->frameSources[i] = t.pinned ? t.source : p_->activeSource;
+    p_->frameSources[i] = t.pinned ? t.source : p_->assignDefaultSource;
   }
-  return tapSource >= 0 && tappedFace >= 0;
+  return tapSource >= 0 && (tappedEntry >= 0 || tappedFace >= 0);
 }
 
 bool Pipeline::setReferenceFaceAt(const ffcv::Image& frame, float x, float y, float* outBox) {

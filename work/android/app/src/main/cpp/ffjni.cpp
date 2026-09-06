@@ -62,6 +62,16 @@ struct AssignResult { volatile bool consumed = false; volatile bool have = false
                       float box[4]{}; int source = -1; };
 static AssignRequest g_assignReq;
 static AssignResult g_assignResult;
+// RAW -> DISPLAY scale of the live frame, written every liveFrame and read by
+// takeSelectionBox (called from the shot callback, outside liveFrame, which is the one
+// place that knows both sizes).
+static float g_scaleX = 1.f, g_scaleY = 1.f;
+// Mirror of the pipeline's assign flag, read by liveFrame to pick the analysis mode:
+// assign mode forces a FRESH detection (noTrack) instead of the tracker's reconstructed
+// boxes -- a tap and the per-person tracking both need the truth about where faces are,
+// and the reconstructed box jumps at detector boundaries, which is exactly the jitter
+// that made taps miss and associations churn.
+static bool g_assignEnabled = false;
 
 std::string jstr(JNIEnv* env, jstring s) {
   if (!s) return {};
@@ -251,7 +261,27 @@ Java_com_facefusion_mobile_NativePipe_takeAssignmentResult(JNIEnv* env, jclass) 
 // exactly what the user asked for when they turn the feature off.
 JNIEXPORT void JNICALL
 Java_com_facefusion_mobile_NativePipe_setFaceAssignEnabled(JNIEnv*, jclass, jboolean enabled) {
-  if (g_pipe) g_pipe->setFaceAssignEnabled(enabled == JNI_TRUE);
+  g_assignEnabled = enabled == JNI_TRUE;
+  if (g_pipe) g_pipe->setFaceAssignEnabled(g_assignEnabled);
+}
+
+// The SELECTED person (assign mode): the last one tapped, who follows the source chip
+// until an empty tap deselects them. FIVE floats -- x0, y0, x1, y1 and the person's
+// CURRENT source -- in DISPLAY bitmap coordinates, so the UI can draw a persistent
+// highlight that follows them (moved here from RAW by the scale liveFrame recorded);
+// EMPTY when nobody is selected. A pure query: it does not consume anything.
+JNIEXPORT jfloatArray JNICALL
+Java_com_facefusion_mobile_NativePipe_takeSelectionBox(JNIEnv* env, jclass) {
+  if (!g_pipe) return env->NewFloatArray(0);
+  float raw[4]; int source = -1;
+  if (!g_pipe->selectedFaceBox(raw, &source)) return env->NewFloatArray(0);
+  jfloatArray out = env->NewFloatArray(5);
+  if (out) {
+    float five[5] = {raw[0] * g_scaleX, raw[1] * g_scaleY,
+                     raw[2] * g_scaleX, raw[3] * g_scaleY, (float)source};
+    env->SetFloatArrayRegion(out, 0, 5, five);
+  }
+  return out;
 }
 
 JNIEXPORT void JNICALL
@@ -1023,7 +1053,11 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
     if (!(v.score <= gateThreshold)) return -2;
   }
 
-  auto faces = g_pipe->analyse(frame);
+  // Assign mode analyses with noTrack: the tracker's reconstructed boxes are a speed
+  // optimisation that jitters at detector boundaries, and both the tap hit-test and the
+  // per-person association need accurate boxes. Costs one yoloface per frame while the
+  // mode is on -- the price of the feature being correct.
+  auto faces = g_pipe->analyse(frame, /*boxesOnly=*/false, /*noTrack=*/g_assignEnabled);
 
   // Assignment taps, consumed HERE on the PRE-SWAP detections: the identity pinned is
   // the real person's, not the swapped result the display will draw. The tap arrives in
@@ -1038,6 +1072,7 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
     g_assignResult.have = false;
   }
   const int dw = dstW > 0 ? (int)dstW : w, dh = dstH > 0 ? (int)dstH : h;
+  g_scaleX = (float)dw / (float)w; g_scaleY = (float)dh / (float)h;
   // updateLiveTracking runs on EVERY live frame: it is the per-frame bookkeeping that
   // makes an assignment STICKY (faces are associated by box, never re-scored against
   // the assignments), and it pins the tapped face so the swap on THIS very frame

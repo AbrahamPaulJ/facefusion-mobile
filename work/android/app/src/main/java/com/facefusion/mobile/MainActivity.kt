@@ -250,6 +250,14 @@ class MainActivity : ComponentActivity() {
     private var liveAssignNonce by mutableIntStateOf(0)
     private var liveAssignCount by mutableIntStateOf(0)
     /**
+     * The SELECTED person (assign mode): x0, y0, x1, y1, source -- DISPLAY bitmap
+     * coordinates -- polled every shot, so the highlight follows the person. Null when
+     * nobody is selected (or assign mode is off). The native side owns the selection:
+     * tapping a face selects it, tapping empty space deselects it, and a selected
+     * person follows the source chip.
+     */
+    private var liveSelectionBox by mutableStateOf<FloatArray?>(null)
+    /**
      * A tap is in flight: the next liveFrame consumes it and the shot callback takes the
      * result. Pending until taken; a consumed-but-empty result is a miss, never guessed.
      */
@@ -1206,6 +1214,7 @@ class MainActivity : ComponentActivity() {
                                 assignBox = liveAssignBox,
                                 assignNonce = liveAssignNonce,
                                 assignCount = liveAssignCount,
+                                selectionBox = liveSelectionBox,
                                 onClearAssignments = ::clearLiveAssignments,
                                 onToggleRecord = ::toggleLiveRecording,
                             )
@@ -2654,6 +2663,14 @@ class MainActivity : ComponentActivity() {
 
     private fun toggleLiveAssign() {
         liveAssignMode = !liveAssignMode
+        // Assign per person and "Target faces" (largest only) are mutually exclusive:
+        // both decide WHICH face gets WHICH source, and largest-only would silently
+        // ignore every pin but the biggest face. Turning assign on forces the selector
+        // back to "all faces" -- the UI also locks the switch while assign is on.
+        if (liveAssignMode && liveLargestOnly) {
+            liveLargestOnly = false
+            NativePipe.setSwapLargestOnly(false)
+        }
         NativePipe.setFaceAssignEnabled(liveAssignMode)
         liveAssignBox = null
         liveNote = if (liveAssignMode) getString(R.string.live_assign_hint)
@@ -2837,9 +2854,15 @@ class MainActivity : ComponentActivity() {
                         liveNote = getString(R.string.live_assign_set, (box[4].toInt() + 1))
                     } else if (box.size == 1) {
                         assignTapPending = false
+                        // The miss also DESELECTED the person (empty tap = deselect).
                         liveNote = getString(R.string.live_assign_missed)
                     }
                 }
+                // The selected person's highlight, polled every shot so it follows them.
+                // Empty means no selection -- clear the stale box (person left, or a
+                // session reset), never draw yesterday's person.
+                val sel = NativePipe.takeSelectionBox()
+                liveSelectionBox = if (sel.size >= 5) sel else null
             }
         }
     }
@@ -2860,7 +2883,7 @@ class MainActivity : ComponentActivity() {
         // Assignments die with the pipeline the engine is about to release; the UI state
         // around them goes with them so a stale box or count cannot outlive the session.
         assignTapPending = false
-        liveAssignBox = null; liveAssignCount = 0
+        liveAssignBox = null; liveAssignCount = 0; liveSelectionBox = null
         liveFrame = null; liveFps = 0.0; liveFaces = 0
         // ⚠ The pipeline is freed by the ENGINE's callback, not here. stop() runs it inline
         // when the pump drains (the normal case, ~60 ms) and from a watchdog thread when it

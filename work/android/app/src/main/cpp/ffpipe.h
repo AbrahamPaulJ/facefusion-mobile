@@ -99,8 +99,11 @@ struct Config {
   // model sees it. See syncLip in ffpipe.cpp for where each is applied.
   float lipSyncWeight = 0.5f;
 
-  // content_analyser.py:detect_with_nsfw_2 -- `logit[0] - logit[1] > 0.25` flags a frame.
-  float nsfwThreshold = 0.25f;
+  // content_analyser.py:detect_with_nsfw_2 -- `logit[0] - logit[1] > T` flags a frame.
+  // Deliberately above upstream's 0.25, matching ContentGate.THRESHOLD: at 0.25 the
+  // model flags shirtless torsos and babies in diapers; 0.6 still trips on clearly
+  // explicit content while letting borderline-but-benign frames through.
+  float nsfwThreshold = 0.6f;
 
   // Tiers this DEVICE has already proved it cannot run, so init does not spend a load on
   // them again. Set by the caller from what a previous init reported through
@@ -232,8 +235,10 @@ class Pipeline {
    * Live's per-person assignment mode. When ON, a face the user tapped KEEPS its
    * source for as long as it is in frame -- the decision is made once, at the tap, and
    * never re-scored against per-frame embedding noise (that re-scoring is what made
-   * the old per-frame distance match flicker between sources). Unassigned faces follow
-   * the active slot, exactly as when the mode is OFF.
+   * the old per-frame distance match flicker between sources). Untapped faces keep
+   * the source that was active when the mode was switched on -- the chip is a BRUSH
+   * while the mode is on, and changing it changes nothing on the feed until a face is
+   * tapped.
    *
    * Disabled is the default behaviour -- every face uses the active slot -- and it is
    * the switch the user asked for: off means nothing about a session changes.
@@ -265,6 +270,15 @@ class Pipeline {
    */
   bool updateLiveTracking(const std::vector<Face>& faces,
                           float tapX, float tapY, int tapSource, float* outTapBox);
+
+  /**
+   * The SELECTED person (assign mode): the last one tapped, who follows the source
+   * chip until an empty tap deselects them. Copies their current box (RAW frame
+   * coordinates) into [out] and their source into [outSource]; false when nobody is
+   * selected or the person is no longer tracked. The box moves with the person, so the
+   * UI can draw a persistent highlight over them.
+   */
+  bool selectedFaceBox(float* out, int* outSource) const;
 
   /**
    * Remember the face at (x, y) in [frame] as the one to swap -- upstream's

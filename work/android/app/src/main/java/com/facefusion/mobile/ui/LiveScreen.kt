@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -90,6 +91,13 @@ fun LiveScreen(
     assignBox: FloatArray? = null,
     assignNonce: Int = 0,
     assignCount: Int = 0,
+    /**
+     * The SELECTED person (assign mode): x0, y0, x1, y1, source -- DISPLAY bitmap
+     * coordinates, polled every shot so the highlight follows them. The selected person
+     * follows the source chip until an empty tap deselects them (they keep their last
+     * source). Null when nobody is selected.
+     */
+    selectionBox: FloatArray? = null,
     onClearAssignments: () -> Unit = {},
     /** Start or finish recording the feed. Only meaningful while it is running. */
     onToggleRecord: () -> Unit = {},
@@ -180,6 +188,11 @@ fun LiveScreen(
         // Crop, not Fit, for the same reason: Fit inside a wider box would letterbox the
         // 9:16 image into grey side bars, which trades one ugly shape for another.
         val raw = frame?.let { it.width.toFloat() / it.height } ?: (3f / 4f)
+        // Frame dimensions, captured ONCE per composition as the gesture keys -- see the
+        // pointerInput below. Constant within a session (the pump reuses the resolution),
+        // which is exactly why they are safe as keys where the Bitmap reference is not.
+        val fw = (frame?.width ?: 0).toFloat()
+        val fh = (frame?.height ?: 0).toFloat()
         // The confirmation box around a just-assigned face, faded out after a beat. The
         // nonce from the caller retimes it: a new assignment restarts the fade.
         var assignFade by remember { mutableStateOf(false) }
@@ -196,10 +209,15 @@ fun LiveScreen(
                 // pane (which CROPS the frame and, on the front lens, draws it MIRRORED)
                 // into DISPLAY bitmap coordinates -- what the pipeline sees -- so the
                 // native side can resolve it against the pre-swap detections.
-                .pointerInput(frame, assignMode, running, frontCamera) {
+                // ⚠ NOT keyed on `frame`: that Bitmap reference changes every shot, so
+                // keying on it tore the gesture detector down and rebuilt it every frame,
+                // eating the occasional tap in the middle of a recomposition. The frame
+                // DIMENSIONS are constant for a session, so they are the key: the detector
+                // restarts once when live starts (0 -> real size) and not again, and the
+                // mapping math below only needs them.
+                .pointerInput(assignMode, running, frontCamera, fw, fh) {
                     if (assignMode && running && frame != null) {
                         detectTapGestures { off ->
-                            val fw = frame.width.toFloat(); val fh = frame.height.toFloat()
                             val bw = size.width.toFloat(); val bh = size.height.toFloat()
                             val s = maxOf(bw / fw, bh / fh)
                             val ox = (bw - fw * s) / 2f; val oy = (bh - fh * s) / 2f
@@ -320,6 +338,38 @@ fun LiveScreen(
                 }
             }
 
+            // The SELECTED person's persistent highlight -- white, so it reads as the
+            // active target against the red one-shot confirmation above. Follows the
+            // person frame to frame; the label shows the source they currently have
+            // (which a selected person updates when the chip changes). Same crop+mirror
+            // mapping as the confirmation box.
+            if (selectionBox != null && selectionBox.size >= 5 && frame != null) {
+                val b = selectionBox
+                Canvas(Modifier.fillMaxSize()) {
+                    val fw = frame.width.toFloat(); val fh = frame.height.toFloat()
+                    val bw = size.width.toFloat(); val bh = size.height.toFloat()
+                    val s = maxOf(bw / fw, bh / fh)
+                    val ox = (bw - fw * s) / 2f; val oy = (bh - fh * s) / 2f
+                    val l = ox + (if (frontCamera) fw - b[2] else b[0]) * s
+                    val r = ox + (if (frontCamera) fw - b[0] else b[2]) * s
+                    val t = oy + b[1] * s
+                    val bo = oy + b[3] * s
+                    drawRect(Color.White, topLeft = Offset(l, t),
+                             size = androidx.compose.ui.geometry.Size(r - l, bo - t),
+                             style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
+                    val label = "Source ${b[4].toInt() + 1}"
+                    val paint = android.graphics.Paint().apply {
+                        color = android.graphics.Color.WHITE
+                        textSize = 13.dp.toPx()
+                        isAntiAlias = true
+                        typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    }
+                    drawContext.canvas.nativeCanvas.drawText(
+                        label, l + 6.dp.toPx(),
+                        if (t - 6.dp.toPx() > 0f) t - 6.dp.toPx() else t + 14.dp.toPx(), paint)
+                }
+            }
+
             // Frame rate over the feed, where it is read while looking at the result rather
             // than after it. Only while running: a stale rate on a stopped feed is a lie.
             if (running) {
@@ -389,14 +439,24 @@ fun LiveScreen(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Target faces", style = MaterialTheme.typography.bodyMedium)
-                Text(if (largestOnly) "Swap largest face only" else "Swap all detected faces",
+                // Mutually exclusive with assign per person (both choose which face gets
+                // which source). While assign is on the selector is pinned to "all
+                // faces", so the switch is locked and says so.
+                Text(stringResource(
+                    if (assignMode) R.string.live_target_locked
+                    else if (largestOnly) R.string.live_target_one
+                    else R.string.live_target_all),
                      style = MaterialTheme.typography.bodySmall)
             }
             Switch(checked = !largestOnly,
                    onCheckedChange = { onLargestOnlyChange(!it) },
-                   enabled = !recording && !finalizing)
+                   enabled = !assignMode && !recording && !finalizing)
         }
 
+        // How assign mode works: select the source FIRST, then tap the person -- the
+        // order the tap captures. A help dialog is the one place the flow can be stated
+        // without cluttering the row; it is available whether or not the mode is on.
+        var showAssignHelp by rememberSaveable { mutableStateOf(false) }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(stringResource(R.string.live_assign_title),
@@ -404,6 +464,17 @@ fun LiveScreen(
                 Text(stringResource(if (assignMode) R.string.live_assign_on
                                     else R.string.live_assign_off),
                      style = MaterialTheme.typography.bodySmall, fontSize = 11.sp)
+            }
+            IconButton(
+                onClick = { showAssignHelp = true },
+                modifier = Modifier.size(32.dp),
+            ) {
+                Icon(
+                    Icons.Filled.Info,
+                    contentDescription = stringResource(R.string.live_assign_help),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
             }
             // Clear lives with the switch: turning the mode off means default behaviour
             // (each face takes the selected source) for the whole session, so the
@@ -419,6 +490,19 @@ fun LiveScreen(
                    // cannot be turned on mid-recording either -- the chips are locked
                    // for the same reason.
                    enabled = running && !recording && !finalizing && sourceCount > 0)
+        }
+        if (showAssignHelp) {
+            AlertDialog(
+                onDismissRequest = { showAssignHelp = false },
+                icon = { Icon(Icons.Filled.Info, contentDescription = null) },
+                title = { Text(stringResource(R.string.live_assign_help_title)) },
+                text = { Text(stringResource(R.string.live_assign_help_body)) },
+                confirmButton = {
+                    TextButton(onClick = { showAssignHelp = false }) {
+                        Text(stringResource(R.string.live_assign_help_gotit))
+                    }
+                },
+            )
         }
 
         // ---------------------------------------------------------------- fast mode

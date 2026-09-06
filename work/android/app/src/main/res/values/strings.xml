@@ -479,11 +479,18 @@ Turning it off runs your own Swap settings instead. This is experimental: the en
     <string name="live_mic_busy">Stop the voice recording before recording Live with the microphone.</string>
     <string name="live_assign_title">Assign per person</string>
     <string name="live_assign_off">Each face takes the selected source</string>
-    <string name="live_assign_on">Tap a face to give it the selected source</string>
-    <string name="live_assign_hint">Assign per person: tap a face to give it the selected source</string>
+    <string name="live_assign_on">Nothing changes until you tap a face</string>
+    <string name="live_assign_hint">Assign per person: select a source, then tap a face. Untapped faces keep their source.</string>
     <string name="live_assign_set">Source %1$d assigned to this person</string>
-    <string name="live_assign_missed">No face at that point</string>
+    <string name="live_assign_missed">No face — selection cleared</string>
     <string name="live_assign_cleared">Assignments cleared</string>
     <string name="live_assign_clear">Clear</string>
     <string name="live_assign_count">%1$d assigned</string>
+    <string name="live_target_all">Swap all detected faces</string>
+    <string name="live_target_one">Swap largest face only</string>
+    <string name="live_target_locked">Locked while Assign per person is on</string>
+    <string name="live_assign_help">How Assign per person works</string>
+    <string name="live_assign_help_title">Assign per person</string>
+    <string name="live_assign_help_body">1. Turn the switch on. The feed keeps its current look.\n2. Select a source chip (Source 1, Source 2…).\n3. Tap the person who should have that source — they are now SELECTED (white box) and take that source right away.\n4. While they are selected, changing the chip changes THEM — you can try different sources on one person.\n5. For the next person, tap them (the selection moves), or tap empty space to DESELECT — the person keeps their last source and nothing can change them anymore.\n\nTapped people keep their source for the whole session. Untapped people keep the look from when the mode was switched on.\n\nClear removes all assignments. Turning the switch off goes back to the default behaviour (every face follows the chip).</string>
+    <string name="live_assign_help_gotit">Got it</string>
 </resources>

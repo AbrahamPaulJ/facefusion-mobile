@@ -280,6 +280,15 @@ object NativePipe {
 
     /** Forget every assignment of the current pipeline. */
     @JvmStatic external fun clearFaceSourceAssignments()
+
+    /**
+     * The SELECTED person (assign mode): the last one tapped, who follows the source
+     * chip until an empty tap deselects them. FIVE floats -- x0, y0, x1, y1 and their
+     * current source -- in DISPLAY bitmap coordinates (moved from RAW by the scale the
+     * native side records per frame), or EMPTY when nobody is selected. A pure query,
+     * safe to poll every shot: it does not consume anything.
+     */
+    @JvmStatic external fun takeSelectionBox(): FloatArray
     /** Swaps every face in place; returns the face count, or -1 on error. */
     @JvmStatic external fun processFrame(bgr: ByteArray, w: Int, h: Int): Int
 
