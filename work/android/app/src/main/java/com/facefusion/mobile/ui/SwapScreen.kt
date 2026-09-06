@@ -885,7 +885,11 @@ fun SwapScreen(
                                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                                 },
                             )
-                            if (idle && item.state == BatchState.Waiting) {
+                            // EVERY row, in every state. Restricting the bin to
+                            // `Waiting` meant that once a batch had run, nothing in the
+                            // list could be removed at all -- the rows are all Done by
+                            // then, which is exactly when a user wants to clear them out.
+                            if (idle) {
                                 IconButton({ onRemoveFromBatch(i) },
                                            modifier = Modifier.size(32.dp)) {
                                     Icon(Icons.Default.Delete,

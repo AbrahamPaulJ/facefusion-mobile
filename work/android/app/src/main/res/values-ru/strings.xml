@@ -357,4 +357,8 @@
     <string name="batch_autosave">Сохранять каждый клип в галерею сразу</string>
     <string name="batch_output_of">Клип %1$d из %2$d, проведите пальцем</string>
     <string name="swap_autosaved_to_gallery">Автоматически сохранено в Movies/FaceFusion.</string>
+    <string name="batch_delete_title">Удалить этот клип?</string>
+    <string name="batch_delete_body">У «%1$s» есть готовое видео, которого нет в галерее. Удаление клипа удалит и его.</string>
+    <string name="batch_delete_confirm">Удалить</string>
+    <string name="status_batch_already_queued">Эти клипы уже в очереди.</string>
 </resources>

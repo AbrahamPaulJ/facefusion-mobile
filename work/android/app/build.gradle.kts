@@ -354,8 +354,8 @@ android {
         // build someone is holding is precise and useless to them. 0.7.0 had four
         // APKs and 0.8.0 had ten, and in both cases the NAME could not tell them
         // apart -- which is the whole ambiguity the version rule exists to stop.
-        versionCode = 72
-        versionName = "0.8.3$variantTag"    // "-dev" == NO content gate
+        versionCode = 73
+        versionName = "0.8.4$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }

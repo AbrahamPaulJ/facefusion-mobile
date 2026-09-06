@@ -406,6 +406,10 @@
     <string name="batch_skipped">skipped</string>
     <string name="batch_remove">Remove from queue</string>
     <string name="batch_unnamed_clip">clip</string>
+    <string name="batch_delete_title">Delete this clip?</string>
+    <string name="batch_delete_body">%1$s has a finished video that is not in your gallery. Deleting the clip deletes it.</string>
+    <string name="batch_delete_confirm">Delete</string>
+    <string name="status_batch_already_queued">Those clips are already in the queue.</string>
     <string name="batch_autosave">Save each clip to the gallery as it finishes</string>
     <string name="batch_output_of">Clip %1$d of %2$d, swipe to change</string>
     <string name="swap_autosaved_to_gallery">Saved to Movies/FaceFusion automatically.</string>

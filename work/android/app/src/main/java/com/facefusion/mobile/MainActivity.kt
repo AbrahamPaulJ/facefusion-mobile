@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
@@ -190,6 +191,9 @@ class MainActivity : ComponentActivity() {
      * new frame and an index would silently come to mean a different face.
      */
     private var referenceBox by mutableStateOf<FloatArray?>(null)
+
+    /** A queue row whose render would be lost; see [removeFromBatch]. */
+    private var confirmBatchDelete by mutableStateOf<Int?>(null)
 
     /**
      * The targets waiting behind the visible one -- roadmap 14.
@@ -516,7 +520,16 @@ class MainActivity : ComponentActivity() {
         val head = if (batchQueue.isEmpty())
                        listOf(BatchItem(Uri.fromFile(tgt), targetName ?: tgt.name))
                    else batchQueue
-        batchQueue = head + videos.map {
+        // ⚠ Not the same clip twice. Adding a file that is already queued produced a second
+        // row with the same name that swapped the same video again into a second output --
+        // twice the wait for one result, and two rows nobody could tell apart.
+        val already = head.map { it.uri }.toSet()
+        val fresh = videos.filterNot { it in already }
+        if (fresh.isEmpty()) {
+            status = getString(R.string.status_batch_already_queued)
+            return@registerForActivityResult
+        }
+        batchQueue = head + fresh.map {
             BatchItem(it, displayName(it) ?: getString(R.string.batch_unnamed_clip))
         }
         status = getString(R.string.status_batch_queued, batchQueue.size)
@@ -1002,12 +1015,14 @@ class MainActivity : ComponentActivity() {
                                     pickMoreTargets.launch(arrayOf("video/*"))
                                 },
                                 onRemoveFromBatch = { i ->
-                                    // ⚠ Index 0 is the VISIBLE target. It is removed by
-                                    // clearing the target, not from this list -- dropping
-                                    // it here would leave the panes showing a clip the run
-                                    // no longer includes.
-                                    if (i > 0)
-                                        batchQueue = batchQueue.filterIndexed { j, _ -> j != i }
+                                    // A finished row holds a render. Ask before losing one,
+                                    // exactly as the single output does -- unless auto-save
+                                    // already put it in the gallery, where the file here is
+                                    // a working copy and deleting it costs nothing.
+                                    val it0 = batchQueue.getOrNull(i)
+                                    if (it0?.output != null && !opts.batchAutoSave)
+                                        confirmBatchDelete = i
+                                    else removeFromBatch(i)
                                 },
                                 onCancel = {
                                     cancelRequested = true
@@ -1104,6 +1119,26 @@ class MainActivity : ComponentActivity() {
                             },
                             dismissButton = {
                                 TextButton({ confirmModel = null }) {
+                                    Text(stringResource(R.string.proc_get_cancel))
+                                }
+                            },
+                        )
+                    }
+
+                    confirmBatchDelete?.let { ix ->
+                        val name = batchQueue.getOrNull(ix)?.name ?: ""
+                        AlertDialog(
+                            onDismissRequest = { confirmBatchDelete = null },
+                            title = { Text(stringResource(R.string.batch_delete_title)) },
+                            text = { Text(stringResource(R.string.batch_delete_body, name)) },
+                            confirmButton = {
+                                TextButton({ removeFromBatch(ix) }) {
+                                    Text(stringResource(R.string.batch_delete_confirm),
+                                         color = MaterialTheme.colorScheme.error)
+                                }
+                            },
+                            dismissButton = {
+                                TextButton({ confirmBatchDelete = null }) {
                                     Text(stringResource(R.string.proc_get_cancel))
                                 }
                             },
@@ -2155,8 +2190,20 @@ class MainActivity : ComponentActivity() {
      * kept is a different file and this does not touch it.
      */
     private fun discardOutput() {
-        outputFile?.delete()
+        val gone = outputFile
+        gone?.delete()
         outputFile = null; outputPartial = false; savedUri = null; savedPathLabel = null
+        // ⚠ A QUEUE ROW MAY BE POINTING AT WHAT WAS JUST DELETED. The row is the only way
+        // back to a batch clip, so leaving it Done with a dead File means a thumbnail that
+        // opens a black pane and a Save that writes nothing. The clip goes back to being
+        // queued, which is what it now is.
+        if (gone != null && batchQueue.any { it.output == gone })
+            batchQueue = batchQueue.map {
+                if (it.output == gone)
+                    it.copy(state = BatchState.Waiting, output = null, thumb = null,
+                            detail = null)
+                else it
+            }
     }
 
     /**
@@ -2277,6 +2324,48 @@ class MainActivity : ComponentActivity() {
             return
         }
         startLive()
+    }
+
+    /**
+     * Take one clip out of the batch queue, whatever state it is in.
+     *
+     * ⚠ EVERY ROW, INCLUDING THE FIRST. Row 0 is the visible target, and the first version
+     * refused to touch it on the reasoning that the target is cleared from the target pane
+     * instead -- which left the one row on screen that the user could not delete, in a list
+     * where the other eleven had a bin next to them. Deleting it now does what deleting the
+     * single target does, then promotes the next clip into the pane so the rest of the queue
+     * survives. Only when nothing is left does it become a plain clearTarget().
+     *
+     * ⚠ The output file goes WITH the row. The row was the only way to reach it, so leaving
+     * the file behind would strand a full-size video in the app's storage that nothing lists
+     * and nothing can play.
+     */
+    private fun removeFromBatch(i: Int) {
+        if (busy) return
+        val item = batchQueue.getOrNull(i) ?: return
+        confirmBatchDelete = null
+
+        item.output?.let { f ->
+            // Step the pane off it first: the player holds the file, and a pane pointing at
+            // a deleted path shows a black rectangle with no way back.
+            if (outputFile == f) { outputFile = null; savedUri = null; savedPathLabel = null }
+            runCatching { f.delete() }
+        }
+
+        if (i == 0) {
+            val rest = batchQueue.drop(1)
+            if (rest.isEmpty()) { clearTarget(); return }
+            // ⚠ Order matters: loadTarget does NOT touch batchQueue (only clearTarget does),
+            // so the shortened queue set here survives the load that follows it.
+            batchQueue = if (rest.size > 1) rest else emptyList()
+            loadTarget(rest.first().uri)
+            return
+        }
+        val left = batchQueue.filterIndexed { j, _ -> j != i }
+        // One clip is not a queue. Collapsing to empty keeps a single remaining item
+        // unambiguous: it is simply the target, and Swap takes the single-run path with its
+        // trim, rather than a batch of one that quietly ignores the trim slider.
+        batchQueue = if (left.size > 1) left else emptyList()
     }
 
     /**
@@ -2707,10 +2796,16 @@ class MainActivity : ComponentActivity() {
         discardOutput()
         preview = null; framesDone = 0; framesTotal = 0; elapsedS = 0.0
 
-        // Item 0 IS the visible target; the queue has held it since the pick. Only the
-        // per-item state is reset, so a second press of Swap re-runs the same list.
+        // Item 0 IS the visible target; the queue has held it since the pick.
+        //
+        // ⚠ The PREVIOUS run's files are deleted here, not merely forgotten. Pressing Swap
+        // twice used to null out every `output` and leave twelve full-size videos on disk
+        // that nothing listed and nothing could play -- they survived until the next cold
+        // start, when onCreate's sweep found them. Anything auto-saved is already a
+        // separate copy in the gallery and is unaffected.
         batchQueue = batchQueue.map {
-            it.copy(state = BatchState.Waiting, output = null, detail = null)
+            it.output?.let { f -> runCatching { f.delete() } }
+            it.copy(state = BatchState.Waiting, output = null, detail = null, thumb = null)
         }
 
         // The foreground service, for the process rather than for the work. See
@@ -2798,6 +2893,10 @@ class MainActivity : ComponentActivity() {
                 BatchStatus.item(i + 1, item.name)
                 framesDone = 0; framesTotal = 0; progress = 0f
 
+                // Captured so the failure path can clean up after itself: the file is
+                // created inside the block below, and a cancel mid-encode leaves it there
+                // half-written with nothing referencing it.
+                var partial: File? = null
                 val r = withContext(Dispatchers.Default) {
                     runCatching {
                         // Only the visible target is already a file; the queued ones are
@@ -2821,6 +2920,7 @@ class MainActivity : ComponentActivity() {
                         val out = File(outputDir(),
                                        "swapped_" + System.currentTimeMillis() +
                                        "_" + (i + 1) + ".mp4")
+                        partial = out
                         var lastPreview = 0L
                         VideoSwapper(
                             outputFps = opts.outputFps,
@@ -2854,6 +2954,9 @@ class MainActivity : ComponentActivity() {
                         out to batchThumb(out)
                     }
                 }
+                // Whatever it got to is not a result. Deleting it here keeps a cancelled
+                // twelve-clip batch from leaving a trail of unplayable fragments.
+                if (r.isFailure) partial?.let { f -> runCatching { f.delete() } }
                 batchQueue = batchQueue.mapIndexed { j, it ->
                     if (j != i) it else r.fold(
                         { (f, th) ->

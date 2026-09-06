@@ -376,4 +376,8 @@
     <string name="batch_autosave">每個片段完成後立即儲存到相簿</string>
     <string name="batch_output_of">第 %1$d / %2$d 個片段，滑動切換</string>
     <string name="swap_autosaved_to_gallery">已自動儲存到 Movies/FaceFusion。</string>
+    <string name="batch_delete_title">刪除該片段？</string>
+    <string name="batch_delete_body">%1$s 有一個尚未儲存到相簿的成品影片。刪除片段會一併刪除它。</string>
+    <string name="batch_delete_confirm">刪除</string>
+    <string name="status_batch_already_queued">這些片段已在佇列中。</string>
 </resources>
