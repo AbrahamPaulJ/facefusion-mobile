@@ -368,4 +368,5 @@
     <string name="swap_size_hint_smaller">Меньше файл и быстрее обработка: кадр целиком обрабатывается в этом размере. Лица от этого чётче не станут.</string>
     <string name="swap_size_hint_source">Клип сохраняет своё разрешение.</string>
     <string name="swap_size_hint_source_dims">Клип сохраняет свой размер, %1$d x %2$d.</string>
+    <string name="swap_size_source_at">Как есть (%1$dp)</string>
 </resources>

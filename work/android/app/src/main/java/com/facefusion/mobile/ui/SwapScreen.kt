@@ -758,7 +758,12 @@ fun SwapScreen(
                 // short edge is not a familiar number ("606p") still reads honestly, and
                 // the hint underneath carries the full WxH either way.
                 val srcShort = minOf(targetW, targetH)
-                val srcName = if (srcShort > 0) srcShort.toString() + "p"
+                // "Same (960p)": the word says what the choice MEANS and the number says
+                // what it produces. The number alone made the source chip look like one
+                // more fixed size rather than the leave-it-alone option, which is what it
+                // is and what most runs want.
+                val srcName = if (srcShort > 0)
+                                  stringResource(R.string.swap_size_source_at, srcShort)
                               else stringResource(R.string.swap_size_source)
                 val sizeLabel = if (opts.outputMaxShortEdge > 0)
                                     opts.outputMaxShortEdge.toString() + "p"

@@ -387,4 +387,5 @@
     <string name="swap_size_hint_smaller">檔案更小，處理更快：整個影格以此尺寸處理。這不會讓臉孔更清晰。</string>
     <string name="swap_size_hint_source">片段保持原有解析度。</string>
     <string name="swap_size_hint_source_dims">片段保持原有尺寸 %1$d x %2$d。</string>
+    <string name="swap_size_source_at">不變 (%1$dp)</string>
 </resources>

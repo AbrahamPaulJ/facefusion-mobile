@@ -170,6 +170,18 @@ data class SwapOptions(
     /** How many swapper invocations one face costs at this setting. */
     val invocationsPerFace get() = pixelBoost * pixelBoost
 
+    /**
+     * ⚠ THE TARGET-DEPENDENT SETTINGS ARE NOT SAVED, deliberately.
+     *
+     * `outputFps` and `outputMaxShortEdge` are answers about ONE clip: "24 of this clip's
+     * 30" and "720p of this clip's 2160p". Restoring them onto the next clip applies a
+     * decision that was never made about it -- a 720p cap silently inherited by a 720p clip
+     * does nothing visible, and by a 4K one quietly halves what the user gets. Everything
+     * else here is a preference about how the app should WORK and does survive.
+     *
+     * They still persist for the length of a session; `loadTarget` resets them when the
+     * clip they were chosen for goes away.
+     */
     fun save(context: Context) {
         prefs(context).edit()
             .putString(K_SWAPPER, swapper)
@@ -182,13 +194,11 @@ data class SwapOptions(
             .putBoolean(K_LARGEST, largestOnly)
             .putFloat(K_REF_DISTANCE, referenceDistance)
             .putBoolean(K_BATCH_AUTOSAVE, batchAutoSave)
-            .putInt(K_OUT_SHORT_EDGE, outputMaxShortEdge)
             .putInt(K_TRACK, trackPeriod)
             .putBoolean(K_ENHANCE, faceEnhance)
             .putFloat(K_ENHANCE_BLEND, enhanceBlend)
             .putBoolean(K_LIP_SYNC, lipSync)
             .putFloat(K_LIP_SYNC_WEIGHT, lipSyncWeight)
-            .putInt(K_FPS, outputFps)
             .apply()
     }
 
@@ -204,13 +214,11 @@ data class SwapOptions(
         private const val K_LARGEST = "largest_only"
         private const val K_REF_DISTANCE = "reference_distance"
         private const val K_BATCH_AUTOSAVE = "batch_autosave"
-        private const val K_OUT_SHORT_EDGE = "output_max_short_edge"
         private const val K_TRACK = "track_period"
         private const val K_ENHANCE = "face_enhance"
         private const val K_ENHANCE_BLEND = "face_enhance_blend"
         private const val K_LIP_SYNC = "lip_sync"
         private const val K_LIP_SYNC_WEIGHT = "lip_sync_weight"
-        private const val K_FPS = "output_fps"
 
         private fun prefs(context: Context) =
             context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -235,13 +243,11 @@ data class SwapOptions(
                 largestOnly = p.getBoolean(K_LARGEST, d.largestOnly),
                 referenceDistance = p.getFloat(K_REF_DISTANCE, d.referenceDistance),
                 batchAutoSave = p.getBoolean(K_BATCH_AUTOSAVE, d.batchAutoSave),
-                outputMaxShortEdge = p.getInt(K_OUT_SHORT_EDGE, d.outputMaxShortEdge),
                 trackPeriod = p.getInt(K_TRACK, d.trackPeriod),
                 faceEnhance = p.getBoolean(K_ENHANCE, d.faceEnhance),
                 enhanceBlend = p.getFloat(K_ENHANCE_BLEND, d.enhanceBlend),
                 lipSync = p.getBoolean(K_LIP_SYNC, d.lipSync),
                 lipSyncWeight = p.getFloat(K_LIP_SYNC_WEIGHT, d.lipSyncWeight),
-                outputFps = p.getInt(K_FPS, d.outputFps),
             )
         }
     }

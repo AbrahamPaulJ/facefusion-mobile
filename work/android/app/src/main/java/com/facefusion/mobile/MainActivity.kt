@@ -2019,6 +2019,11 @@ class MainActivity : ComponentActivity() {
                 targetFile = l.file; durationMs = l.durationMs
                 inputFps = l.fps
                 targetW = l.width; targetH = l.height
+                // ⚠ The output choices belong to the clip that is going away. "24 fps" and
+                // "720p" were answers about ITS 30 fps and ITS 2160p; carrying them onto a
+                // new clip applies a decision nobody made about it. Reset, not remembered.
+                if (opts.outputFps != 0 || opts.outputMaxShortEdge != 0)
+                    applyOpts(opts.copy(outputFps = 0, outputMaxShortEdge = 0))
                 trimStartMs = 0f; trimEndMs = l.durationMs.toFloat()
                 targetAspect = if (l.width > 0 && l.height > 0)
                     l.width.toFloat() / l.height else 16f / 9f

@@ -410,6 +410,7 @@
     <string name="swap_output_summary">%1$s, %2$s fps</string>
     <string name="swap_output_size">Output size</string>
     <string name="swap_size_source">Same as source</string>
+    <string name="swap_size_source_at">Same (%1$dp)</string>
     <string name="swap_size_hint_smaller">Smaller file, and a faster run: the whole frame is processed at this size. It does not make faces sharper.</string>
     <string name="swap_size_hint_source">The clip keeps its own resolution.</string>
     <string name="swap_size_hint_source_dims">The clip keeps its own size, %1$d x %2$d.</string>
