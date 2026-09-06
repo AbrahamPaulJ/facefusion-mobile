@@ -220,6 +220,8 @@ class MainActivity : ComponentActivity() {
     /** The Live recording in flight, and whether the UI should say so -- roadmap 13b. */
     private var liveRecorder: LiveRecorder? = null
     private var liveRecording by mutableStateOf(false)
+    private var liveMicrophone by mutableStateOf(false)
+    private var liveFinalizing by mutableStateOf(false)
 
     // ⚠ Compose state, NOT live.isRunning. A plain field on the engine is invisible to
     // recomposition, so the first build showed a running feed under a button still saying
@@ -1118,6 +1120,9 @@ class MainActivity : ComponentActivity() {
                                 frontCamera = liveFrontCamera,
                                 onSwitchCamera = ::switchLiveCamera,
                                 recording = liveRecording,
+                                microphone = liveMicrophone,
+                                finalizing = liveFinalizing,
+                                onMicrophoneChange = ::changeLiveMicrophone,
                                 onToggleRecord = ::toggleLiveRecording,
                             )
                             Screen.Settings -> SettingsScreen(
@@ -2179,6 +2184,7 @@ class MainActivity : ComponentActivity() {
 
     private fun toggleVoiceRecording() {
         if (recordingVoice) { stopVoiceRecording(); return }
+        if (liveRecording || liveFinalizing) return
         if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) !=
             android.content.pm.PackageManager.PERMISSION_GRANTED) {
             askMic.launch(android.Manifest.permission.RECORD_AUDIO)
@@ -2519,11 +2525,37 @@ class MainActivity : ComponentActivity() {
      * Only while the pump is running: there is nothing to record otherwise, and a recorder
      * armed before the camera would produce a zero-frame file.
      */
+    private val askLiveMic = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()) { granted ->
+        liveMicrophone = granted
+        if (!granted) status = getString(R.string.status_mic_denied)
+    }
+
+    private fun changeLiveMicrophone(enabled: Boolean) {
+        if (liveRecording || liveFinalizing) return
+        if (enabled && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            askLiveMic.launch(android.Manifest.permission.RECORD_AUDIO)
+        } else liveMicrophone = enabled
+    }
+
     private fun toggleLiveRecording() {
         if (liveRecording) { finishLiveRecording(discard = false); return }
-        if (!liveRunning) return
+        if (!liveRunning || liveFinalizing) return
+        if (liveMicrophone) {
+            if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                liveMicrophone = false
+                status = getString(R.string.status_mic_denied)
+                return
+            }
+            if (recordingVoice) {
+                status = getString(R.string.live_mic_busy)
+                return
+            }
+        }
         val f = File(outputDir(), "live_" + System.currentTimeMillis() + ".mp4")
-        val rec = LiveRecorder(f) { appendLog(it) }
+        val rec = LiveRecorder(f, if (liveMicrophone) LiveMicrophone(this) else null) { appendLog(it) }
         liveRecorder = rec
         live.recorder = rec
         liveRecording = true
@@ -2544,20 +2576,25 @@ class MainActivity : ComponentActivity() {
         live.recorder = null
         liveRecorder = null
         liveRecording = false
-        val out = rec.stop()
-        if (discard) {
-            out?.delete()
-            return
-        }
-        val err = rec.error
-        when {
-            err != null -> status = getString(R.string.status_failed, err)
-            out == null -> status = getString(R.string.status_live_rec_empty)
-            else -> {
-                outputFile = out
-                outputPartial = false
-                status = getString(R.string.status_live_rec_saved, rec.frameCount)
-                saveToGallery(out)
+        liveFinalizing = true
+        lifecycleScope.launch(kotlinx.coroutines.NonCancellable) {
+            // Finish even when the activity is destroyed, so codecs and the microphone close.
+            val out = withContext(Dispatchers.IO) { rec.stop() }
+            liveFinalizing = false
+            if (discard) {
+                out?.delete()
+                return@launch
+            }
+            val err = rec.error
+            when {
+                err != null -> status = getString(R.string.status_failed, err)
+                out == null -> status = getString(R.string.status_live_rec_empty)
+                else -> {
+                    outputFile = out
+                    outputPartial = false
+                    status = getString(R.string.status_live_rec_saved, rec.frameCount)
+                    saveToGallery(out)
+                }
             }
         }
     }

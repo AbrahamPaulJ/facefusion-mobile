@@ -64,6 +64,9 @@ fun LiveScreen(
     onSwitchCamera: () -> Unit = {},
     /** Whether a recording is in flight -- roadmap 13b. */
     recording: Boolean = false,
+    microphone: Boolean = false,
+    finalizing: Boolean = false,
+    onMicrophoneChange: (Boolean) -> Unit = {},
     /** Start or finish recording the feed. Only meaningful while it is running. */
     onToggleRecord: () -> Unit = {},
 ) {
@@ -254,13 +257,23 @@ fun LiveScreen(
             // running -- arming a recorder before the camera produces a zero-frame file.
             OutlinedButton(
                 onClick = onToggleRecord,
-                enabled = running,
+                enabled = running && !finalizing,
                 modifier = Modifier.weight(1f),
             ) {
                 Text(stringResource(if (recording) R.string.live_rec_stop
                                     else R.string.live_rec_start),
                      color = if (recording) FfRed else Color.Unspecified)
             }
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.live_mic), style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(if (microphone) R.string.live_mic_on else R.string.live_mic_off),
+                     style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(checked = microphone, onCheckedChange = onMicrophoneChange,
+                   enabled = !recording && !finalizing)
         }
 
         // ---------------------------------------------------------------- fast mode

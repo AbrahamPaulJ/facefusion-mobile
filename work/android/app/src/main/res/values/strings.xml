@@ -473,4 +473,8 @@ Turning it off runs your own Swap settings instead. This is experimental: the en
     <string name="set_tab_device">Device</string>
     <string name="set_tab_api">API</string>
     <string name="set_tab_about">About</string>
+    <string name="live_mic">Microphone</string>
+    <string name="live_mic_on">Record microphone audio. Change before recording.</string>
+    <string name="live_mic_off">Video only. Microphone is off.</string>
+    <string name="live_mic_busy">Stop the voice recording before recording Live with the microphone.</string>
 </resources>

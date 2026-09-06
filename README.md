@@ -33,7 +33,9 @@ Ruhs. The pipeline, the models, and the option names, defaults and ranges are Fa
   between frames instead of finding it again every frame, for about 15% more speed. Off by
   default.
 - **Live**: the front or back camera, swapped, in real time, and you can record what it
-  shows. Fast mode forces the settings a camera can keep up with; turning it off is
+  shows. Enable **Microphone** before recording to include microphone audio in the MP4
+  (Android asks for permission); leave it off for silent video. The switch is locked while
+  recording and saving. Fast mode forces the settings a camera can keep up with; turning it off is
   experimental and asks first.
 - **Batch**: queue several clips and swap them all in one run, with one source face. Each
   finished clip gets a thumbnail you can tap, and can be saved to your gallery as it lands.

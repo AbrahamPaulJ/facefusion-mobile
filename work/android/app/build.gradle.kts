@@ -1,4 +1,4 @@
-﻿import java.util.Properties
+import java.util.Properties
 
 plugins {
     id("com.android.application")
@@ -52,6 +52,15 @@ val appLabel = if (hasContentGate) "FaceFusion" else "FaceFusion Dev"
 // Delete work/android/ncnn/ and this builds exactly the QNN-only app 0.3.0 shipped.
 val ncnnDir = file("../ncnn")
 val hasNcnn = File(ncnnDir, "lib/libncnn.a").exists()
+
+// Optional matching native binaries for Kotlin/UI-only builds without the Qualcomm SDK.
+// Supply a directory containing arm64-v8a/libffnative.so and its runtime dependencies.
+val prebuiltNativeDir = providers.gradleProperty("prebuiltNativeDir").orNull?.let { file(it) }
+if (prebuiltNativeDir != null) {
+    require(File(prebuiltNativeDir, "arm64-v8a/libffnative.so").isFile) {
+        "prebuiltNativeDir must contain arm64-v8a/libffnative.so"
+    }
+}
 
 android {
     namespace = "com.facefusion.mobile"
@@ -359,7 +368,7 @@ android {
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }
-        externalNativeBuild {
+        if (prebuiltNativeDir == null) externalNativeBuild {
             cmake {
                 arguments += listOf("-DANDROID_STL=c++_shared")
                 if (hasNcnn) {
@@ -375,13 +384,16 @@ android {
         }
     }
 
-    externalNativeBuild {
+    if (prebuiltNativeDir == null) externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
         }
     }
     ndkVersion = "27.2.12479018"
+    if (prebuiltNativeDir != null) {
+        sourceSets.getByName("main").jniLibs.srcDir(prebuiltNativeDir)
+    }
 
     // The QNN runtime .so files ship in jniLibs and are dlopen'd by libffnative.so at
     // runtime.  They are NOT exec'd: a process exec'd out of the APK is denied the Hexagon
@@ -407,7 +419,12 @@ android {
     }
 
     buildTypes {
-        debug { isMinifyEnabled = false }
+        debug {
+            isMinifyEnabled = false
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-mic-debug"
+            manifestPlaceholders["appLabel"] = "$appLabel Debug"
+        }
         release {
             isMinifyEnabled = false
             signingConfig = signingConfigs.findByName("release")
