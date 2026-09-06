@@ -298,6 +298,17 @@ class MainActivity : ComponentActivity() {
      * frame-rate control offers only lower rates -- so it needs the clip's short edge, and
      * `targetAspect` alone cannot give it (a ratio says nothing about how many pixels).
      */
+    /**
+     * Decode caps, long edge in pixels. See [decodeOriented].
+     *
+     * A SOURCE is only ever an identity -- 112 for the recogniser, 256 for the swapper --
+     * so 2048 is already far more than the models can use. A photo TARGET is the OUTPUT, so
+     * it keeps four times the area; 4096 is a 12 MP result, which is more than a phone
+     * screen or a message will ever show and still fits in memory four times over.
+     */
+    private val MAX_SOURCE_EDGE = 2048
+    private val MAX_TARGET_EDGE = 4096
+
     private var targetW by mutableStateOf(0)
     private var targetH by mutableStateOf(0)
 
@@ -581,20 +592,51 @@ class MainActivity : ComponentActivity() {
      * with getPixels, and a hardware bitmap has no pixel array to read. It throws rather
      * than returning null on a bad file, hence runCatching.
      */
-    private fun decodeOriented(uri: Uri): Bitmap? = runCatching {
-        ImageDecoder.decodeBitmap(ImageDecoder.createSource(contentResolver, uri)) { d, _, _ ->
+    /**
+     * ⚠ AND IT IS CAPPED, which is not an optimisation -- it is why the app survives a
+     * camera photo at all.
+     *
+     * Reported as "freezes and crashes on SOME photos" on an 8 Elite Gen 5. Nothing here
+     * limited the decode, and a flagship shoots 50 MP (8160x6144) or 200 MP. At 50 MP one
+     * photo asks for, in order: a 200 MB ARGB_8888 bitmap, a 200 MB `copy` for the gate, a
+     * 200 MB IntArray for getPixels, and a 150 MB BGR buffer. ~750 MB against an app heap
+     * that is typically 256-512 MB, so it dies -- and thrashes the collector on the way,
+     * which is the freeze that precedes it. A 12 MP shot needs ~48 MB and lives, which is
+     * exactly why it was "some photos".
+     *
+     * setTargetSampleSize decodes SMALLER rather than decoding and shrinking, so the full
+     * bitmap is never allocated. Powers of two only, which is what the decoders do natively
+     * and therefore free.
+     *
+     * The caps differ because the two uses differ. A SOURCE is an identity: it is warped to
+     * 112 for the recogniser and 256 for the swapper, so pixels beyond ~2048 on the long
+     * edge are thrown away untouched. A photo TARGET is the output -- what is capped here
+     * is what gets saved -- so it keeps four times the area, which still leaves a 12 MP
+     * result and a working phone.
+     */
+    private fun decodeOriented(uri: Uri, maxEdge: Int = MAX_SOURCE_EDGE): Bitmap? = runCatching {
+        ImageDecoder.decodeBitmap(ImageDecoder.createSource(contentResolver, uri)) { d, info, _ ->
             d.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
             d.isMutableRequired = true
+            sampleFor(info.size.width, info.size.height, maxEdge)?.let { d.setTargetSampleSize(it) }
         }
     }.getOrNull()
 
     /** As above, for a file the selftest pushed rather than a picked Uri. */
-    private fun decodeOriented(file: File): Bitmap? = runCatching {
-        ImageDecoder.decodeBitmap(ImageDecoder.createSource(file)) { d, _, _ ->
+    private fun decodeOriented(file: File, maxEdge: Int = MAX_SOURCE_EDGE): Bitmap? = runCatching {
+        ImageDecoder.decodeBitmap(ImageDecoder.createSource(file)) { d, info, _ ->
             d.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
             d.isMutableRequired = true
+            sampleFor(info.size.width, info.size.height, maxEdge)?.let { d.setTargetSampleSize(it) }
         }
     }.getOrNull()
+
+    /** The power-of-two subsample that brings the long edge under [maxEdge]; null for none. */
+    private fun sampleFor(w: Int, h: Int, maxEdge: Int): Int? {
+        var s = 1
+        while (maxOf(w, h) / s > maxEdge) s *= 2
+        return if (s > 1) s else null
+    }
 
     /**
      * The fp16 canary pair, unpacked out of assets.
@@ -857,7 +899,7 @@ class MainActivity : ComponentActivity() {
                     }
                     val found = withContext(Dispatchers.Default) {
                         runCatching {
-                            val soft = frame.copy(Bitmap.Config.ARGB_8888, false)
+                            val soft = frame.asArgb8888()
                                 ?: return@runCatching null
                             val px = IntArray(soft.width * soft.height)
                             soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
@@ -1807,7 +1849,7 @@ class MainActivity : ComponentActivity() {
                         previewNote = getString(R.string.status_cannot_read_source)
                         return@launch
                     }
-                    val soft = bmp.copy(Bitmap.Config.ARGB_8888, false)
+                    val soft = bmp.asArgb8888()
                     val px = IntArray(soft.width * soft.height)
                     soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
 
@@ -2054,7 +2096,7 @@ class MainActivity : ComponentActivity() {
         preparing = true
         targetName = displayName(uri)
         lifecycleScope.launch {
-            val bmp = withContext(Dispatchers.IO) { decodeOriented(uri) }
+            val bmp = withContext(Dispatchers.IO) { decodeOriented(uri, MAX_TARGET_EDGE) }
             if (bmp == null) {
                 status = getString(R.string.status_cannot_read_image)
                 preparing = false
@@ -2450,7 +2492,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             val box = withContext(Dispatchers.Default) {
                 runCatching {
-                    val soft = frame.copy(Bitmap.Config.ARGB_8888, false)
+                    val soft = frame.asArgb8888()
                         ?: return@runCatching FloatArray(0)
                     val px = IntArray(soft.width * soft.height)
                     soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
@@ -2555,7 +2597,7 @@ class MainActivity : ComponentActivity() {
                 if (!NativePipe.init(libDir, libDir, models.absolutePath, opts)) return@withContext false
                 NativePipe.setTrackPeriod(opts.trackPeriod)
                 val bmp = decodeOriented(src) ?: return@withContext false
-                val soft = bmp.copy(Bitmap.Config.ARGB_8888, false)
+                val soft = bmp.asArgb8888()
                 val px = IntArray(soft.width * soft.height)
                 soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
                 NativePipe.setSource(NativePipe.argbToBgr(px, soft.width, soft.height),
@@ -2705,7 +2747,7 @@ class MainActivity : ComponentActivity() {
                                                     R.string.gate_subject_target_video, it))
                     }
 
-                    val soft = bmp.copy(Bitmap.Config.ARGB_8888, false)
+                    val soft = bmp.asArgb8888()
                     val px = IntArray(soft.width * soft.height)
                     soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
                     if (!NativePipe.setSource(NativePipe.argbToBgr(px, soft.width, soft.height),
@@ -2884,7 +2926,7 @@ class MainActivity : ComponentActivity() {
                             ContentGate.message(this@MainActivity,
                                                 R.string.gate_subject_source_image, it))
                     }
-                    val soft = bmp.copy(Bitmap.Config.ARGB_8888, false)
+                    val soft = bmp.asArgb8888()
                     val px = IntArray(soft.width * soft.height)
                     soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
                     if (!NativePipe.setSource(
@@ -3274,7 +3316,7 @@ class MainActivity : ComponentActivity() {
                     say("SELFTEST PARTIAL: DSP reachable, no test assets"); return@launch
                 }
                 val bmp = decodeOriented(srcFile) ?: return@launch
-                val soft = bmp.copy(Bitmap.Config.ARGB_8888, false)
+                val soft = bmp.asArgb8888()
                 val px = IntArray(soft.width * soft.height)
                 soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
                 if (!NativePipe.setSource(NativePipe.argbToBgr(px, soft.width, soft.height),

@@ -364,7 +364,7 @@ class ApiServer(
                              "detail" to gate.detail))
                 return@withPipeline
             }
-            val soft = bmp.copy(Bitmap.Config.ARGB_8888, false)
+            val soft = bmp.asArgb8888()
             val px = IntArray(soft.width * soft.height)
             soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
             val bgr = NativePipe.argbToBgr(px, soft.width, soft.height)
@@ -396,7 +396,7 @@ class ApiServer(
                              "detail" to gate.detail))
                 return@withPipeline
             }
-            val soft = bmp.copy(Bitmap.Config.ARGB_8888, false)
+            val soft = bmp.asArgb8888()
             val w = soft.width; val h = soft.height
             val px = IntArray(w * h)
             soft.getPixels(px, 0, w, 0, 0, w, h)
