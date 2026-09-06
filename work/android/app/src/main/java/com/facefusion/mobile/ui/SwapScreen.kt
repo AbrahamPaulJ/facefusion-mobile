@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontFamily
@@ -161,6 +163,11 @@ fun SwapScreen(
     onRemoveFromBatch: (Int) -> Unit,
     /** Add more clips to the queue, leaving the visible target alone. */
     onAddToBatch: () -> Unit,
+    /** Show a finished batch clip in the output pane, by its index in [batch]. */
+    onOpenBatchOutput: (Int) -> Unit,
+    /** Copy every finished batch clip straight to the gallery. */
+    batchAutoSave: Boolean,
+    onBatchAutoSave: (Boolean) -> Unit,
     openCard: String,
     onToggleCard: (String) -> Unit,
     /** There is something to save: a finished video, or a swapped still on the pane. */
@@ -557,9 +564,13 @@ fun SwapScreen(
                     else -> R.string.swap_add_target
                 }),
                 modifier = paneModifier,
-                // The pane IS the picker. A separate full-width button said the same thing
-                // twice and cost a row of height the wordmark needed.
-                onClick = if (idle) onPickTarget else null,
+                // ⚠ The pane is the picker ONLY WHILE IT IS EMPTY. Once a target is loaded
+                // the frame belongs to zoom and face selection, and a stray tap that threw
+                // away the clip you were working on -- to open a file browser you can reach
+                // with the + button beside the caption -- was the opposite of what the tap
+                // was for. Empty, it stays tappable: there is nothing else to do with it
+                // and it draws an Add icon saying so.
+                onClick = if (idle && !hasTarget) onPickTarget else null,
                 actionIcon = if (hasTarget) null else Icons.Default.Add,
                 zoom = zoom,
                 faceBoxes = preview.faceBoxes,
@@ -789,14 +800,49 @@ fun SwapScreen(
         if (batch.size > 1) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(vertical = 4.dp)) {
+                    // AUTO-SAVE, at the top of the queue rather than in a settings screen:
+                    // it is a decision about THIS run, taken while looking at the list it
+                    // applies to. Remembered, because a batch is unattended by nature and
+                    // re-ticking it every time defeats the point of leaving one running.
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = idle) { onBatchAutoSave(!batchAutoSave) }
+                            .padding(start = 6.dp, end = 14.dp, top = 2.dp, bottom = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(batchAutoSave, { onBatchAutoSave(it) }, enabled = idle)
+                        Text(stringResource(R.string.batch_autosave),
+                             style = MaterialTheme.typography.bodySmall)
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     batch.forEachIndexed { i, item ->
                         if (i > 0) HorizontalDivider(
                             color = MaterialTheme.colorScheme.outlineVariant)
                         Row(
                             Modifier.fillMaxWidth()
+                                // A finished row IS the way back to its clip. Only when
+                                // there is something to open: a waiting row that reacted to
+                                // a tap by doing nothing would read as broken.
+                                .clickable(enabled = idle && item.output != null) {
+                                    onOpenBatchOutput(i)
+                                }
                                 .padding(horizontal = 14.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            // The thumbnail is the row's identity: twelve filenames from one
+                            // camera roll look alike, and one frame of the swapped result
+                            // says both WHICH clip this is and what came out of it.
+                            if (item.thumb != null) {
+                                Image(
+                                    item.thumb!!.asImageBitmap(), null,
+                                    Modifier
+                                        .size(44.dp, 30.dp)
+                                        .clip(RoundedCornerShape(4.dp)),
+                                    contentScale = ContentScale.Crop,
+                                )
+                                Spacer(Modifier.width(10.dp))
+                            }
                             Column(Modifier.weight(1f)) {
                                 Text(item.name, style = MaterialTheme.typography.bodySmall,
                                      maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -880,13 +926,49 @@ fun SwapScreen(
         // what you were about to save. A video gets a player with a scrub bar; an image
         // result is a still, which is all there is to show.
         if (outputFile != null) {
-            OutputPane(
-                file = outputFile,
-                height = paneHeight,
-                onSaveFrame = onSaveFrame,
-                partial = outputPartial,
-                enabled = idle,
-            )
+            // SWIPE BETWEEN BATCH RESULTS. The indices of everything finished, and where
+            // the pane currently sits in that list.
+            val doneIx = batch.indices.filter { batch[it].output != null }
+            val cur = doneIx.indexOfFirst { batch[it].output == outputFile }
+            var drag by remember(outputFile) { mutableStateOf(0f) }
+            Box(
+                Modifier.pointerInput(doneIx.size, cur) {
+                    if (doneIx.size < 2 || cur < 0) return@pointerInput
+                    // ⚠ HORIZONTAL only, and accumulated to a threshold rather than acted
+                    // on per event. detectHorizontalDragGestures ignores a vertical-dominant
+                    // drag, so the page still scrolls with a finger on the video -- which
+                    // matters, because this pane is most of the screen.
+                    detectHorizontalDragGestures(
+                        onDragEnd = {
+                            val step = if (drag < -60f) 1 else if (drag > 60f) -1 else 0
+                            drag = 0f
+                            if (step != 0)
+                                doneIx.getOrNull(cur + step)?.let(onOpenBatchOutput)
+                        },
+                        onDragCancel = { drag = 0f },
+                    ) { change, amount -> drag += amount; change.consume() }
+                }
+            ) {
+                OutputPane(
+                    file = outputFile,
+                    height = paneHeight,
+                    onSaveFrame = onSaveFrame,
+                    partial = outputPartial,
+                    enabled = idle,
+                )
+            }
+            // Says the swipe exists. A gesture with nothing on screen to suggest it is a
+            // gesture only its author knows about -- which is what the batch queue itself
+            // had just been.
+            if (doneIx.size > 1 && cur >= 0) {
+                Text(
+                    stringResource(R.string.batch_output_of, cur + 1, doneIx.size),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
 
         if (hasOutput) {

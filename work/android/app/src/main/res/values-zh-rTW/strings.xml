@@ -373,4 +373,7 @@
     <string name="swap_batch_add_more">新增更多片段</string>
     <string name="status_faces_found">偵測到 %1$d 張臉孔——點按其中一張僅替換該臉孔。</string>
     <string name="status_reference_warming">正在準備預覽——請稍後再次點按該臉孔。</string>
+    <string name="batch_autosave">每個片段完成後立即儲存到相簿</string>
+    <string name="batch_output_of">第 %1$d / %2$d 個片段——滑動切換</string>
+    <string name="status_batch_showing">正在顯示 %1$s</string>
 </resources>

@@ -62,6 +62,15 @@ data class SwapOptions(
     val referenceDistance: Float = 0.3f,
 
     /**
+     * Copy every finished BATCH clip straight into the gallery.
+     *
+     * ⚠ Not a pipeline field -- it never reaches native, like `outputFps`. It lives here
+     * only because it is a preference worth remembering: a batch is unattended by nature,
+     * and being asked to re-tick it on every run defeats the point of leaving one running.
+     */
+    val batchAutoSave: Boolean = false,
+
+    /**
      * Frames between real face detections during a VIDEO run. 0 = detect every frame,
      * which is upstream's behaviour and the default.
      *
@@ -148,6 +157,7 @@ data class SwapOptions(
             .putInt(K_BOOST, pixelBoost)
             .putBoolean(K_LARGEST, largestOnly)
             .putFloat(K_REF_DISTANCE, referenceDistance)
+            .putBoolean(K_BATCH_AUTOSAVE, batchAutoSave)
             .putInt(K_TRACK, trackPeriod)
             .putBoolean(K_ENHANCE, faceEnhance)
             .putFloat(K_ENHANCE_BLEND, enhanceBlend)
@@ -168,6 +178,7 @@ data class SwapOptions(
         private const val K_BOOST = "pixel_boost"
         private const val K_LARGEST = "largest_only"
         private const val K_REF_DISTANCE = "reference_distance"
+        private const val K_BATCH_AUTOSAVE = "batch_autosave"
         private const val K_TRACK = "track_period"
         private const val K_ENHANCE = "face_enhance"
         private const val K_ENHANCE_BLEND = "face_enhance_blend"
@@ -197,6 +208,7 @@ data class SwapOptions(
                 pixelBoost = p.getInt(K_BOOST, d.pixelBoost),
                 largestOnly = p.getBoolean(K_LARGEST, d.largestOnly),
                 referenceDistance = p.getFloat(K_REF_DISTANCE, d.referenceDistance),
+                batchAutoSave = p.getBoolean(K_BATCH_AUTOSAVE, d.batchAutoSave),
                 trackPeriod = p.getInt(K_TRACK, d.trackPeriod),
                 faceEnhance = p.getBoolean(K_ENHANCE, d.faceEnhance),
                 enhanceBlend = p.getFloat(K_ENHANCE_BLEND, d.enhanceBlend),

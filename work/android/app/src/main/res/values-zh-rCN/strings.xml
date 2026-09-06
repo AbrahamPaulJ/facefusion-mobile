@@ -370,4 +370,7 @@
     <string name="swap_batch_add_more">添加更多片段</string>
     <string name="status_faces_found">检测到 %1$d 张人脸——点按其中一张仅替换该人脸。</string>
     <string name="status_reference_warming">正在准备预览——请稍后再次点按该人脸。</string>
+    <string name="batch_autosave">每个片段完成后立即保存到相册</string>
+    <string name="batch_output_of">第 %1$d / %2$d 个片段——滑动切换</string>
+    <string name="status_batch_showing">正在显示 %1$s</string>
 </resources>

@@ -1,5 +1,6 @@
 package com.facefusion.mobile
 
+import android.graphics.Bitmap
 import android.net.Uri
 import java.io.File
 
@@ -29,6 +30,15 @@ data class BatchItem(
      * shows it must not offer a bug report for a safety check doing its job.
      */
     val detail: String? = null,
+    /**
+     * A small frame from [output], for the queue row.
+     *
+     * Made once, when the clip finishes, on the worker thread that produced it -- a
+     * retriever call on the main thread would stutter the list at exactly the moment the
+     * next clip starts encoding. Null until then, and null for anything that did not
+     * produce a file.
+     */
+    val thumb: Bitmap? = null,
 )
 
 /**

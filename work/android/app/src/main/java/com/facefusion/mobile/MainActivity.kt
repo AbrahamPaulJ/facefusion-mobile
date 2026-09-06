@@ -172,6 +172,17 @@ class MainActivity : ComponentActivity() {
     private var faceBoxes by mutableStateOf<FloatArray?>(null)
 
     /**
+     * The frame [faceBoxes] were computed FROM, by identity.
+     *
+     * ⚠ Without this the boxes outlive their frame. A finished run releases the pipeline, so
+     * the detection effect early-returns on `!previewWarm` -- and the old frame's rectangles
+     * stayed on screen over the new frame until the re-warm finished. Reported as "after
+     * swap output the ORIGINAL frame has changed and boxes are misaligned", which is exactly
+     * what it was: right boxes, wrong frame.
+     */
+    private var faceBoxFrame: Bitmap? = null
+
+    /**
      * The face chosen to swap, as its box -- upstream's `face_selector_mode = reference`.
      *
      * The IDENTITY lives natively (see `Pipeline::setReferenceFaceAt`); this is only what
@@ -808,6 +819,13 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(originalFrame, showFaceBoxes, previewWarm, busy,
                                targetVersion) {
                     val frame = originalFrame
+                    // The boxes belong to ONE frame. The moment the frame changes they are
+                    // wrong, and being wrong on screen is worse than being absent -- so they
+                    // go immediately, before anything below decides whether to recompute.
+                    if (faceBoxFrame !== frame) {
+                        faceBoxes = null
+                        faceBoxFrame = null
+                    }
                     val decide = autoBoxTarget != targetVersion
                     if (frame == null || !previewWarm || busy ||
                         (!showFaceBoxes && !decide)) {
@@ -837,6 +855,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     faceBoxes = if (showFaceBoxes) found else null
+                    faceBoxFrame = frame
                 }
 
                 LaunchedEffect(sourceUri, targetVersion, modelsMissing) {
@@ -957,6 +976,19 @@ class MainActivity : ComponentActivity() {
                                     if (batchQueue.size > 1) runBatch() else runSwap()
                                 },
                                 batch = batchQueue,
+                                batchAutoSave = opts.batchAutoSave,
+                                onBatchAutoSave = { on ->
+                                    applyOpts(opts.copy(batchAutoSave = on))
+                                },
+                                onOpenBatchOutput = { i ->
+                                    batchQueue.getOrNull(i)?.output?.let {
+                                        outputFile = it
+                                        outputPartial = false
+                                        savedUri = null
+                                        status = getString(R.string.status_batch_showing,
+                                                           batchQueue[i].name)
+                                    }
+                                },
                                 onAddToBatch = {
                                     pickMoreTargets.launch(arrayOf("video/*"))
                                 },
@@ -2807,12 +2839,18 @@ class MainActivity : ComponentActivity() {
                             onLog = { appendLog(it) },
                             isCancelled = { cancelRequested || BatchStatus.cancelled },
                         ).swap(f.absolutePath, out.absolutePath).getOrThrow()
-                        out
+                        // On THIS thread, while it is already off the main one: a retriever
+                        // call in the state update below would stutter the list exactly as
+                        // the next clip starts encoding.
+                        out to batchThumb(out)
                     }
                 }
                 batchQueue = batchQueue.mapIndexed { j, it ->
                     if (j != i) it else r.fold(
-                        { f -> done++; it.copy(state = BatchState.Done, output = f) },
+                        { (f, th) ->
+                            done++
+                            it.copy(state = BatchState.Done, output = f, thumb = th)
+                        },
                         { e ->
                             when {
                                 e.message == "cancelled" -> it.copy(state = BatchState.Skipped)
@@ -2829,7 +2867,13 @@ class MainActivity : ComponentActivity() {
                 }
                 // The last finished clip is what the panes show, so the screen is not left
                 // on a frame from four clips ago.
-                r.getOrNull()?.let { outputFile = it }
+                r.getOrNull()?.let { (f, _) ->
+                    outputFile = f
+                    // AS IT FINISHES, not at the end. A batch is unattended by nature, and
+                    // saving twelve clips only once the last one lands means a cancel or a
+                    // crash at clip eleven loses ten that were already finished.
+                    if (opts.batchAutoSave) saveToGallery(f)
+                }
                 // The COPY, not the output. A twelve-clip batch would otherwise leave
                 // twelve full-size videos in the cache behind the twelve it produced.
                 if (i > 0 && item.uri.scheme != "file")
@@ -2850,6 +2894,26 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    /**
+     * A small first frame of [f], for a batch queue row.
+     *
+     * MediaMetadataRetriever rather than FrameSeeker: this wants one thumbnail from a file
+     * this app just wrote, not an exact seek into an arbitrary container, and the retriever
+     * is a fraction of the cost. Failure is null -- a missing thumbnail is a cosmetic loss
+     * and must never take a finished clip down with it.
+     */
+    private fun batchThumb(f: File): Bitmap? = runCatching {
+        android.media.MediaMetadataRetriever().use { r ->
+            r.setDataSource(f.absolutePath)
+            val full = r.getFrameAtTime(0) ?: return@use null
+            val w = 160
+            val h = (full.height.toLong() * w / full.width).toInt().coerceAtLeast(1)
+            Bitmap.createScaledBitmap(full, w, h, true).also {
+                if (it !== full) full.recycle()
+            }
+        }
+    }.getOrNull()
 
     /** The finished video, into the shared Movies collection. */
     private fun saveToGallery(file: File) {

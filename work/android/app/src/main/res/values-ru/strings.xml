@@ -354,4 +354,7 @@
     <string name="swap_batch_add_more">Добавить ещё клипы</string>
     <string name="status_faces_found">Найдено лиц: %1$d — нажмите на одно, чтобы заменить только его.</string>
     <string name="status_reference_warming">Готовится предпросмотр — нажмите на лицо ещё раз через мгновение.</string>
+    <string name="batch_autosave">Сохранять каждый клип в галерею сразу</string>
+    <string name="batch_output_of">Клип %1$d из %2$d — проведите пальцем</string>
+    <string name="status_batch_showing">Показан %1$s</string>
 </resources>
