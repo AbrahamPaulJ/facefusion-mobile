@@ -2357,15 +2357,20 @@ class MainActivity : ComponentActivity() {
             if (rest.isEmpty()) { clearTarget(); return }
             // ⚠ Order matters: loadTarget does NOT touch batchQueue (only clearTarget does),
             // so the shortened queue set here survives the load that follows it.
-            batchQueue = if (rest.size > 1) rest else emptyList()
+            batchQueue = rest
             loadTarget(rest.first().uri)
             return
         }
-        val left = batchQueue.filterIndexed { j, _ -> j != i }
-        // One clip is not a queue. Collapsing to empty keeps a single remaining item
-        // unambiguous: it is simply the target, and Swap takes the single-run path with its
-        // trim, rather than a batch of one that quietly ignores the trim slider.
-        batchQueue = if (left.size > 1) left else emptyList()
+        // ⚠ DELETE ONE ROW, LOSE ONE ROW. This used to collapse the queue to empty
+        // whenever a single item was left, on the reasoning that one clip is not a queue --
+        // which meant that deleting either row of a TWO-clip list made both disappear, and
+        // from outside that is indistinguishable from a delete button that wipes the list.
+        // Reported as exactly that.
+        //
+        // The list now shows whatever is left, down to one. Swap still routes a queue of
+        // one to the single-run path, so it keeps its trim; that decision belongs at the
+        // button, not in a rule that quietly deletes rows the user did not ask to delete.
+        batchQueue = batchQueue.filterIndexed { j, _ -> j != i }
     }
 
     /**

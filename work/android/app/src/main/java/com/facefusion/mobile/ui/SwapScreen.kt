@@ -802,10 +802,13 @@ fun SwapScreen(
             }
         }
 
-        // THE QUEUE. Only when there is one -- a list of length one is the normal
-        // single-clip screen, and drawing an empty container for it would add a row of
-        // furniture to the case that does not need it.
-        if (batch.size > 1) {
+        // THE QUEUE, whenever one exists -- down to a single row.
+        //
+        // ⚠ It used to draw only at size > 1, which paired with a runner that collapsed the
+        // list at one item to make deleting from a two-clip queue look like a button that
+        // wiped everything. A queue is only ever non-empty because the user built one, so a
+        // one-row card is not furniture: it is the last clip they queued, still there.
+        if (batch.isNotEmpty()) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(vertical = 4.dp)) {
                     // AUTO-SAVE, at the top of the queue rather than in a settings screen:
