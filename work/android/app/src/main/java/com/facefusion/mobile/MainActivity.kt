@@ -977,6 +977,13 @@ class MainActivity : ComponentActivity() {
                                 },
                                 batch = batchQueue,
                                 batchAutoSave = opts.batchAutoSave,
+                                // Already in the gallery, so there is nothing to offer.
+                                // Auto-save writes each clip as it finishes; a Save button
+                                // beside a clip that is already saved is a second copy and
+                                // a question the user has answered once already.
+                                outputAutoSaved = opts.batchAutoSave &&
+                                    outputFile != null &&
+                                    batchQueue.any { it.output == outputFile },
                                 onBatchAutoSave = { on ->
                                     applyOpts(opts.copy(batchAutoSave = on))
                                 },
@@ -985,8 +992,10 @@ class MainActivity : ComponentActivity() {
                                         outputFile = it
                                         outputPartial = false
                                         savedUri = null
-                                        status = getString(R.string.status_batch_showing,
-                                                           batchQueue[i].name)
+                                        // The NAME alone. "Showing beach.mp4" spends the
+                                        // status line saying what the pane above it is
+                                        // already doing.
+                                        status = batchQueue[i].name
                                     }
                                 },
                                 onAddToBatch = {

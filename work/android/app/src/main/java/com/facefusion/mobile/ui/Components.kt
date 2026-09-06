@@ -517,6 +517,21 @@ fun OutputPane(
                 .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center,
         ) {
+            // ⚠ KEYED ON THE PATH, and this is not decoration. AndroidView's `factory`
+            // runs ONCE; nothing re-points a VideoView when the composable's `file`
+            // changes, so swapping the file left the previous video loaded and playing.
+            //
+            // It went unnoticed because a single run never exercises it: between two runs
+            // `outputFile` is null while discardOutput deletes the old file, the pane
+            // leaves composition, and the next run builds a fresh view. Batch swipe is the
+            // first path that goes from one file straight to another, and it showed clip
+            // one's frames under clip two's name.
+            //
+            // key() rather than an `update` block: VideoView is a stateful legacy view with
+            // a prepared/playing lifecycle, and re-targeting one mid-playback is a longer
+            // list of things to get right than throwing it away. Every piece of state
+            // around it is already `remember(file)`, so it resets with the view.
+            key(file.absolutePath) {
             AndroidView(
                 factory = { ctx ->
                     VideoView(ctx).apply {
@@ -533,6 +548,7 @@ fun OutputPane(
                 },
                 modifier = Modifier.fillMaxSize(),
             )
+            }
         }
         Row(
             Modifier.fillMaxWidth(),

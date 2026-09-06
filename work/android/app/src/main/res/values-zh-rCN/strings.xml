@@ -95,7 +95,7 @@
     <string name="opt_weight_hint_default">直接使用源人脸特征，不作修改（默认）</string>
     <string name="opt_pixel_boost">像素增强</string>
     <string name="opt_pixel_boost_native">模型的原生尺寸</string>
-    <string name="opt_pixel_boost_cost">每张脸的换脸开销变为 %1$d 倍 —— 处理照片没问题，处理视频会很慢</string>
+    <string name="opt_pixel_boost_cost">每张脸的换脸开销变为 %1$d 倍 ， 处理照片没问题，处理视频会很慢</string>
     <string name="opt_model">模型</string>
     <string name="opt_model_hint">hyperswap 为 256²，inswapper 为 128² 且更慢</string>
 
@@ -123,14 +123,14 @@
     <string name="opt_faces_every_short">所有人脸</string>
     <string name="opt_faces_largest_short">最大的人脸</string>
     <string name="opt_faces_hint">替换画面中的所有人脸，或只替换最大的一张</string>
-    <string name="opt_detector_note">检测尺寸固定为 640，换脸尺寸固定为 256 —— 两者都已编译进 NPU 二进制文件</string>
+    <string name="opt_detector_note">检测尺寸固定为 640，换脸尺寸固定为 256 ， 两者都已编译进 NPU 二进制文件</string>
 
     <string name="opt_face_enhancer">人脸增强</string>
     <string name="opt_enhancer_summary">gpen_bfr_256   混合 %1$s</string>
     <string name="opt_enhancer_off_summary">关闭</string>
     <string name="opt_blend">混合</string>
     <string name="opt_blend_hint_full">只使用增强后的结果</string>
-    <string name="opt_blend_hint_none">无效果 —— 换脸结果保持不变</string>
+    <string name="opt_blend_hint_none">无效果 ， 换脸结果保持不变</string>
     <string name="opt_blend_hint_mixed">与未增强的换脸结果混合（默认 0.80）</string>
     <string name="opt_enhancer_note">在贴回原图之前，以 %1$s 处理换好的人脸</string>
     <string name="opt_lip_sync_weight_hint">音频驱动口型的强度（默认 0.50）</string>
@@ -175,7 +175,7 @@
     <string name="set_runtime_cpu">CPU</string>
     <string name="set_runtime_none">未启动</string>
     <string name="set_unknown_dash">-</string>
-    <string name="set_ncnn_note">此设备没有高通 NPU，因此换脸在 GPU 和 CPU 上运行：每帧耗时约为原来的 13 倍。人脸增强和内容检查在这里始终使用 CPU —— 在 GPU 上它们的结果是错误的，而不只是更慢。</string>
+    <string name="set_ncnn_note">此设备没有高通 NPU，因此换脸在 GPU 和 CPU 上运行：每帧耗时约为原来的 13 倍。人脸增强和内容检查在这里始终使用 CPU ， 在 GPU 上它们的结果是错误的，而不只是更慢。</string>
     <string name="set_htp_unmeasured">无法测量 HTP。应用会回退到兼容性最好的版本，因此这不一定意味着无法运行。</string>
     <string name="set_hexagon_arch">Hexagon 架构</string>
     <string name="set_vtcm">VTCM</string>
@@ -188,7 +188,7 @@
     <string name="set_supported_devices">支持的设备</string>
     <string name="set_in_use">使用中</string>
 
-    <string name="set_runtime_override_note">本机有 Hexagon NPU 并正在使用它。强制走 GPU/CPU 路径可以看到没有高通 NPU 的设备是什么表现 —— 它需要另一套模型，而且慢得多。</string>
+    <string name="set_runtime_override_note">本机有 Hexagon NPU 并正在使用它。强制走 GPU/CPU 路径可以看到没有高通 NPU 的设备是什么表现 ， 它需要另一套模型，而且慢得多。</string>
     <string name="set_runtime_pinned_note">运行方式是手动固定的，而不是根据本机自动选择的。选择“自动”即可恢复：有 NPU 时使用 NPU，没有时使用 GPU 和 CPU。</string>
     <string name="set_runtime_auto">自动</string>
     <string name="set_runtime_force_npu">NPU</string>
@@ -200,7 +200,7 @@
     <string name="set_api_body">打开此开关，然后在电脑的浏览器中访问下面的地址。所有处理仍然在这台手机上进行。</string>
     <string name="set_api_lan_title">允许其他设备连接</string>
     <string name="set_api_lan_on">已开启。同一网络中能访问到这台手机的任何人都可以打开该页面并用它换脸。</string>
-    <string name="set_api_lan_on_pending">已开启。目前还没有开始监听 —— 在上面启动服务后才会生效。</string>
+    <string name="set_api_lan_on_pending">已开启。目前还没有开始监听 ， 在上面启动服务后才会生效。</string>
     <string name="set_api_lan_off">已关闭。仅限本机，或通过 USB 连接的电脑。</string>
     <string name="set_api_open_this">访问地址</string>
     <string name="set_api_over_usb">或通过 USB</string>
@@ -289,7 +289,7 @@
     <string name="out_delete_title">删除这个输出？</string>
     <string name="out_delete_body">渲染好的文件将从这部手机上删除。已经保存到相册的内容会保留。</string>
     <string name="opt_fast_video">快速视频</string>
-    <string name="opt_fast_video_hint">两次人脸检测之间相隔的帧数。中间的帧改为跟踪人脸而不是重新检测，速度更快，但头部快速移动时略欠精确。仅用于视频处理 — 预览始终重新检测人脸。</string>
+    <string name="opt_fast_video_hint">两次人脸检测之间相隔的帧数。中间的帧改为跟踪人脸而不是重新检测，速度更快，但头部快速移动时略欠精确。仅用于视频处理：预览始终重新检测人脸。</string>
     <string name="opt_fast_video_off">关闭</string>
     <string name="live_title">实时</string>
     <string name="live_models_missing">未安装模型</string>
@@ -309,7 +309,7 @@
     <string name="live_fast_confirm_title">关闭快速模式？</string>
     <string name="live_fast_confirm_body">快速模式是实时画面能够流畅的原因。它会强制使用相机跟得上的设置：
 
-• 人脸跟踪开启 — 每四帧检测一次
+• 人脸跟踪开启：每四帧检测一次
 • 人脸增强关闭
 • pixel boost 256（不放大）
 • 口型同步关闭
@@ -364,13 +364,13 @@
     <string name="notif_batch_title">正在替换片段</string>
     <string name="notif_batch_text">第 %1$d / %2$d 个片段：%3$s</string>
     <string name="notif_batch_channel">批量替换</string>
-    <string name="status_batch_queued_some">已排入 %1$d 个片段。已忽略 %2$d 张照片——批量仅支持视频。</string>
+    <string name="status_batch_queued_some">已排入 %1$d 个片段。已忽略 %2$d 张照片，批量仅支持视频。</string>
     <string name="status_batch_images_only">照片逐张替换；结果已显示在面板上。</string>
     <string name="swap_batch_add">添加更多片段（批量）</string>
     <string name="swap_batch_add_more">添加更多片段</string>
-    <string name="status_faces_found">检测到 %1$d 张人脸——点按其中一张仅替换该人脸。</string>
-    <string name="status_reference_warming">正在准备预览——请稍后再次点按该人脸。</string>
+    <string name="status_faces_found">检测到 %1$d 张人脸，点按其中一张仅替换该人脸。</string>
+    <string name="status_reference_warming">正在准备预览，请稍后再次点按该人脸。</string>
     <string name="batch_autosave">每个片段完成后立即保存到相册</string>
-    <string name="batch_output_of">第 %1$d / %2$d 个片段——滑动切换</string>
-    <string name="status_batch_showing">正在显示 %1$s</string>
+    <string name="batch_output_of">第 %1$d / %2$d 个片段，滑动切换</string>
+    <string name="swap_autosaved_to_gallery">已自动保存到 Movies/FaceFusion。</string>
 </resources>

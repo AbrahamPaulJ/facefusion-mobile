@@ -103,7 +103,7 @@
     <string name="opt_weight_hint_default">эмбеддинг исходника без изменений (по умолчанию)</string>
     <string name="opt_pixel_boost">Pixel boost</string>
     <string name="opt_pixel_boost_native">собственный размер модели</string>
-    <string name="opt_pixel_boost_cost">в %1$d раз дороже на лицо — нормально для фото, медленно для видео</string>
+    <string name="opt_pixel_boost_cost">в %1$d раз дороже на лицо: нормально для фото, медленно для видео</string>
     <string name="opt_model">Модель</string>
     <string name="opt_model_hint">hyperswap — 256², inswapper — 128² и медленнее</string>
     <string name="opt_face_masker">Маска лица</string>
@@ -130,15 +130,15 @@
     <string name="opt_faces_largest_short">самое крупное лицо</string>
     <string name="opt_faces_hint">заменять все лица в кадре или только самое крупное</string>
     <string name="opt_fast_video">Быстрое видео</string>
-    <string name="opt_fast_video_hint">Сколько кадров между обнаружениями лица. В промежутке лицо отслеживается, а не ищется заново: быстрее, но чуть менее точно при быстрых движениях головы. Работает только для видео — в предпросмотре лицо ищется всегда.</string>
+    <string name="opt_fast_video_hint">Сколько кадров между обнаружениями лица. В промежутке лицо отслеживается, а не ищется заново: быстрее, но чуть менее точно при быстрых движениях головы. Работает только для видео; в предпросмотре лицо ищется всегда.</string>
     <string name="opt_fast_video_off">Выкл.</string>
-    <string name="opt_detector_note">размер детектора зафиксирован на 640, а свопера на 256 — оба вшиты в бинарники NPU</string>
+    <string name="opt_detector_note">размер детектора зафиксирован на 640, а свопера на 256; оба вшиты в бинарники NPU</string>
     <string name="opt_face_enhancer">Улучшение лица</string>
     <string name="opt_enhancer_summary">gpen_bfr_256   смешивание %1$s</string>
     <string name="opt_enhancer_off_summary">выкл.</string>
     <string name="opt_blend">Смешивание</string>
     <string name="opt_blend_hint_full">только результат улучшения</string>
-    <string name="opt_blend_hint_none">без эффекта — замена остаётся нетронутой</string>
+    <string name="opt_blend_hint_none">без эффекта; замена остаётся нетронутой</string>
     <string name="opt_blend_hint_mixed">смешано с неулучшенной заменой (по умолчанию 0,80)</string>
     <string name="opt_enhancer_note">работает на заменённом лице в %1$s, до вставки обратно</string>
     <string name="opt_lip_sync_weight_hint">насколько сильно аудио управляет ртом (по умолчанию 0,50)</string>
@@ -182,7 +182,7 @@
     <string name="set_runtime_cpu">CPU</string>
     <string name="set_runtime_none">ничего не запустилось</string>
     <string name="set_unknown_dash">-</string>
-    <string name="set_ncnn_note">На этом устройстве нет NPU Qualcomm, поэтому замена выполняется на GPU и CPU: ожидайте примерно в 13 раз больше времени на кадр. Улучшение лица и проверка контента здесь всегда идут на CPU — на GPU они дают измеримо неверный результат, а не просто работают медленнее.</string>
+    <string name="set_ncnn_note">На этом устройстве нет NPU Qualcomm, поэтому замена выполняется на GPU и CPU: ожидайте примерно в 13 раз больше времени на кадр. Улучшение лица и проверка контента здесь всегда идут на CPU; на GPU они дают измеримо неверный результат, а не просто работают медленнее.</string>
     <string name="set_htp_unmeasured">HTP не удалось измерить. Приложение откатывается к самой нетребовательной сборке, так что это не обязательно означает, что запуск не удастся.</string>
     <string name="set_hexagon_arch">Архитектура Hexagon</string>
     <string name="set_vtcm">VTCM</string>
@@ -194,7 +194,7 @@
     <string name="set_context_binaries">Контекстные бинарники</string>
     <string name="set_supported_devices">Поддерживаемые устройства</string>
     <string name="set_in_use">используется</string>
-    <string name="set_runtime_override_note">В этом телефоне есть Hexagon NPU, и он используется. Принудительный путь GPU/CPU показывает, как работает устройство не на Qualcomm — ему нужен собственный набор моделей, и он значительно медленнее.</string>
+    <string name="set_runtime_override_note">В этом телефоне есть Hexagon NPU, и он используется. Принудительный путь GPU/CPU показывает, как работает устройство не на Qualcomm; ему нужен собственный набор моделей, и он значительно медленнее.</string>
     <string name="set_runtime_pinned_note">Среда выполнения закреплена вручную, а не выбрана для этого телефона. «Автоматически» вернёт всё как было: NPU там, где он есть, GPU и CPU там, где его нет.</string>
     <string name="set_runtime_auto">Автоматически</string>
     <string name="set_runtime_force_npu">NPU</string>
@@ -206,7 +206,7 @@
     <string name="set_api_body">Включите это и откройте адрес ниже в браузере на компьютере. Всё по-прежнему выполняется на этом телефоне.</string>
     <string name="set_api_lan_title">Разрешить подключение другим устройствам</string>
     <string name="set_api_lan_on">Включено. Любой, кто может достучаться до этого телефона в вашей сети, может открыть страницу и менять лица.</string>
-    <string name="set_api_lan_on_pending">Включено. Пока никто не слушает — заработает, когда вы включите сервер выше.</string>
+    <string name="set_api_lan_on_pending">Включено. Пока никто не слушает; заработает, когда вы включите сервер выше.</string>
     <string name="set_api_lan_off">Выключено. Только этот телефон или компьютер, подключённый по USB.</string>
     <string name="set_api_open_this">Откройте это</string>
     <string name="set_api_over_usb">Или по USB</string>
@@ -297,7 +297,7 @@
     <string name="live_fast_on">Отслеживание вкл., улучшение выкл., 256, без синхронизации губ</string>
     <string name="live_fast_off">Ваши настройки замены, включая улучшение лица</string>
     <string name="live_fast_confirm_title">Выключить быстрый режим?</string>
-    <string name="live_fast_confirm_body">Быстрый режим — это то, что делает живое видео смотрибельным. Он принудительно задаёт настройки, за которыми камера успевает:\n\n• отслеживание лица ВКЛ. — детектор работает на каждом четвёртом кадре\n• улучшение лица ВЫКЛ.\n• pixel boost 256 (без увеличения)\n• синхронизация губ ВЫКЛ.\n\nЕсли выключить, будут применяться ваши собственные настройки замены. Это экспериментально: улучшение лица на 1024 может опустить частоту кадров до однозначных значений, а синхронизации губ вживую нечего отслеживать — аудио нет.</string>
+    <string name="live_fast_confirm_body">Быстрый режим — это то, что делает живое видео смотрибельным. Он принудительно задаёт настройки, за которыми камера успевает:\n\n• отслеживание лица ВКЛ.: детектор работает на каждом четвёртом кадре\n• улучшение лица ВЫКЛ.\n• pixel boost 256 (без увеличения)\n• синхронизация губ ВЫКЛ.\n\nЕсли выключить, будут применяться ваши собственные настройки замены. Это экспериментально: улучшение лица на 1024 может опустить частоту кадров до однозначных значений, а синхронизации губ вживую нечего отслеживать: аудио нет.</string>
     <string name="live_fast_confirm_ok">Выключить</string>
     <string name="common_cancel">Отмена</string>
     <string name="common_delete">Удалить</string>
@@ -326,7 +326,7 @@
     <string name="status_reference_missed">В этой точке лица нет.</string>
     <string name="status_reference_cleared">Снова меняются все лица.</string>
     <string name="opt_reference_distance">Совпадение с выбранным лицом</string>
-    <string name="opt_reference_distance_hint">Работает только после выбора лица на цели. Больше — совпадает больше людей; меньше — тот же человек может перестать совпадать, когда отвернётся.</string>
+    <string name="opt_reference_distance_hint">Работает только после выбора лица на цели. Больше: совпадает больше людей; меньше: тот же человек может перестать совпадать, когда отвернётся.</string>
     <string name="swap_action_batch">Обработать %1$d клипов</string>
     <string name="status_batch_queued">В очереди %1$d клипов. Обрезка и частота кадров — только для первого.</string>
     <string name="status_batch_item">Клип %1$d из %2$d: %3$s</string>
@@ -348,13 +348,13 @@
     <string name="notif_batch_title">Обработка клипов</string>
     <string name="notif_batch_text">Клип %1$d из %2$d: %3$s</string>
     <string name="notif_batch_channel">Пакетная обработка</string>
-    <string name="status_batch_queued_some">В очереди %1$d клипов. Фото пропущено: %2$d — пакет только для видео.</string>
+    <string name="status_batch_queued_some">В очереди %1$d клипов. Фото пропущено: %2$d. Пакет только для видео.</string>
     <string name="status_batch_images_only">Фото обрабатывается по одному; результат уже на панели.</string>
     <string name="swap_batch_add">Добавить клипы (пакет)</string>
     <string name="swap_batch_add_more">Добавить ещё клипы</string>
-    <string name="status_faces_found">Найдено лиц: %1$d — нажмите на одно, чтобы заменить только его.</string>
-    <string name="status_reference_warming">Готовится предпросмотр — нажмите на лицо ещё раз через мгновение.</string>
+    <string name="status_faces_found">Найдено лиц: %1$d. Нажмите на одно, чтобы заменить только его.</string>
+    <string name="status_reference_warming">Готовится предпросмотр. Нажмите на лицо ещё раз через мгновение.</string>
     <string name="batch_autosave">Сохранять каждый клип в галерею сразу</string>
-    <string name="batch_output_of">Клип %1$d из %2$d — проведите пальцем</string>
-    <string name="status_batch_showing">Показан %1$s</string>
+    <string name="batch_output_of">Клип %1$d из %2$d, проведите пальцем</string>
+    <string name="swap_autosaved_to_gallery">Автоматически сохранено в Movies/FaceFusion.</string>
 </resources>

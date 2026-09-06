@@ -165,6 +165,14 @@ fun SwapScreen(
     onAddToBatch: () -> Unit,
     /** Show a finished batch clip in the output pane, by its index in [batch]. */
     onOpenBatchOutput: (Int) -> Unit,
+    /**
+     * The output on screen is already in the gallery, put there by the batch's auto-save.
+     *
+     * Hides the Save button rather than disabling it: a greyed control still asks the user
+     * to work out why, and the answer -- "because it is already saved" -- is better said by
+     * the label that replaces it.
+     */
+    outputAutoSaved: Boolean,
     /** Copy every finished batch clip straight to the gallery. */
     batchAutoSave: Boolean,
     onBatchAutoSave: (Boolean) -> Unit,
@@ -972,11 +980,26 @@ fun SwapScreen(
         }
 
         if (hasOutput) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button(onSave, enabled = idle, modifier = Modifier.weight(1f),
-                       shape = RoundedCornerShape(14.dp)) {
-                    Text(stringResource(if (saved) R.string.swap_saved_to_gallery
-                                        else R.string.swap_save_to_gallery))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Auto-save already put this clip in the gallery, so there is nothing to
+                // offer -- just a line saying where it went. Share stays: sending it
+                // somewhere is a different action from keeping it.
+                if (outputAutoSaved) {
+                    Text(
+                        stringResource(R.string.swap_autosaved_to_gallery),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                } else {
+                    Button(onSave, enabled = idle, modifier = Modifier.weight(1f),
+                           shape = RoundedCornerShape(14.dp)) {
+                        Text(stringResource(if (saved) R.string.swap_saved_to_gallery
+                                            else R.string.swap_save_to_gallery))
+                    }
                 }
                 OutlinedButton(onShare, enabled = idle,
                                shape = RoundedCornerShape(14.dp)) {
