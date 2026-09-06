@@ -349,8 +349,13 @@ android {
         // must stop calling itself one -- a bug report naming "0.7.0" has to mean the
         // thing on GitHub. Features from here (roadmap 13a, 2b, 12b, 14, 13b) bump
         // the CODE only; the name moves again when 0.8.0 is actually released.
-        versionCode = 69
-        versionName = "0.8.0$variantTag"    // "-dev" == NO content gate
+        // ⚠ THE NAME MOVES WITH EVERY BUILD THAT LEAVES THIS MACHINE, not just with
+        // every release. Asked for 2026-09-06: quoting a versionCode to say which
+        // build someone is holding is precise and useless to them. 0.7.0 had four
+        // APKs and 0.8.0 had ten, and in both cases the NAME could not tell them
+        // apart -- which is the whole ambiguity the version rule exists to stop.
+        versionCode = 70
+        versionName = "0.8.1$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }
