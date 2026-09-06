@@ -406,6 +406,10 @@
     <string name="batch_skipped">skipped</string>
     <string name="batch_remove">Remove from queue</string>
     <string name="batch_unnamed_clip">clip</string>
+    <string name="swap_batch_add">Add more clips (batch)</string>
+    <string name="swap_batch_add_more">Add more clips</string>
+    <string name="status_faces_found">%1$d faces found — tap one to swap only that face.</string>
+    <string name="status_reference_warming">Preparing the preview — tap the face again in a moment.</string>
     <string name="status_batch_queued_some">%1$d clips queued. %2$d photos were left out — batches are videos only.</string>
     <string name="status_batch_images_only">Photos are swapped one at a time; the result is already on the pane.</string>
     <string name="notif_batch_title">Swapping clips</string>

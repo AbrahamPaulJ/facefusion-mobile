@@ -369,4 +369,8 @@
     <string name="notif_batch_channel">批次替換</string>
     <string name="status_batch_queued_some">已排入 %1$d 個片段。已略過 %2$d 張相片——批次僅支援影片。</string>
     <string name="status_batch_images_only">相片逐張替換；結果已顯示在面板上。</string>
+    <string name="swap_batch_add">新增更多片段（批次）</string>
+    <string name="swap_batch_add_more">新增更多片段</string>
+    <string name="status_faces_found">偵測到 %1$d 張臉孔——點按其中一張僅替換該臉孔。</string>
+    <string name="status_reference_warming">正在準備預覽——請稍後再次點按該臉孔。</string>
 </resources>

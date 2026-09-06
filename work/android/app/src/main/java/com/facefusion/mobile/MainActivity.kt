@@ -160,6 +160,15 @@ class MainActivity : ComponentActivity() {
      * original frame costs one yoloface pass (~2 ms) and no identity work at all.
      */
     private var showFaceBoxes by mutableStateOf(false)
+
+    /**
+     * The [targetVersion] the overlay has already decided about.
+     *
+     * The decision is "does this clip hold more than one face", and it is made ONCE per
+     * target. Without the marker the next preview frame would re-decide and switch the
+     * overlay back on for a user who had just turned it off.
+     */
+    private var autoBoxTarget by mutableStateOf(-1)
     private var faceBoxes by mutableStateOf<FloatArray?>(null)
 
     /**
@@ -431,6 +440,9 @@ class MainActivity : ComponentActivity() {
     private val pickTarget = registerForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNullOrEmpty()) return@registerForActivityResult
+        // How many came back, in the log: "I picked several and got one clip" and "I picked
+        // one" are the same screen afterwards, and only this line tells them apart.
+        android.util.Log.i("ffbatch", "picker returned " + uris.size + " uri(s)")
         batchQueue = emptyList()
         loadTarget(uris.first())
         // ⚠ VIDEOS ONLY, and the first pick decides whether there is a queue at all.
@@ -466,6 +478,39 @@ class MainActivity : ComponentActivity() {
                      else getString(R.string.status_batch_queued, videos.size)
         }
     }
+    /**
+     * Add clips to the queue WITHOUT disturbing the visible target -- roadmap 14.
+     *
+     * ⚠ This exists because the field report was "i didnt see any batch processing from ui
+     * side". The design was that picking several files IS the batch, with no control to
+     * find; that is still true and still works, but it is invisible -- SAF needs a
+     * long-press before a second file can be selected at all, so a user who does not
+     * already know the feature exists has no way to discover it. A named button is how
+     * they find out the queue is there; multi-select stays as the fast path.
+     */
+    private val pickMoreTargets = registerForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNullOrEmpty()) return@registerForActivityResult
+        val tgt = targetFile ?: return@registerForActivityResult
+        val videos = uris.filter {
+            contentResolver.getType(it)?.startsWith("image/") != true
+        }
+        if (videos.isEmpty()) {
+            status = getString(R.string.status_batch_images_only)
+            return@registerForActivityResult
+        }
+        // Seed index 0 with the VISIBLE target the first time, so the queue keeps its one
+        // representation: item 0 is always the clip on screen. runBatch reads targetFile
+        // for that item rather than this URI, so a cache path here would be equivalent.
+        val head = if (batchQueue.isEmpty())
+                       listOf(BatchItem(Uri.fromFile(tgt), targetName ?: tgt.name))
+                   else batchQueue
+        batchQueue = head + videos.map {
+            BatchItem(it, displayName(it) ?: getString(R.string.batch_unnamed_clip))
+        }
+        status = getString(R.string.status_batch_queued, batchQueue.size)
+    }
+
     // Audio or video -- upstream's own `source_paths` takes either and reads whichever
     // track is there, so a dubbed line saved as a short video should not be rejected for
     // carrying pixels it will never use.
@@ -749,20 +794,27 @@ class MainActivity : ComponentActivity() {
                 // a stale frame filled the pane instead. Now that a target change keeps the
                 // pipeline (see clearPreviewFrames), this is what draws the new target, and
                 // the guard would have left the pane empty.
-                // WHAT THE DETECTOR SEES, on demand.
+                // WHAT THE DETECTOR SEES.
                 //
-                // Keyed on the frame and the switch, so it re-asks when either changes and
-                // never runs while the overlay is off. `previewWarm` is the precondition
-                // that matters: detectFaces goes straight at the shared g_pipe, so it must
-                // not be asked while a run owns it -- `busy` covers that, and PipeGuard
-                // covers the API.
-                LaunchedEffect(originalFrame, showFaceBoxes, previewWarm, busy) {
+                // `previewWarm` is the precondition that matters: detectFaces goes straight
+                // at the shared g_pipe, so it must not be asked while a run owns it --
+                // `busy` covers that, and PipeGuard covers the API.
+                //
+                // ⚠ It also runs ONCE PER TARGET while the overlay is OFF, to answer "is
+                // there more than one face here". That question cannot be answered by the
+                // switch's initial value, because the detector has to have run first -- and
+                // it is exactly the question the user has when a second face is on screen.
+                // One yoloface pass, ~2 ms, and no identity work at all.
+                LaunchedEffect(originalFrame, showFaceBoxes, previewWarm, busy,
+                               targetVersion) {
                     val frame = originalFrame
-                    if (!showFaceBoxes || frame == null || !previewWarm || busy) {
-                        if (!showFaceBoxes) faceBoxes = null
+                    val decide = autoBoxTarget != targetVersion
+                    if (frame == null || !previewWarm || busy ||
+                        (!showFaceBoxes && !decide)) {
+                        if (!showFaceBoxes && !decide) faceBoxes = null
                         return@LaunchedEffect
                     }
-                    faceBoxes = withContext(Dispatchers.Default) {
+                    val found = withContext(Dispatchers.Default) {
                         runCatching {
                             val soft = frame.copy(Bitmap.Config.ARGB_8888, false)
                                 ?: return@runCatching null
@@ -773,6 +825,18 @@ class MainActivity : ComponentActivity() {
                                 soft.width, soft.height)
                         }.getOrNull()
                     }
+                    if (decide) {
+                        // Once per target, whatever the answer: a user who turns the
+                        // overlay back off must not have it turned on again by the next
+                        // preview frame of the same clip.
+                        autoBoxTarget = targetVersion
+                        if ((found?.size ?: 0) >= 10) {
+                            showFaceBoxes = true
+                            status = getString(R.string.status_faces_found,
+                                               (found?.size ?: 0) / 5)
+                        }
+                    }
+                    faceBoxes = if (showFaceBoxes) found else null
                 }
 
                 LaunchedEffect(sourceUri, targetVersion, modelsMissing) {
@@ -893,6 +957,9 @@ class MainActivity : ComponentActivity() {
                                     if (batchQueue.size > 1) runBatch() else runSwap()
                                 },
                                 batch = batchQueue,
+                                onAddToBatch = {
+                                    pickMoreTargets.launch(arrayOf("video/*"))
+                                },
                                 onRemoveFromBatch = { i ->
                                     // ⚠ Index 0 is the VISIBLE target. It is removed by
                                     // clearing the target, not from this list -- dropping
@@ -2192,7 +2259,23 @@ class MainActivity : ComponentActivity() {
      */
     private fun pickReferenceFace(x: Float, y: Float) {
         val frame = originalFrame ?: return
-        if (!previewWarm || busy) return
+        if (busy) return
+        // ⚠ THIS USED TO RETURN SILENTLY, and that is the whole of the bug reported as
+        // "after output is made i cant choose different face box unless i load the target
+        // again". A finished run RELEASES the pipeline and only re-warms through
+        // refreshSwapped(force = true); a tap landing in that window found previewWarm
+        // false, did nothing and said nothing -- so the feature looked dead, and reloading
+        // the target was the only thing that visibly fixed it, because reloading is what
+        // warms the pipeline again.
+        //
+        // A tap needs a live pipeline: the embedding under the finger cannot be resolved
+        // without one. So instead of failing quietly it says what is happening and starts
+        // the warm, and the next tap lands.
+        if (!previewWarm) {
+            status = getString(R.string.status_reference_warming)
+            refreshSwapped(force = true)
+            return
+        }
         val current = referenceBox
         // A second tap on the CHOSEN face is how it is cleared. No new control, and it is
         // the same gesture that set it -- which is what makes it discoverable at all.

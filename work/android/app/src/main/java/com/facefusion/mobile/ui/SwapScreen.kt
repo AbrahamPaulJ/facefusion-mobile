@@ -159,6 +159,8 @@ fun SwapScreen(
     batch: List<BatchItem>,
     /** Drop a queued clip. Only offered while it is still waiting. */
     onRemoveFromBatch: (Int) -> Unit,
+    /** Add more clips to the queue, leaving the visible target alone. */
+    onAddToBatch: () -> Unit,
     openCard: String,
     onToggleCard: (String) -> Unit,
     /** There is something to save: a finished video, or a swapped still on the pane. */
@@ -769,6 +771,17 @@ fun SwapScreen(
                     else R.string.swap_action,
                     batch.size),
                  fontSize = 16.sp) }
+
+        // HOW THE QUEUE IS FOUND. Picking several files at once still builds it, but that
+        // needs a long-press in the system picker and is invisible to anyone who does not
+        // already know -- which is exactly what the first field report said. One text
+        // button, under the Swap button, only while a video target is loaded.
+        if (hasTarget && !imageTarget && idle) {
+            TextButton(onAddToBatch, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(if (batch.size > 1) R.string.swap_batch_add_more
+                                    else R.string.swap_batch_add))
+            }
+        }
 
         // THE QUEUE. Only when there is one -- a list of length one is the normal
         // single-clip screen, and drawing an empty container for it would add a row of
