@@ -143,19 +143,16 @@ struct Pipeline::Impl {
   /**
    * A content check has RUN on this pipeline and passed -- roadmap 1a.
    *
-   * ⚠ This is the half of the gate that a Kotlin patch cannot delete. The published bypass
-   * is four lines: an `ENABLED = false` in ContentGate.kt and an early return that hands
-   * every caller an ALLOW. It works because the Kotlin layer both performs the check AND
-   * decides what to do about it, so removing the call removes the consequence.
-   *
-   * Here the consequence lives with the thing that does the work: `swapAll` refuses unless
-   * this is set, and only `checkContent` can set it -- by actually running the graph and
-   * scoring below `Config::nsfwThreshold`. An app patched by that recipe now performs no
-   * checks and therefore swaps nothing, which is the direction a gate must fail.
+   * The invariant: `swapAll` refuses unless this is set, and only `checkContent` can set
+   * it -- by running the graph and scoring below `Config::nsfwThreshold`. A pipeline that
+   * has not been checked does not swap. That is the direction a gate must fail.
    *
    * ⚠ Policy is still Kotlin's. The THRESHOLD in Config is a floor, not the policy: Kotlin
    * still owns the sampling rate, the 10%-of-frames video rule, the wording of a refusal
-   * and the NaN-is-not-permission rule. Native only refuses to work unattested.
+   * and the NaN-is-not-permission rule. This only declines to work unattested.
+   *
+   * ⚠ Describe the INVARIANT here, never the ways around it. This file is public, and a
+   * comment that names an attack is the attack's documentation.
    *
    * ⚠ Scoped to the PIPELINE, not to an input. Every path gates its inputs before it swaps
    * (docs/gate.md lists all six), so one clearance per init matches how the app already
@@ -1093,8 +1090,7 @@ bool Pipeline::syncLip(ffcv::Image& frame, const std::vector<Face>& faces,
 
 bool Pipeline::swapAll(ffcv::Image& frame, const std::vector<Face>& faces) {
   if (!p_->haveSource) { err_ = "setSource not called"; return false; }
-  // ⚠ NO CHECK, NO SWAP. See Impl::gateCleared. The message says the mechanism and never
-  // the score: a refusal that quoted the threshold would hand the next patcher the number.
+  // ⚠ NO CHECK, NO SWAP. See Impl::gateCleared. The message never quotes the score.
   if (!p_->gateCleared) {
     err_ = "content check has not run for this pipeline";
     return false;
