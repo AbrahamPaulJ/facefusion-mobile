@@ -383,4 +383,5 @@
     <string name="swap_size_source">与源相同</string>
     <string name="swap_size_hint_smaller">文件更小，处理更快：整帧按此尺寸处理。这不会让人脸更清晰。</string>
     <string name="swap_size_hint_source">片段保持原有分辨率。</string>
+    <string name="swap_size_hint_source_dims">片段保持原有尺寸 %1$d x %2$d。</string>
 </resources>

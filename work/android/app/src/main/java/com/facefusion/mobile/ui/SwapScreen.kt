@@ -751,10 +751,18 @@ fun SwapScreen(
                 // sake of settings nobody was changing.
                 Spacer(Modifier.height(6.dp))
                 var outputOpen by rememberSaveable { mutableStateOf(false) }
-                val sizeLabel = when (opts.outputMaxShortEdge) {
-                    0 -> stringResource(R.string.swap_size_source)
-                    else -> opts.outputMaxShortEdge.toString() + "p"
-                }
+                // ⚠ The SOURCE option is named by its own number, not by the word "same".
+                // Sitting in a row that reads 480p / 720p / 1080p, "Same as source" was the
+                // one chip that did not say what it would produce -- and the clip's size is
+                // already on this screen, so there was nothing to look up. A clip whose
+                // short edge is not a familiar number ("606p") still reads honestly, and
+                // the hint underneath carries the full WxH either way.
+                val srcShort = minOf(targetW, targetH)
+                val srcName = if (srcShort > 0) srcShort.toString() + "p"
+                              else stringResource(R.string.swap_size_source)
+                val sizeLabel = if (opts.outputMaxShortEdge > 0)
+                                    opts.outputMaxShortEdge.toString() + "p"
+                                else srcName
                 val rateLabel = if (opts.outputFps in 1..inputFps) opts.outputFps.toString()
                                 else stringResource(R.string.swap_rate_same, inputFps)
                 Accordion(
@@ -773,10 +781,10 @@ fun SwapScreen(
                 // and paste-back scale with frame area, and 4K is ~9x the area of 1080p.
                 // What it cannot do is make a face sharper; that is pixel boost and the
                 // enhancer, and this control must not be mistaken for them.
-                val shortEdge = minOf(targetW, targetH)
+                val shortEdge = srcShort
                 val sizes = listOf(480, 720, 1080).filter { it < shortEdge }
                                 .map { it to (it.toString() + "p") } +
-                            listOf(0 to stringResource(R.string.swap_size_source))
+                            listOf(0 to srcName)
                 if (sizes.size > 1) {
                     OptionSteps(
                         stringResource(R.string.swap_output_size),
@@ -786,6 +794,9 @@ fun SwapScreen(
                         { onOptsChange(opts.copy(outputMaxShortEdge = it)) },
                         hint = if (opts.outputMaxShortEdge in 1 until shortEdge)
                                    stringResource(R.string.swap_size_hint_smaller)
+                               else if (targetW > 0 && targetH > 0)
+                                   stringResource(R.string.swap_size_hint_source_dims,
+                                                  targetW, targetH)
                                else stringResource(R.string.swap_size_hint_source),
                         enabled = idle,
                     )
