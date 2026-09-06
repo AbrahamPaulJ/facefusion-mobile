@@ -135,8 +135,7 @@ The app includes FaceFusion's content checker and it blocks. Flagged material is
 with no output file and nothing shown. Every path that processes an image is checked: the
 source face, the target photo or video, the preview, the Live camera, every clip in a batch
 and the remote API. If the checker cannot run, for instance if its model is missing, the app
-refuses to process anything rather than continuing unchecked. The refusal is enforced inside
-the processing pipeline itself, not only in the layer that calls it.
+refuses to process anything rather than continuing unchecked.
 
 **Do not use this on real people without their consent.** That is the main way software of
 this kind causes harm, and it is prohibited by the upstream licence.
