@@ -292,6 +292,16 @@ class MainActivity : ComponentActivity() {
     private var inputFps by mutableStateOf(30)
 
     /**
+     * The target's own pixel size, UPRIGHT. 0 until a video is loaded.
+     *
+     * The output-size control offers only sizes below the clip's own, the same way the
+     * frame-rate control offers only lower rates -- so it needs the clip's short edge, and
+     * `targetAspect` alone cannot give it (a ratio says nothing about how many pixels).
+     */
+    private var targetW by mutableStateOf(0)
+    private var targetH by mutableStateOf(0)
+
+    /**
      * The trim handle the previews are following.
      *
      * Both panes used to show the start frame unconditionally, so dragging the END handle
@@ -909,6 +919,8 @@ class MainActivity : ComponentActivity() {
                                 onTrimChange = ::onTrimChanged,
                                 targetAspect = targetAspect,
                                 inputFps = inputFps,
+                                targetW = targetW,
+                                targetH = targetH,
                                 fmt = ::fmt,
                                 preview = PreviewUi(
                                     original = originalFrame,
@@ -1001,10 +1013,17 @@ class MainActivity : ComponentActivity() {
                                     applyOpts(opts.copy(batchAutoSave = on))
                                 },
                                 onOpenBatchOutput = { i ->
-                                    batchQueue.getOrNull(i)?.output?.let {
+                                    val q = batchQueue.getOrNull(i)
+                                    q?.output?.let {
                                         outputFile = it
                                         outputPartial = false
-                                        savedUri = null
+                                        // The CLIP's saved state, not a blank one. Nulling
+                                        // it here is what made a hand-saved clip forget it
+                                        // had been saved the moment you swiped past it.
+                                        savedUri = q.savedUri
+                                        savedPathLabel = q.savedUri?.let { _ ->
+                                            "Movies/FaceFusion/" + it.name
+                                        }
                                         // The NAME alone. "Showing beach.mp4" spends the
                                         // status line saying what the pane above it is
                                         // already doing.
@@ -1999,6 +2018,7 @@ class MainActivity : ComponentActivity() {
                 targetImage = null
                 targetFile = l.file; durationMs = l.durationMs
                 inputFps = l.fps
+                targetW = l.width; targetH = l.height
                 trimStartMs = 0f; trimEndMs = l.durationMs.toFloat()
                 targetAspect = if (l.width > 0 && l.height > 0)
                     l.width.toFloat() / l.height else 16f / 9f
@@ -2697,6 +2717,7 @@ class MainActivity : ComponentActivity() {
 
                     VideoSwapper(
                         outputFps = opts.outputFps,
+                        outputMaxShortEdge = opts.outputMaxShortEdge,
                         trackPeriod = opts.trackPeriod,
                         lipSync = opts.lipSync,
                         voicePath = voiceFile?.absolutePath,
@@ -2929,6 +2950,7 @@ class MainActivity : ComponentActivity() {
                         var lastPreview = 0L
                         VideoSwapper(
                             outputFps = opts.outputFps,
+                            outputMaxShortEdge = opts.outputMaxShortEdge,
                             trackPeriod = opts.trackPeriod,
                             lipSync = opts.lipSync,
                             voicePath = voiceFile?.absolutePath,
@@ -3039,6 +3061,12 @@ class MainActivity : ComponentActivity() {
             r.onSuccess {
                 savedUri = it
                 savedPathLabel = "Movies/FaceFusion/" + file.name
+                // Remember it against the CLIP as well as the screen, so swiping away and
+                // back does not offer to save it a second time.
+                if (batchQueue.any { q -> q.output == file })
+                    batchQueue = batchQueue.map { q ->
+                        if (q.output == file) q.copy(savedUri = it) else q
+                    }
                 status = getString(R.string.status_saved_movies)
                 toast(getString(R.string.toast_saved_to, savedPathLabel!!))
             }.onFailure {

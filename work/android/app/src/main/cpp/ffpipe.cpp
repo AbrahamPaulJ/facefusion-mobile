@@ -139,6 +139,31 @@ struct Pipeline::Impl {
   // what upstream's distance is defined over. Not in Config -- see setReferenceFaceAt.
   float refEmbeddingNorm[512]{};
   bool haveReference = false;
+
+  /**
+   * A content check has RUN on this pipeline and passed -- roadmap 1a.
+   *
+   * ⚠ This is the half of the gate that a Kotlin patch cannot delete. The published bypass
+   * is four lines: an `ENABLED = false` in ContentGate.kt and an early return that hands
+   * every caller an ALLOW. It works because the Kotlin layer both performs the check AND
+   * decides what to do about it, so removing the call removes the consequence.
+   *
+   * Here the consequence lives with the thing that does the work: `swapAll` refuses unless
+   * this is set, and only `checkContent` can set it -- by actually running the graph and
+   * scoring below `Config::nsfwThreshold`. An app patched by that recipe now performs no
+   * checks and therefore swaps nothing, which is the direction a gate must fail.
+   *
+   * ⚠ Policy is still Kotlin's. The THRESHOLD in Config is a floor, not the policy: Kotlin
+   * still owns the sampling rate, the 10%-of-frames video rule, the wording of a refusal
+   * and the NaN-is-not-permission rule. Native only refuses to work unattested.
+   *
+   * ⚠ Scoped to the PIPELINE, not to an input. Every path gates its inputs before it swaps
+   * (docs/gate.md lists all six), so one clearance per init matches how the app already
+   * behaves -- but it does mean a cleared pipeline will swap a later frame that was not
+   * itself checked. Binding it to a source/target identity is the stronger version and is
+   * still roadmap 1a; this is the part that can be built and proven without one.
+   */
+  bool gateCleared = false;
   std::vector<float> emap;   // inswapper only: the 512x512 initializer
 
   // A box mask depends only on (size, cfg.maskBlur, cfg.maskPadding) -- constant across
@@ -530,6 +555,10 @@ ContentVerdict Pipeline::checkContent(const ffcv::Image& frame) {
   v.ok = true;
   v.score = out[0][0] - out[0][1];
   v.blocked = v.score > p_->cfg.nsfwThreshold;
+  // THE ONLY PLACE A PIPELINE BECOMES ABLE TO SWAP. Measured, and under the threshold --
+  // a graph that failed to run leaves v.ok false and clears nothing, so a broken checker
+  // refuses rather than permits, exactly as the NaN rule does one layer up.
+  if (v.ok && !v.blocked) p_->gateCleared = true;
   return v;
 }
 
@@ -1064,6 +1093,12 @@ bool Pipeline::syncLip(ffcv::Image& frame, const std::vector<Face>& faces,
 
 bool Pipeline::swapAll(ffcv::Image& frame, const std::vector<Face>& faces) {
   if (!p_->haveSource) { err_ = "setSource not called"; return false; }
+  // ⚠ NO CHECK, NO SWAP. See Impl::gateCleared. The message says the mechanism and never
+  // the score: a refusal that quoted the threshold would hand the next patcher the number.
+  if (!p_->gateCleared) {
+    err_ = "content check has not run for this pipeline";
+    return false;
+  }
   const Config& cfg = p_->cfg;
   const int SS = cfg.swapSize;                       // what the GRAPH takes: always 256
   const int PB = cfg.pixelBoost < 1 ? 1 : cfg.pixelBoost;

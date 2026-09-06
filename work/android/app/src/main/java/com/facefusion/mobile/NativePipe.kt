@@ -210,6 +210,15 @@ object NativePipe {
      *
      * Empty when there is no pipeline or the frame is the wrong size -- never null.
      */
+    /**
+     * Resample a BGR frame, for the output-size cap.
+     *
+     * The same `resizeLinear` the pipeline uses elsewhere, so a capped run differs from an
+     * uncapped one only in the size of the picture. Null on a bad size.
+     */
+    @JvmStatic external fun resizeBgr(bgr: ByteArray, w: Int, h: Int,
+                                      dw: Int, dh: Int): ByteArray?
+
     @JvmStatic external fun detectFaces(bgr: ByteArray, w: Int, h: Int): FloatArray
 
     /**

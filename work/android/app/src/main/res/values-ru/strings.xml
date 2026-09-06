@@ -361,4 +361,10 @@
     <string name="batch_delete_body">У «%1$s» есть готовое видео, которого нет в галерее. Удаление клипа удалит и его.</string>
     <string name="batch_delete_confirm">Удалить</string>
     <string name="status_batch_already_queued">Эти клипы уже в очереди.</string>
+    <string name="swap_output_settings">Параметры вывода</string>
+    <string name="swap_output_summary">%1$s, %2$s кадр/с</string>
+    <string name="swap_output_size">Размер вывода</string>
+    <string name="swap_size_source">Как в источнике</string>
+    <string name="swap_size_hint_smaller">Меньше файл и быстрее обработка: кадр целиком обрабатывается в этом размере. Лица от этого чётче не станут.</string>
+    <string name="swap_size_hint_source">Клип сохраняет своё разрешение.</string>
 </resources>

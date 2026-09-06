@@ -39,6 +39,15 @@ data class BatchItem(
      * produce a file.
      */
     val thumb: Bitmap? = null,
+    /**
+     * Where this clip landed in the gallery, once it has been saved.
+     *
+     * ⚠ PER ITEM, because "saved" is a fact about a clip and the Activity only had room for
+     * one of them. Saving clip two by hand and swiping to clip three moved the single
+     * `savedUri` with the pane, so clip two's button went back to reading "Save" and
+     * offered to write a second copy of a file already in the gallery.
+     */
+    val savedUri: Uri? = null,
 )
 
 /**

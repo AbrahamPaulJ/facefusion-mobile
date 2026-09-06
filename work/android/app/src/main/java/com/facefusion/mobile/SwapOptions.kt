@@ -71,6 +71,30 @@ data class SwapOptions(
     val batchAutoSave: Boolean = false,
 
     /**
+     * Cap the output's SHORT EDGE, in pixels. 0 keeps the source's own size.
+     *
+     * Upstream 3.8.2 has no resolution argument at all: it takes `--output-video-scale`, a
+     * 0.25-8.0 multiplier defaulting to 1.0. The upward half of that range is a trap here --
+     * the swapper runs at 256 whatever the frame is, so 2x output is the same swap enlarged
+     * at four times the bitrate. This is the useful half, named the way people say it.
+     *
+     * ⚠ THE SHORT EDGE, so the aspect ratio never changes and "480p" means what it means
+     * everywhere else: a 16:9 clip becomes 854x480 and a portrait one 480x854. And it only
+     * ever shrinks -- picking 1080p on a 720p clip leaves it alone, which is what upstream's
+     * own `restrict_video_resolution` does.
+     *
+     * Applied at DECODE, not at encode. Detector prep and paste-back both scale with frame
+     * AREA, so capping a 4K clip to 1080p makes the run itself faster rather than merely
+     * making the file smaller.
+     *
+     * ⚠ It is a real trade, not a free win: swap quality follows how many pixels THE FACE
+     * has, not the frame. A face filling a quarter of the frame has plenty either way; a
+     * face far away in a 4K shot has half as many pixels at 1080p and will look worse.
+     * Hence 0 by default.
+     */
+    val outputMaxShortEdge: Int = 0,
+
+    /**
      * Frames between real face detections during a VIDEO run. 0 = detect every frame,
      * which is upstream's behaviour and the default.
      *
@@ -158,6 +182,7 @@ data class SwapOptions(
             .putBoolean(K_LARGEST, largestOnly)
             .putFloat(K_REF_DISTANCE, referenceDistance)
             .putBoolean(K_BATCH_AUTOSAVE, batchAutoSave)
+            .putInt(K_OUT_SHORT_EDGE, outputMaxShortEdge)
             .putInt(K_TRACK, trackPeriod)
             .putBoolean(K_ENHANCE, faceEnhance)
             .putFloat(K_ENHANCE_BLEND, enhanceBlend)
@@ -179,6 +204,7 @@ data class SwapOptions(
         private const val K_LARGEST = "largest_only"
         private const val K_REF_DISTANCE = "reference_distance"
         private const val K_BATCH_AUTOSAVE = "batch_autosave"
+        private const val K_OUT_SHORT_EDGE = "output_max_short_edge"
         private const val K_TRACK = "track_period"
         private const val K_ENHANCE = "face_enhance"
         private const val K_ENHANCE_BLEND = "face_enhance_blend"
@@ -209,6 +235,7 @@ data class SwapOptions(
                 largestOnly = p.getBoolean(K_LARGEST, d.largestOnly),
                 referenceDistance = p.getFloat(K_REF_DISTANCE, d.referenceDistance),
                 batchAutoSave = p.getBoolean(K_BATCH_AUTOSAVE, d.batchAutoSave),
+                outputMaxShortEdge = p.getInt(K_OUT_SHORT_EDGE, d.outputMaxShortEdge),
                 trackPeriod = p.getInt(K_TRACK, d.trackPeriod),
                 faceEnhance = p.getBoolean(K_ENHANCE, d.faceEnhance),
                 enhanceBlend = p.getFloat(K_ENHANCE_BLEND, d.enhanceBlend),

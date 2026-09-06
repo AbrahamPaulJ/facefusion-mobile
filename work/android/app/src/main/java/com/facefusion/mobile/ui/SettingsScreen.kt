@@ -1,5 +1,6 @@
 package com.facefusion.mobile.ui
 
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -9,6 +10,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -160,9 +162,28 @@ fun SettingsScreen(
                 text = { Text(stringResource(res)) })
         }
     }
+    // SWIPE BETWEEN THE SUB-TABS. The tab row is four targets across the top of a screen
+    // that is mostly one-handed scrolling, so reaching it to move one tab is the longest
+    // way to do the smallest thing.
+    //
+    // ⚠ Horizontal-dominant drags only, and accumulated to a threshold: this Column
+    // scrolls VERTICALLY, and a gesture recogniser that took every drag would fight the
+    // scroll for the whole screen. detectHorizontalDragGestures leaves a vertical drag
+    // alone, so the two coexist.
+    var tabDrag by remember { mutableStateOf(0f) }
     Column(
         Modifier
             .fillMaxSize()
+            .pointerInput(tab) {
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        val step = if (tabDrag < -70f) 1 else if (tabDrag > 70f) -1 else 0
+                        tabDrag = 0f
+                        if (step != 0) tab = (tab + step).coerceIn(0, 3)
+                    },
+                    onDragCancel = { tabDrag = 0f },
+                ) { change, amount -> tabDrag += amount; change.consume() }
+            }
             .verticalScroll(rememberScrollState())
             // top, not just horizontal: the tab row is a hard edge and the first caption
             // sat directly against it, so the content read as part of the tab rather than

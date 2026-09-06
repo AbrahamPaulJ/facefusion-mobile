@@ -34,6 +34,14 @@ class VideoSwapper(
      * a swap is ~19 ms of NPU per frame, so the frames not kept are the frames not swapped.
      */
     private val outputFps: Int = 0,
+    /**
+     * Cap the output's SHORT EDGE in pixels. 0 keeps the source's size.
+     *
+     * Applied at DECODE, so it is a SPEED knob as much as a size one: detector prep and
+     * paste-back both scale with frame AREA, and 4K is ~9x the area of 1080p. It never
+     * enlarges -- a clip already under the cap is passed through untouched.
+     */
+    private val outputMaxShortEdge: Int = 0,
     private val trimStartUs: Long = 0L,
     private val trimEndUs: Long = Long.MAX_VALUE,
     private val onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
@@ -156,9 +164,24 @@ class VideoSwapper(
             }.getOrDefault(0)
         }.let { ((it % 360) + 360) % 360 }
 
-        // What everything downstream sees: 90 and 270 swap the axes.
-        val outW = if (rotation == 90 || rotation == 270) height else width
-        val outH = if (rotation == 90 || rotation == 270) width else height
+        // The upright frame, before any cap: 90 and 270 swap the axes.
+        val uprightW = if (rotation == 90 || rotation == 270) height else width
+        val uprightH = if (rotation == 90 || rotation == 270) width else height
+
+        // THE OUTPUT SIZE CAP, on the SHORT edge, so the aspect ratio is untouched and
+        // "720p" means the same thing for a portrait clip as for a landscape one.
+        //
+        // ⚠ Both axes are rounded to EVEN. 4:2:0 chroma is half-size in both directions and
+        // an odd edge has nowhere to put the last row -- the same rule upstream's
+        // normalize_resolution applies, and the same one the encoder alignment below is
+        // about.
+        val shortEdge = minOf(uprightW, uprightH)
+        val capped = outputMaxShortEdge in 1 until shortEdge
+        val outW = if (!capped) uprightW
+                   else ((uprightW.toLong() * outputMaxShortEdge / shortEdge).toInt()) and 1.inv()
+        val outH = if (!capped) uprightH
+                   else ((uprightH.toLong() * outputMaxShortEdge / shortEdge).toInt()) and 1.inv()
+        if (capped) onLog("output capped to ${outW}x$outH from ${uprightW}x$uprightH")
         val inFps = if (vf.containsKey(MediaFormat.KEY_FRAME_RATE))
             vf.getInteger(MediaFormat.KEY_FRAME_RATE) else 30
         // Never above the input: duplicating frames would cost a full swap each and add
@@ -392,8 +415,15 @@ class VideoSwapper(
                         // preview, the encoder -- works on the frame the viewer will see.
                         val decoded = imageToBgr(image, width, height)
                         image.close()
-                        val bgr = if (rotation == 0) decoded
-                                  else NativePipe.rotateBgr(decoded, width, height, rotation)
+                        val upright = if (rotation == 0) decoded
+                                      else NativePipe.rotateBgr(decoded, width, height, rotation)
+                        // Downscale BEFORE anything looks at the frame, so the detector,
+                        // the swap and the paste all work at the smaller size. Resizing at
+                        // encode time instead would shrink the file and save nothing else.
+                        val bgr = if (!capped) upright
+                                  else NativePipe.resizeBgr(upright, uprightW, uprightH,
+                                                            outW, outH)
+                                      ?: error("resize to ${outW}x$outH failed")
                         // `swapped` is the OUTPUT frame index: it counts frames written,
                         // so it already accounts for the ones decimation dropped.
                         val faces = NativePipe.processFrameAt(bgr, outW, outH,

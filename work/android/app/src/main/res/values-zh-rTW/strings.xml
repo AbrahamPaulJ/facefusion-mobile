@@ -380,4 +380,10 @@
     <string name="batch_delete_body">%1$s 有一個尚未儲存到相簿的成品影片。刪除片段會一併刪除它。</string>
     <string name="batch_delete_confirm">刪除</string>
     <string name="status_batch_already_queued">這些片段已在佇列中。</string>
+    <string name="swap_output_settings">輸出設定</string>
+    <string name="swap_output_summary">%1$s，%2$s fps</string>
+    <string name="swap_output_size">輸出尺寸</string>
+    <string name="swap_size_source">與來源相同</string>
+    <string name="swap_size_hint_smaller">檔案更小，處理更快：整個影格以此尺寸處理。這不會讓臉孔更清晰。</string>
+    <string name="swap_size_hint_source">片段保持原有解析度。</string>
 </resources>

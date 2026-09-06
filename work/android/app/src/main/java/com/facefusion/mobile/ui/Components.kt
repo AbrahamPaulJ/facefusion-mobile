@@ -39,6 +39,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
@@ -124,13 +125,21 @@ val IconDownload: ImageVector = ImageVector.Builder(
 
 /** A small all-caps caption. Used for the pane labels and settings section headers. */
 @Composable
-fun Caption(text: String, modifier: Modifier = Modifier) {
+fun Caption(text: String, modifier: Modifier = Modifier, singleLine: Boolean = false) {
     Text(
         text.uppercase(),
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         letterSpacing = 1.5.sp,
         fontSize = 11.sp,
+        // ⚠ A PANE's caption must never wrap. It shares its row with that pane's buttons,
+        // so a second line makes the row taller -- and since ORIGINAL carries three icons
+        // and SWAPPED carries one, only ORIGINAL grew, leaving two panes that are supposed
+        // to be the same size sitting at different heights. It showed up on PORTRAIT
+        // targets, where the two panes go side by side and each has half the width to fit
+        // "ORIGINAL AT 0:03" and three buttons into.
+        maxLines = if (singleLine) 1 else Int.MAX_VALUE,
+        overflow = if (singleLine) TextOverflow.Ellipsis else TextOverflow.Clip,
         modifier = modifier,
     )
 }
@@ -250,7 +259,7 @@ fun PreviewPane(
             Modifier.fillMaxWidth().padding(start = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Caption(label, Modifier.weight(1f))
+            Caption(label, Modifier.weight(1f), singleLine = true)
             // Fixed HEIGHT, whatever the slot holds; width still wraps.
             //
             // It used to size to its content, and content alternated between an 18 dp

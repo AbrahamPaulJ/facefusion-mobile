@@ -114,6 +114,9 @@ fun SwapScreen(
     targetAspect: Float,
     /** The target video's own rate, and the cap on what can be chosen. */
     inputFps: Int,
+    /** The target's own pixel size, upright. The cap on what output sizes are offered. */
+    targetW: Int,
+    targetH: Int,
     fmt: (Float) -> String,
     preview: PreviewUi,
     run: RunUi,
@@ -558,9 +561,14 @@ fun SwapScreen(
                 // that is not there. So before a target it says TARGET instead, which is
                 // what the pane is ASKING for and the counterpart of SOURCE FACE above.
                 // (It was blank, which left the one pane on the screen with no name at all.)
+                // ⚠ The TIME is dropped when the panes are side by side. A portrait target
+                // puts them there, so each has half the width to fit a caption AND this
+                // pane's three buttons -- and "ORIGINAL AT 0:03" ellipsised to about six
+                // characters says less than "ORIGINAL" does. The time is still under the
+                // trim slider, which is where it is being set.
                 label = when {
                     !hasTarget -> stringResource(R.string.swap_pane_target)
-                    preview.timeLabel.isEmpty() ->
+                    portrait || preview.timeLabel.isEmpty() ->
                         stringResource(R.string.swap_pane_original)
                     else -> stringResource(R.string.swap_pane_original_at, preview.timeLabel)
                 },
@@ -735,6 +743,54 @@ fun SwapScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
+                // OUTPUT SETTINGS, behind an accordion. Frame rate and output size are the
+                // same kind of decision -- both trade quality for time and size, both have
+                // a "leave it alone" default that most runs want, and neither is touched
+                // twice in a session. Two open controls between the trim slider and the
+                // Swap button pushed the button off the screen on a short phone for the
+                // sake of settings nobody was changing.
+                Spacer(Modifier.height(6.dp))
+                var outputOpen by rememberSaveable { mutableStateOf(false) }
+                val sizeLabel = when (opts.outputMaxShortEdge) {
+                    0 -> stringResource(R.string.swap_size_source)
+                    else -> opts.outputMaxShortEdge.toString() + "p"
+                }
+                val rateLabel = if (opts.outputFps in 1..inputFps) opts.outputFps.toString()
+                                else stringResource(R.string.swap_rate_same, inputFps)
+                Accordion(
+                    stringResource(R.string.swap_output_settings),
+                    stringResource(R.string.swap_output_summary, sizeLabel, rateLabel),
+                    outputOpen,
+                    { outputOpen = !outputOpen },
+                ) {
+                // OUTPUT SIZE, on the SHORT edge so the aspect ratio never changes and
+                // "480p" means what it means everywhere else. Only sizes BELOW the clip's
+                // own are offered, for the same reason the frame rate only offers lower
+                // rates: enlarging costs bitrate and adds nothing, because the swapper runs
+                // at 256 whatever the frame is.
+                //
+                // ⚠ It is applied at DECODE, so it makes the RUN faster too -- detector prep
+                // and paste-back scale with frame area, and 4K is ~9x the area of 1080p.
+                // What it cannot do is make a face sharper; that is pixel boost and the
+                // enhancer, and this control must not be mistaken for them.
+                val shortEdge = minOf(targetW, targetH)
+                val sizes = listOf(480, 720, 1080).filter { it < shortEdge }
+                                .map { it to (it.toString() + "p") } +
+                            listOf(0 to stringResource(R.string.swap_size_source))
+                if (sizes.size > 1) {
+                    OptionSteps(
+                        stringResource(R.string.swap_output_size),
+                        sizes,
+                        if (opts.outputMaxShortEdge in 1 until shortEdge)
+                            opts.outputMaxShortEdge else 0,
+                        { onOptsChange(opts.copy(outputMaxShortEdge = it)) },
+                        hint = if (opts.outputMaxShortEdge in 1 until shortEdge)
+                                   stringResource(R.string.swap_size_hint_smaller)
+                               else stringResource(R.string.swap_size_hint_source),
+                        enabled = idle,
+                    )
+                }
+
                 // Frame rate. Only rates BELOW the input's are offered: a higher one would
                 // duplicate frames, and each duplicate costs a full swap to produce nothing
                 // new. Dropping frames is the only direction that saves anything.
@@ -765,6 +821,7 @@ fun SwapScreen(
                                else stringResource(R.string.swap_rate_hint_drop),
                         enabled = idle,
                     )
+                }
                 }
             }
         }

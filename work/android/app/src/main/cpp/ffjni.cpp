@@ -677,6 +677,32 @@ Java_com_facefusion_mobile_NativePipe_argbToBgr(JNIEnv* env, jclass, jintArray j
  * A pure index remap, so it is exact -- no resampling and nothing to verify numerically.
  * 90 and 270 SWAP the dimensions; the caller must size everything downstream to match.
  */
+// Resample a BGR frame to another size -- the output-size cap in VideoSwapper.
+//
+// ffcv::resizeLinear, the SAME resampler the pipeline uses everywhere else, so a capped run
+// and an uncapped one differ only in the size of the picture and not in how it was made.
+// It is bit-identical to cv2 INTER_AREA at a 2x downscale, which is the common case here
+// (4K to 1080p is exactly 2x).
+//
+// Downscaling only is the caller's rule, not this function's: it will happily enlarge, and
+// nothing in the app asks it to.
+JNIEXPORT jbyteArray JNICALL
+Java_com_facefusion_mobile_NativePipe_resizeBgr(JNIEnv* env, jclass, jbyteArray jBgr,
+                                                jint w, jint h, jint dw, jint dh) {
+  if (w <= 0 || h <= 0 || dw <= 0 || dh <= 0) { g_err = "resizeBgr: bad size"; return nullptr; }
+  ffcv::Image src(w, h, 3);
+  if ((size_t)env->GetArrayLength(jBgr) != src.data.size()) {
+    g_err = "resizeBgr: buffer is not w*h*3 bytes";
+    return nullptr;
+  }
+  env->GetByteArrayRegion(jBgr, 0, (jsize)src.data.size(), (jbyte*)src.data.data());
+  ffcv::Image dst = ffcv::resizeLinear(src, dw, dh);
+  jbyteArray out = env->NewByteArray((jsize)dst.data.size());
+  if (out)
+    env->SetByteArrayRegion(out, 0, (jsize)dst.data.size(), (const jbyte*)dst.data.data());
+  return out;
+}
+
 JNIEXPORT jbyteArray JNICALL
 Java_com_facefusion_mobile_NativePipe_rotateBgr(JNIEnv* env, jclass, jbyteArray jBgr,
                                                 jint w, jint h, jint degrees) {

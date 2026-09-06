@@ -406,6 +406,12 @@
     <string name="batch_skipped">skipped</string>
     <string name="batch_remove">Remove from queue</string>
     <string name="batch_unnamed_clip">clip</string>
+    <string name="swap_output_settings">Output settings</string>
+    <string name="swap_output_summary">%1$s, %2$s fps</string>
+    <string name="swap_output_size">Output size</string>
+    <string name="swap_size_source">Same as source</string>
+    <string name="swap_size_hint_smaller">Smaller file, and a faster run: the whole frame is processed at this size. It does not make faces sharper.</string>
+    <string name="swap_size_hint_source">The clip keeps its own resolution.</string>
     <string name="batch_delete_title">Delete this clip?</string>
     <string name="batch_delete_body">%1$s has a finished video that is not in your gallery. Deleting the clip deletes it.</string>
     <string name="batch_delete_confirm">Delete</string>
