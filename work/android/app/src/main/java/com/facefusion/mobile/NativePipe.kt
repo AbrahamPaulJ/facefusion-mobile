@@ -244,6 +244,42 @@ object NativePipe {
     @JvmStatic external fun contentGateIsQuantised(): Boolean
 
     @JvmStatic external fun setSource(bgr: ByteArray, w: Int, h: Int): Boolean
+    @JvmStatic external fun addSource(bgr: ByteArray, w: Int, h: Int): Int
+    @JvmStatic external fun setActiveSource(index: Int)
+    @JvmStatic external fun setSwapEnabled(enabled: Boolean)
+
+    /**
+     * The `one`-face selector (largest detected face) at runtime. The native side reads
+     * it per frame, so flipping it does NOT restart the pipeline -- a restart would tear
+     * down the pipeline and with it every face assignment of the live session.
+     */
+    @JvmStatic external fun setSwapLargestOnly(enabled: Boolean)
+
+    /**
+     * Live's per-person assignment mode. OFF is the default behaviour (active slot for
+     * every face); ON lets a face the user assigned keep its own source.
+     */
+    @JvmStatic external fun setFaceAssignEnabled(enabled: Boolean)
+
+    /**
+     * Queue a tap (DISPLAY bitmap coordinates -- the frame [LiveScreen] draws) for the
+     * next [liveFrame] to resolve against the PRE-SWAP detections: the embedding stored
+     * is the real person's, not the swapped frame on the display. The source chip
+     * selected at tap time is the one assigned.
+     */
+    @JvmStatic external fun requestFaceAssignment(x: Float, y: Float, source: Int)
+
+    /**
+     * The result of the last consumed request: FIVE floats -- x0, y0, x1, y1 and the
+     * source index -- in DISPLAY bitmap coordinates, so the overlay can draw it as-is;
+     * ONE float [-1] when the tap was consumed but landed on no face; EMPTY when nothing
+     * was consumed since the last read (a slow frame can keep a request in flight past
+     * any timeout, so "miss" is never guessed). Each result is returned exactly once.
+     */
+    @JvmStatic external fun takeAssignmentResult(): FloatArray
+
+    /** Forget every assignment of the current pipeline. */
+    @JvmStatic external fun clearFaceSourceAssignments()
     /** Swaps every face in place; returns the face count, or -1 on error. */
     @JvmStatic external fun processFrame(bgr: ByteArray, w: Int, h: Int): Int
 

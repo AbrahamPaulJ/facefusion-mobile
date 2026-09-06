@@ -477,4 +477,13 @@ Turning it off runs your own Swap settings instead. This is experimental: the en
     <string name="live_mic_on">Record microphone audio. Change before recording.</string>
     <string name="live_mic_off">Video only. Microphone is off.</string>
     <string name="live_mic_busy">Stop the voice recording before recording Live with the microphone.</string>
+    <string name="live_assign_title">Assign per person</string>
+    <string name="live_assign_off">Each face takes the selected source</string>
+    <string name="live_assign_on">Tap a face to give it the selected source</string>
+    <string name="live_assign_hint">Assign per person: tap a face to give it the selected source</string>
+    <string name="live_assign_set">Source %1$d assigned to this person</string>
+    <string name="live_assign_missed">No face at that point</string>
+    <string name="live_assign_cleared">Assignments cleared</string>
+    <string name="live_assign_clear">Clear</string>
+    <string name="live_assign_count">%1$d assigned</string>
 </resources>

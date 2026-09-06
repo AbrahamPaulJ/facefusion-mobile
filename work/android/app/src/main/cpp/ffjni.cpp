@@ -43,6 +43,26 @@ std::vector<std::string> g_skipTiers;
  */
 std::vector<float> g_refEmbedding;
 
+/**
+ * Live's per-person assignment: a TAP from the UI is a REQUEST, consumed by the next
+ * liveFrame against the PRE-SWAP detections, so the embedding recorded is the real
+ * person's -- the frame the display shows is already swapped, and assigning from it
+ * would lock the mode onto the wrong identity.
+ *
+ * Cross-thread by design, and safe for the same reason the pipeline's other live flags
+ * are: Kotlin writes `pending` LAST, so the analyzer thread can only ever consume a
+ * fully-written request, and it clears it before anything else, so a request is
+ * consumed exactly once.
+ */
+struct AssignRequest { volatile bool pending = false; float x = 0; float y = 0; int source = -1; };
+// `consumed` is set on EVERY consumed request (matched or not), so the caller can tell
+// "still in flight" from "consumed and missed" -- the distinction a wall-clock timeout
+// gets wrong when a frame is slow. `have` means it matched.
+struct AssignResult { volatile bool consumed = false; volatile bool have = false;
+                      float box[4]{}; int source = -1; };
+static AssignRequest g_assignReq;
+static AssignResult g_assignResult;
+
 std::string jstr(JNIEnv* env, jstring s) {
   if (!s) return {};
   const char* c = env->GetStringUTFChars(s, nullptr);
@@ -184,6 +204,59 @@ Java_com_facefusion_mobile_NativePipe_rejectedTier(JNIEnv* env, jclass) {
 JNIEXPORT void JNICALL
 Java_com_facefusion_mobile_NativePipe_setTrackPeriod(JNIEnv*, jclass, jint frames) {
   if (g_pipe) g_pipe->setTrackPeriod((int)frames);
+}
+
+// ---- Live per-person assignment ------------------------------------------
+//
+// requestFaceAssignment stores a tap for the analyzer thread; the next liveFrame consumes
+// it (see liveFrame) and takeAssignmentResult hands the chosen face's box back for the
+// overlay. Coordinates are DISPLAY bitmap space both ways: Kotlin undoes the pane's crop
+// and mirror (only the UI knows the lens and the layout), and liveFrame maps the point
+// onto the RAW sensor detections -- the one scale only it knows -- then maps the chosen
+// box back to display space.
+
+JNIEXPORT void JNICALL
+Java_com_facefusion_mobile_NativePipe_requestFaceAssignment(JNIEnv*, jclass,
+                                                            jfloat x, jfloat y, jint source) {
+  g_assignReq.x = (float)x; g_assignReq.y = (float)y; g_assignReq.source = (int)source;
+  g_assignReq.pending = true;    // LAST: the consumer reads a fully-written request only
+}
+
+// The result of the last CONSUMED request, exactly once: FIVE floats (x0, y0, x1, y1,
+// source index -- the box in DISPLAY bitmap coordinates, so the overlay can draw it
+// as-is), ONE float [-1] for "consumed but the tap was on no face", or an EMPTY array
+// for "nothing consumed since the last read" (a slow frame can keep a request in flight
+// well past any wall-clock timeout, so Kotlin never guesses between those two).
+JNIEXPORT jfloatArray JNICALL
+Java_com_facefusion_mobile_NativePipe_takeAssignmentResult(JNIEnv* env, jclass) {
+  if (!g_assignResult.consumed) return env->NewFloatArray(0);
+  g_assignResult.consumed = false;
+  if (!g_assignResult.have) {
+    jfloatArray miss = env->NewFloatArray(1);
+    if (miss) { float m = -1.0f; env->SetFloatArrayRegion(miss, 0, 1, &m); }
+    return miss;
+  }
+  g_assignResult.have = false;
+  jfloatArray out = env->NewFloatArray(5);
+  if (out) {
+    float five[5] = {g_assignResult.box[0], g_assignResult.box[1],
+                     g_assignResult.box[2], g_assignResult.box[3],
+                     (float)g_assignResult.source};
+    env->SetFloatArrayRegion(out, 0, 5, five);
+  }
+  return out;
+}
+
+// The mode switch. OFF is the default behaviour -- every face uses the active slot --
+// exactly what the user asked for when they turn the feature off.
+JNIEXPORT void JNICALL
+Java_com_facefusion_mobile_NativePipe_setFaceAssignEnabled(JNIEnv*, jclass, jboolean enabled) {
+  if (g_pipe) g_pipe->setFaceAssignEnabled(enabled == JNI_TRUE);
+}
+
+JNIEXPORT void JNICALL
+Java_com_facefusion_mobile_NativePipe_clearFaceSourceAssignments(JNIEnv*, jclass) {
+  if (g_pipe) g_pipe->clearFaceSourceAssignments();
 }
 
 // Comma-separated, because a JNI array of strings costs three more calls and this list is
@@ -523,6 +596,33 @@ Java_com_facefusion_mobile_NativePipe_setSource(JNIEnv* env, jclass, jbyteArray 
   env->GetByteArrayRegion(jBgr, 0, (jsize)img.data.size(), (jbyte*)img.data.data());
   if (!g_pipe->setSource(img)) { g_err = g_pipe->error(); return JNI_FALSE; }
   return JNI_TRUE;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_facefusion_mobile_NativePipe_addSource(JNIEnv* env, jclass, jbyteArray jBgr,
+                                                jint w, jint h) {
+  if (!g_pipe) { g_err = "pipeline not initialised"; return -1; }
+  ffcv::Image img(w, h, 3);
+  env->GetByteArrayRegion(jBgr, 0, (jsize)img.data.size(), (jbyte*)img.data.data());
+  return (jint)g_pipe->addSource(img);
+}
+
+JNIEXPORT void JNICALL
+Java_com_facefusion_mobile_NativePipe_setActiveSource(JNIEnv* env, jclass, jint index) {
+  if (g_pipe) g_pipe->setActiveSource(index);
+}
+
+JNIEXPORT void JNICALL
+Java_com_facefusion_mobile_NativePipe_setSwapEnabled(JNIEnv* env, jclass, jboolean enabled) {
+  if (g_pipe) g_pipe->setSwapEnabled(enabled);
+}
+
+// The `one`-face selector at runtime, WITHOUT a pipeline restart -- swapAll and enhance
+// both read it per frame. Restarting instead would tear down the pipeline and with it
+// every face assignment of the live session.
+JNIEXPORT void JNICALL
+Java_com_facefusion_mobile_NativePipe_setSwapLargestOnly(JNIEnv* env, jclass, jboolean enabled) {
+  if (g_pipe) g_pipe->setSwapLargestOnly(enabled);
 }
 
 /** Swap every face in a BGR frame, in place.  Returns the face count, or -1 on error. */
@@ -924,6 +1024,42 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
   }
 
   auto faces = g_pipe->analyse(frame);
+
+  // Assignment taps, consumed HERE on the PRE-SWAP detections: the identity pinned is
+  // the real person's, not the swapped result the display will draw. The tap arrives in
+  // DISPLAY coordinates (what the user touched) and the detections are in RAW sensor
+  // coordinates, so it is mapped across by the frame's own scale -- the one piece of
+  // geometry only this function knows. consumed is set whether or not the tap hit a
+  // face: a miss must be reported, not left hanging.
+  const bool tapPending = g_assignReq.pending;
+  if (tapPending) {
+    g_assignReq.pending = false;
+    g_assignResult.consumed = true;
+    g_assignResult.have = false;
+  }
+  const int dw = dstW > 0 ? (int)dstW : w, dh = dstH > 0 ? (int)dstH : h;
+  // updateLiveTracking runs on EVERY live frame: it is the per-frame bookkeeping that
+  // makes an assignment STICKY (faces are associated by box, never re-scored against
+  // the assignments), and it pins the tapped face so the swap on THIS very frame
+  // already applies the new source.
+  float tapBox[4];
+  const bool tapped = g_pipe->updateLiveTracking(
+      faces,
+      tapPending ? g_assignReq.x * (float)w / (float)dw : 0.f,
+      tapPending ? g_assignReq.y * (float)h / (float)dh : 0.f,
+      tapPending ? (int)g_assignReq.source : -1,
+      tapBox);
+  if (tapPending && tapped) {
+    g_assignResult.have = true;
+    // Back into display space, so the overlay can draw the box without knowing the
+    // sensor size.
+    g_assignResult.box[0] = tapBox[0] * (float)dw / (float)w;
+    g_assignResult.box[1] = tapBox[1] * (float)dh / (float)h;
+    g_assignResult.box[2] = tapBox[2] * (float)dw / (float)w;
+    g_assignResult.box[3] = tapBox[3] * (float)dh / (float)h;
+    g_assignResult.source = (int)g_assignReq.source;
+  }
+
   if (!faces.empty()) {
     if (!g_pipe->swapAll(frame, faces)) { g_err = g_pipe->error(); return -1; }
     // Its own pass, after the swap, never fused -- see Pipeline::enhance's doc.

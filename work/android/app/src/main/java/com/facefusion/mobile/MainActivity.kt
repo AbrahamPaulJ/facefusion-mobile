@@ -42,8 +42,13 @@ import androidx.compose.ui.res.stringResource
  */
 class MainActivity : ComponentActivity() {
 
+    private data class LiveSource(val uri: Uri, val thumb: Bitmap)
+
     private var sourceUri by mutableStateOf<Uri?>(null)
     private var sourceThumb by mutableStateOf<Bitmap?>(null)
+    private var liveSources by mutableStateOf<List<LiveSource>>(emptyList())
+    private var liveSourceIndex by mutableIntStateOf(0)
+    private var liveLargestOnly by mutableStateOf(false)
     private var targetFile by mutableStateOf<File?>(null)
     private var targetName by mutableStateOf<String?>(null)
 
@@ -228,6 +233,27 @@ class MainActivity : ComponentActivity() {
     // "Start" -- the pixels updated because the bitmap reference changed and nothing else
     // did.
     private var liveRunning by mutableStateOf(false)
+    private var liveSwapEnabled by mutableStateOf(true)
+    /**
+     * Assign-per-person mode (Live): when ON, a tap on the feed gives the selected source
+     * chip to that face, and the face keeps it for the rest of the session. OFF is the
+     * default behaviour -- every face takes the active slot. In memory only, like the
+     * other Live switches: it is a property of this screen, not of a swap.
+     */
+    private var liveAssignMode by mutableStateOf(false)
+    /**
+     * The last face assigned, as the box+source liveFrame returned (x0,y0,x1,y1,source,
+     * DISPLAY bitmap coordinates), for the overlay to confirm the tap. [liveAssignNonce]
+     * changes with it so LiveScreen can retime its fade.
+     */
+    private var liveAssignBox by mutableStateOf<FloatArray?>(null)
+    private var liveAssignNonce by mutableIntStateOf(0)
+    private var liveAssignCount by mutableIntStateOf(0)
+    /**
+     * A tap is in flight: the next liveFrame consumes it and the shot callback takes the
+     * result. Pending until taken; a consumed-but-empty result is a miss, never guessed.
+     */
+    private var assignTapPending = false
     // Off = the forced fast preset. Kept out of SwapOptions on purpose: it is a property of
     // this screen, not of a swap, and persisting it would let a Live choice change what a
     // file run does.
@@ -384,12 +410,53 @@ class MainActivity : ComponentActivity() {
     private fun setSourceFrom(uri: Uri) {
         sourceUri = uri
         sourceThumb = decodeOriented(uri)
+        sourceThumb?.let { thumb ->
+            if (liveSources.none { it.uri == uri }) liveSources = liveSources + LiveSource(uri, thumb)
+            liveSourceIndex = liveSources.indexOfFirst { it.uri == uri }.coerceAtLeast(0)
+        }
         // A different face means the loaded pipeline is holding the wrong embedding.
         previewOptionsChanged()
     }
 
     private val pickSource = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) setSourceFrom(uri)
+    }
+
+    private val pickLiveSources = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) addLiveSource(uri)
+    }
+
+    private fun pickLiveSource() = pickLiveSources.launch("image/*")
+
+    private fun addLiveSource(uri: Uri) {
+        // ONE decode, two uses: the thumbnail stored for the pane and the pixels handed
+        // to the pipeline are the same image -- a second decode is a full-size allocation
+        // that produces nothing new.
+        val bmp = decodeOriented(uri) ?: return
+        val soft = bmp.asArgb8888()
+        val px = IntArray(soft.width * soft.height)
+        soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
+        val bgr = NativePipe.argbToBgr(px, soft.width, soft.height)
+
+        // While the pump is running, the native slots must stay aligned with this list,
+        // so the new face is registered at the same index the chip will show. Not running,
+        // there is no live pipeline to add to -- startLive registers the whole list.
+        if (liveRunning) NativePipe.addSource(bgr, soft.width, soft.height)
+
+        liveSources = liveSources + LiveSource(uri, bmp)
+        liveSourceIndex = liveSources.lastIndex
+    }
+
+    private fun selectLiveSource(index: Int) {
+        if (index !in liveSources.indices || index == liveSourceIndex) return
+        liveSourceIndex = index
+        if (liveRunning) NativePipe.setActiveSource(index)
+    }
+
+    private fun clearLiveSource() {
+        if (liveRunning || liveSources.isEmpty()) return
+        liveSources = liveSources.filterIndexed { i, _ -> i != liveSourceIndex }
+        liveSourceIndex = liveSourceIndex.coerceAtMost(liveSources.lastIndex.coerceAtLeast(0))
     }
 
     private val takeSourcePhoto = registerForActivityResult(
@@ -1103,9 +1170,12 @@ class MainActivity : ComponentActivity() {
                             )
 
                             Screen.Live -> LiveScreen(
-                                sourceThumb = sourceThumb,
-                                onPickSource = { pickSource.launch("image/*") },
-                                onClearSource = ::clearSource,
+                                sourceThumb = liveSources.getOrNull(liveSourceIndex)?.thumb,
+                                sourceCount = liveSources.size,
+                                activeSource = liveSourceIndex,
+                                onSelectSource = ::selectLiveSource,
+                                onPickSource = ::pickLiveSource,
+                                onClearSource = ::clearLiveSource,
                                 onCaptureSource = { capture(video = false, forSource = true) },
                                 frame = liveFrame,
                                 running = liveRunning,
@@ -1123,8 +1193,23 @@ class MainActivity : ComponentActivity() {
                                 microphone = liveMicrophone,
                                 finalizing = liveFinalizing,
                                 onMicrophoneChange = ::changeLiveMicrophone,
+                                largestOnly = liveLargestOnly,
+                                // Runtime setter, no pipeline restart: swapLargestOnly is
+                                // read per frame natively, and a restart would tear down
+                                // the pipeline and wipe every face assignment made so far.
+                                onLargestOnlyChange = { liveLargestOnly = it; if (liveRunning) NativePipe.setSwapLargestOnly(it) },
+                                swapEnabled = liveSwapEnabled,
+                                onToggleSwapEnabled = { toggleSwapEnabled() },
+                                assignMode = liveAssignMode,
+                                onToggleAssignMode = ::toggleLiveAssign,
+                                onAssignFace = ::assignLiveFace,
+                                assignBox = liveAssignBox,
+                                assignNonce = liveAssignNonce,
+                                assignCount = liveAssignCount,
+                                onClearAssignments = ::clearLiveAssignments,
                                 onToggleRecord = ::toggleLiveRecording,
                             )
+
                             Screen.Settings -> SettingsScreen(
                                 sections = modelSections(),
                                 modelDirPath = modelDir().absolutePath,
@@ -2562,6 +2647,39 @@ class MainActivity : ComponentActivity() {
         status = getString(R.string.status_live_recording)
     }
 
+    private fun toggleSwapEnabled() {
+        liveSwapEnabled = !liveSwapEnabled
+        NativePipe.setSwapEnabled(liveSwapEnabled)
+    }
+
+    private fun toggleLiveAssign() {
+        liveAssignMode = !liveAssignMode
+        NativePipe.setFaceAssignEnabled(liveAssignMode)
+        liveAssignBox = null
+        liveNote = if (liveAssignMode) getString(R.string.live_assign_hint)
+                   else null
+    }
+
+    private fun clearLiveAssignments() {
+        NativePipe.clearFaceSourceAssignments()
+        liveAssignBox = null
+        liveAssignCount = 0
+        liveNote = getString(R.string.live_assign_cleared)
+    }
+
+    /**
+     * A tap on the live feed, in DISPLAY bitmap coordinates (LiveScreen already undid the
+     * mirror and the crop, so the point matches what the pipeline sees). The tap is
+     * queued natively and resolved against the NEXT frame's pre-swap detections; the
+     * result is polled in the shot callback below.
+     */
+    private fun assignLiveFace(dispX: Float, dispY: Float) {
+        if (!liveRunning || !liveAssignMode) return
+        if (assignTapPending) return   // one tap in flight at a time
+        NativePipe.requestFaceAssignment(dispX, dispY, liveSourceIndex)
+        assignTapPending = true
+    }
+
     /**
      * Close the recording and say where it went.
      *
@@ -2608,7 +2726,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startLive() {
-        val src = sourceUri ?: return
+        // Nothing to run with -- the guard the caller's button already relies on, kept so
+        // this method cannot be entered with an empty list by any other path.
+        if (liveSources.getOrNull(liveSourceIndex) == null) return
         // Read at bind time by the engine, so it must be set before start() and not after.
         live.frontCamera = liveFrontCamera
         lifecycleScope.launch {
@@ -2625,23 +2745,51 @@ class MainActivity : ComponentActivity() {
             // The forced preset. Tracking ON is the whole reason this is watchable; the
             // enhancer and pixel boost are the two settings that most easily turn 25 fps
             // into single digits, so they are pinned unless the override says otherwise.
-            val opts = if (liveUseMySettings) base else base.copy(
+            val opts = (if (liveUseMySettings) base else base.copy(
                 faceEnhance = false, pixelBoost = 1, lipSync = false, trackPeriod = 4,
-            )
-            val ok = withContext(Dispatchers.Default) {
+            )).copy(largestOnly = liveLargestOnly)
+            val startError = withContext(Dispatchers.Default) {
                 val models = modelDir()
                 val libDir = applicationInfo.nativeLibraryDir
-                if (!NativePipe.init(libDir, libDir, models.absolutePath, opts)) return@withContext false
+                if (!NativePipe.init(libDir, libDir, models.absolutePath, opts))
+                    return@withContext "init: ${NativePipe.lastError()}"
                 NativePipe.setTrackPeriod(opts.trackPeriod)
-                val bmp = decodeOriented(src) ?: return@withContext false
-                val soft = bmp.asArgb8888()
-                val px = IntArray(soft.width * soft.height)
-                soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
-                NativePipe.setSource(NativePipe.argbToBgr(px, soft.width, soft.height),
-                                     soft.width, soft.height)
+                // EVERY source is registered, in list order, so the native slots stay
+                // aligned with the chips. The first version registered only the ACTIVE
+                // one, which made `setActiveSource(i)` point at the wrong slot -- or at
+                // nowhere at all -- as soon as the list held more than one face.
+                // Each one is gated too: a face the user can switch to mid-run must not
+                // be the one input the gate never saw.
+                for ((i, ls) in liveSources.withIndex()) {
+                    val bmp = decodeOriented(ls.uri)
+                        ?: return@withContext "cannot read source ${i + 1}"
+                    val verdict = ContentGate.checkImage(bmp)
+                    if (!verdict.ok)
+                        return@withContext ContentGate.message(
+                            this@MainActivity, R.string.gate_subject_source_image, verdict)
+                    val soft = bmp.asArgb8888()
+                    val px = IntArray(soft.width * soft.height)
+                    soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
+                    val bgr = NativePipe.argbToBgr(px, soft.width, soft.height)
+                    val okOne = if (i == 0)
+                                    NativePipe.setSource(bgr, soft.width, soft.height)
+                                else NativePipe.addSource(bgr, soft.width, soft.height) >= 0
+                    if (!okOne) return@withContext "no face in source ${i + 1}"
+                }
+                // A fresh pipeline defaults swapEnabled to true; the switch can be OFF
+                // before the pump ever ran, so the UI's value is pushed onto it here.
+                // setActiveSource restores the chip the user had selected; the assignment
+                // switch rides in the same way (OFF by default natively), and the
+                // largest-only selector with it (already in the init config, pushed again
+                // so the invariant is "the UI's value is what the pipeline has").
+                NativePipe.setSwapEnabled(liveSwapEnabled)
+                NativePipe.setActiveSource(liveSourceIndex)
+                NativePipe.setFaceAssignEnabled(liveAssignMode)
+                NativePipe.setSwapLargestOnly(liveLargestOnly)
+                null
             }
-            if (!ok) {
-                liveNote = "cannot start: ${NativePipe.lastError()}"
+            if (startError != null) {
+                liveNote = startError
                 NativePipe.release(); PipeGuard.release(); return@launch
             }
             liveRunning = true
@@ -2674,6 +2822,24 @@ class MainActivity : ComponentActivity() {
                     liveFaces = shot.faces
                     liveFps = shot.fps
                 }
+                // A pending assignment tap resolves on the frame after it was queued;
+                // this callback runs on the analyzer thread that liveFrame just ran on,
+                // so the result is taken here. Empty means the request is still in
+                // flight (a slow frame -- ncnn at full size is 240-540 ms); [-1] means
+                // it was consumed and the tap was on no face.
+                if (assignTapPending) {
+                    val box = NativePipe.takeAssignmentResult()
+                    if (box.size >= 5) {
+                        assignTapPending = false
+                        liveAssignBox = box
+                        liveAssignNonce++
+                        liveAssignCount++
+                        liveNote = getString(R.string.live_assign_set, (box[4].toInt() + 1))
+                    } else if (box.size == 1) {
+                        assignTapPending = false
+                        liveNote = getString(R.string.live_assign_missed)
+                    }
+                }
             }
         }
     }
@@ -2691,6 +2857,10 @@ class MainActivity : ComponentActivity() {
         finishLiveRecording(discard = false)
         liveRunning = false
         NativePipe.setTrackPeriod(0)
+        // Assignments die with the pipeline the engine is about to release; the UI state
+        // around them goes with them so a stale box or count cannot outlive the session.
+        assignTapPending = false
+        liveAssignBox = null; liveAssignCount = 0
         liveFrame = null; liveFps = 0.0; liveFaces = 0
         // ⚠ The pipeline is freed by the ENGINE's callback, not here. stop() runs it inline
         // when the pump drains (the normal case, ~60 ms) and from a watchdog thread when it
