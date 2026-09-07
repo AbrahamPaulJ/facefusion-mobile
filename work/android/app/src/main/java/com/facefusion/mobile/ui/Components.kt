@@ -323,7 +323,6 @@ fun PreviewPane(
      * swallowing misses would break the way every other pane on the screen behaves.
      */
     onPickFace: ((Float, Float) -> Unit)? = null,
-    trailing: @Composable RowScope.() -> Unit = {},
     /**
      * When set, the image box is THIS wide instead of filling the column, and is centred
      * inside the (still full-width) container. Used by the swapped result pane: its box
@@ -331,6 +330,7 @@ fun PreviewPane(
      * letterboxing a portrait result into grey side bars.
      */
     contentWidth: Dp? = null,
+    trailing: @Composable RowScope.() -> Unit = {},
 ) {
     // ONE container around the caption row AND the image, rather than a caption floating
     // above a rounded box. The label and its buttons sat flush against the pane's outer

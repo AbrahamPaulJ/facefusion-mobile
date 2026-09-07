@@ -314,6 +314,7 @@ fun LiveScreen(
             // draws with, so the outline sits on the person the user tapped.
             if (assignFade && assignBox != null && assignBox.size >= 5 && frame != null) {
                 val b = assignBox
+                val label = stringResource(R.string.live_source_label, b[4].toInt() + 1)
                 Canvas(Modifier.fillMaxSize()) {
                     val fw = frame.width.toFloat(); val fh = frame.height.toFloat()
                     val bw = size.width.toFloat(); val bh = size.height.toFloat()
@@ -326,7 +327,6 @@ fun LiveScreen(
                     drawRect(FfRed, topLeft = Offset(l, t),
                              size = androidx.compose.ui.geometry.Size(r - l, bo - t),
                              style = androidx.compose.ui.graphics.drawscope.Stroke(3.dp.toPx()))
-                    val label = stringResource(R.string.live_source_label, b[4].toInt() + 1)
                     val paint = android.graphics.Paint().apply {
                         color = android.graphics.Color.RED
                         textSize = 13.dp.toPx()
@@ -346,6 +346,7 @@ fun LiveScreen(
             // mapping as the confirmation box.
             if (selectionBox != null && selectionBox.size >= 5 && frame != null) {
                 val b = selectionBox
+                val label = stringResource(R.string.live_source_label, b[4].toInt() + 1)
                 Canvas(Modifier.fillMaxSize()) {
                     val fw = frame.width.toFloat(); val fh = frame.height.toFloat()
                     val bw = size.width.toFloat(); val bh = size.height.toFloat()
@@ -358,7 +359,6 @@ fun LiveScreen(
                     drawRect(Color.White, topLeft = Offset(l, t),
                              size = androidx.compose.ui.geometry.Size(r - l, bo - t),
                              style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
-                    val label = stringResource(R.string.live_source_label, b[4].toInt() + 1)
                     val paint = android.graphics.Paint().apply {
                         color = android.graphics.Color.WHITE
                         textSize = 13.dp.toPx()
