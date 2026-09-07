@@ -15,6 +15,7 @@
 
     <string name="nav_swap">Замена</string>
     <string name="nav_settings">Настройки</string>
+    <string name="nav_live">Live</string>
 
     <string name="swap_source_face">Исходное лицо</string>
     <string name="swap_source_pick">Выберите исходное лицо</string>
@@ -298,6 +299,11 @@
     <string name="live_stat">%1$s fps   %2$s</string>
     <string name="live_faces">лиц: %1$d</string>
     <string name="live_no_face">нет лица</string>
+    <string name="live_source_label">Источник %1$d</string>
+    <string name="live_swap">Замена лица</string>
+    <string name="live_swap_on">Замена активна</string>
+    <string name="live_swap_off">Замена отключена</string>
+    <string name="live_target">Целевые лица</string>
     <string name="live_stop_to_change">Остановите, чтобы сменить исходное лицо</string>
     <string name="live_source_hint">Лицо, которое накладывается НА живое видео</string>
     <string name="live_fast_mode">Быстрый режим</string>

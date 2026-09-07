@@ -324,6 +324,13 @@ fun PreviewPane(
      */
     onPickFace: ((Float, Float) -> Unit)? = null,
     trailing: @Composable RowScope.() -> Unit = {},
+    /**
+     * When set, the image box is THIS wide instead of filling the column, and is centred
+     * inside the (still full-width) container. Used by the swapped result pane: its box
+     * then matches the image's own aspect ratio rather than stretching full width and
+     * letterboxing a portrait result into grey side bars.
+     */
+    contentWidth: Dp? = null,
 ) {
     // ONE container around the caption row AND the image, rather than a caption floating
     // above a rounded box. The label and its buttons sat flush against the pane's outer
@@ -384,7 +391,9 @@ fun PreviewPane(
         }
         Box(
             Modifier
-                .fillMaxWidth()
+                .then(if (contentWidth != null)
+                          Modifier.align(Alignment.CenterHorizontally).width(contentWidth)
+                      else Modifier.fillMaxWidth())
                 .height(height)
                 // 12, not 14: concentric with the container 18 minus its 6 dp padding.
                 .clip(RoundedCornerShape(12.dp))

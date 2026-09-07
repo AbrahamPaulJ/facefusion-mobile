@@ -607,6 +607,7 @@ class MainActivity : ComponentActivity() {
             batchQueue = videos.map {
                 BatchItem(it, displayName(it) ?: getString(R.string.batch_unnamed_clip))
             }
+            seedBatchThumbs(videos, 0)
             status = if (images > 0)
                          getString(R.string.status_batch_queued_some, videos.size, images)
                      else getString(R.string.status_batch_queued, videos.size)
@@ -651,6 +652,7 @@ class MainActivity : ComponentActivity() {
         batchQueue = head + fresh.map {
             BatchItem(it, displayName(it) ?: getString(R.string.batch_unnamed_clip))
         }
+        seedBatchThumbs(fresh, head.size)
         status = getString(R.string.status_batch_queued, batchQueue.size)
     }
 
@@ -3497,6 +3499,53 @@ class MainActivity : ComponentActivity() {
             }
         }
     }.getOrNull()
+
+    /**
+     * A small first frame of a PICKED clip ([uri]), for the queue row as soon as it is
+     * added -- before any swap runs. The queue used to show a play glyph until the clip
+     * FINISHED (the thumbnail came from the output), which read as "the row is empty"
+     * rather than "this clip is queued".
+     *
+     * Same retriever as [batchThumb], but on a content URI rather than an app-written
+     * file. Failure is null -- a missing thumbnail is cosmetic and must not refuse a clip.
+     */
+    private fun batchThumb(uri: Uri): Bitmap? = runCatching {
+        android.media.MediaMetadataRetriever().use { r ->
+            r.setDataSource(this@MainActivity, uri)
+            val full = r.getFrameAtTime(0) ?: return@use null
+            val w = 160
+            val h = (full.height.toLong() * w / full.width).toInt().coerceAtLeast(1)
+            Bitmap.createScaledBitmap(full, w, h, true).also {
+                if (it !== full) full.recycle()
+            }
+        }
+    }.getOrNull()
+
+    /**
+     * Fill in [BatchItem.thumb] for freshly queued clips, off the main thread.
+     *
+     * [startIndex] is where [uris] landed in [batchQueue] (0 for a fresh queue, `head.size`
+     * when appended). The retriever is cheap -- one keyframe -- but not free, and running
+     * it on the picker's main-thread callback would stutter the row draw for every video
+     * added at once.
+     */
+    private fun seedBatchThumbs(uris: List<Uri>, startIndex: Int) {
+        if (uris.isEmpty()) return
+        lifecycleScope.launch(Dispatchers.IO) {
+            uris.forEachIndexed { k, uri ->
+                val th = batchThumb(uri) ?: return@forEachIndexed
+                withContext(Dispatchers.Main) {
+                    // Only the row that is still waiting on its thumbnail, and only the
+                    // position it was queued at: a user can have removed or reordered the
+                    // row while the seek was in flight.
+                    batchQueue = batchQueue.mapIndexed { j, it ->
+                        if (j == startIndex + k && it.thumb == null && it.uri == uri)
+                            it.copy(thumb = th) else it
+                    }
+                }
+            }
+        }
+    }
 
     /** The finished video, into the shared Movies collection. */
     private fun saveToGallery(file: File) {

@@ -28,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
@@ -828,6 +829,10 @@ fun SwapScreen(
         } else {
             resultH = paneHeight.coerceAtMost(maxResultH)
         }
+        // The image box matches the image's OWN aspect ratio: a portrait result is no
+        // longer letterboxed into grey side bars by a full-width box. The column stays
+        // full width; contentWidth centres the (narrower) box inside it.
+        val resultW: Dp? = if (tW > 0 && tH > 0) resultH * (tW.toFloat() / tH.toFloat()) else null
 
         // Always shown by default. The placeholder reads as a call to action until the
         // inputs exist, and once they do it is the after half of the before/after.
@@ -851,8 +856,10 @@ fun SwapScreen(
                 // inputs exist, so this is a transient state rather than an instruction.
                 else -> stringResource(R.string.swap_preparing_preview)
             },
-            // Full width: the result is meant to fill the screen, not sit at 60%.
+            // Full-width container; the image box inside is narrower when the result is
+            // portrait (contentWidth), centred rather than letterboxed into side bars.
             modifier = Modifier.fillMaxWidth(),
+            contentWidth = resultW,
             // The download lives here rather than in a bar of its own: this is the pane
             // that cannot draw anything without the models, so it is where their absence
             // is already visible.
@@ -1257,7 +1264,7 @@ fun SwapScreen(
         if (run.busy || run.progress > 0f) {
             LinearProgressIndicator(
                 progress = { run.progress.coerceIn(0f, 1f) },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().alpha(0.69f),
             )
             if (run.framesTotal > 0) {
                 val fps = if (run.elapsedS > 0) run.framesDone / run.elapsedS else 0.0

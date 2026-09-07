@@ -91,8 +91,8 @@ fun AppScaffold(
                 if (showLive) NavigationBarItem(
                     selected = screen == Screen.Live,
                     onClick = { onScreen(Screen.Live) },
-                    icon = { Icon(Icons.Default.PlayArrow, "Live") },
-                    label = { Text("Live") },
+                    icon = { Icon(Icons.Default.PlayArrow, stringResource(R.string.nav_live)) },
+                    label = { Text(stringResource(R.string.nav_live)) },
                 )
                 NavigationBarItem(
                     selected = screen == Screen.Settings,

@@ -19,6 +19,7 @@
 
     <string name="nav_swap">換臉</string>
     <string name="nav_settings">設定</string>
+    <string name="nav_live">實況</string>
 
     <string name="swap_source_face">來源人臉</string>
     <string name="swap_source_pick">選擇來源人臉</string>
@@ -312,6 +313,11 @@
     <string name="live_stat">%1$s fps   %2$s</string>
     <string name="live_faces">%1$d 張人臉</string>
     <string name="live_no_face">沒有人臉</string>
+    <string name="live_source_label">來源 %1$d</string>
+    <string name="live_swap">換臉</string>
+    <string name="live_swap_on">替換已啟用</string>
+    <string name="live_swap_off">替換已停用</string>
+    <string name="live_target">目標臉孔</string>
     <string name="live_stop_to_change">停止後才能更換來源人臉</string>
     <string name="live_source_hint">要疊加到即時畫面上的人臉</string>
     <string name="live_fast_mode">快速模式</string>
