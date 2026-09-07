@@ -35,8 +35,11 @@ Ruhs. The pipeline, the models, and the option names, defaults and ranges are Fa
 - **Live**: the front or back camera, swapped, in real time, and you can record what it
   shows. Enable **Microphone** before recording to include microphone audio in the MP4
   (Android asks for permission); leave it off for silent video. The switch is locked while
-  recording and saving. Fast mode forces the settings a camera can keep up with; turning it off is
-  experimental and asks first.
+  recording and saving. Fast mode forces the settings a camera can keep up with; turning it
+  off is experimental and asks first.
+- **Assign per person** (Live): with more than one source face loaded, tap a person to give
+  them a specific source. They keep it for as long as they are in frame, while everyone
+  else follows whichever source is selected.
 - **Batch**: queue several clips and swap them all in one run, with one source face. Each
   finished clip gets a thumbnail you can tap, and can be saved to your gallery as it lands.
 - **Pick the face**: tap a face on the target to swap only that person. The boxes appear on
@@ -45,7 +48,8 @@ Ruhs. The pipeline, the models, and the option names, defaults and ranges are Fa
   face, film a target, or record the voice that drives the lip syncer.
 - Saves to your gallery, or hands a still straight out of the preview.
 - Lip sync, optionally: redraws the mouth to match a voice you pick — a dub, a different
-  take, any audio or video file — at about 1-2 ms per frame on the NPU.
+  take, any audio or video file — at about 1-2 ms per frame on the NPU. Play the voice back
+  and trim it first, so only the part you want drives the mouth.
 - Speaks English, Русский, 简体中文 and 繁體中文.
 - Can be driven from a browser on your PC over the local network, if you turn that on.
 
