@@ -178,20 +178,6 @@ class VideoSwapper(
         val uprightW = if (rotation == 90 || rotation == 270) height else width
         val uprightH = if (rotation == 90 || rotation == 270) width else height
 
-        // THE OUTPUT SIZE CAP, on the SHORT edge, so the aspect ratio is untouched and
-        // "720p" means the same thing for a portrait clip as for a landscape one.
-        //
-        // ⚠ Both axes are rounded to EVEN. 4:2:0 chroma is half-size in both directions and
-        // an odd edge has nowhere to put the last row -- the same rule upstream's
-        // normalize_resolution applies, and the same one the encoder alignment below is
-        // about.
-        val shortEdge = minOf(uprightW, uprightH)
-        val capped = outputMaxShortEdge in 1 until shortEdge
-        val outW = if (!capped) uprightW
-                   else ((uprightW.toLong() * outputMaxShortEdge / shortEdge).toInt()) and 1.inv()
-        val outH = if (!capped) uprightH
-                   else ((uprightH.toLong() * outputMaxShortEdge / shortEdge).toInt()) and 1.inv()
-        if (capped) onLog("output capped to ${outW}x$outH from ${uprightW}x$uprightH")
         val inFps = if (vf.containsKey(MediaFormat.KEY_FRAME_RATE))
             vf.getInteger(MediaFormat.KEY_FRAME_RATE) else 30
         // Never above the input: duplicating frames would cost a full swap each and add
@@ -199,6 +185,90 @@ class VideoSwapper(
         val fps = if (outputFps in 1..inFps) outputFps else inFps
         val spanUs = (if (trimEndUs == Long.MAX_VALUE) durationUs(vf) else trimEndUs) - trimStartUs
         val expected = ((spanUs / 1_000_000.0) * fps).toInt().coerceAtLeast(1)
+
+        /*
+         * THE OUTPUT SIZE, on the SHORT edge, so the aspect ratio is untouched and "720p"
+         * means the same thing for a portrait clip as for a landscape one.
+         *
+         * TWO things cap it, and they are resolved TOGETHER: what the user asked for, and
+         * what this device's AVC encoder will actually accept. The encoder used to be asked
+         * only AFTER the size was already chosen, and only about its ALIGNMENT and its
+         * MINIMUM -- so a frame that was too BIG went to `encoder.start()` unchecked, and
+         * came back as a CodecException with an EMPTY message: a bug report whose whole
+         * status line read "Failed: ". Reported on a 1440x2560 clip.
+         *
+         * The ceiling is not one number, which is why it is asked per candidate size rather
+         * than compared against `supportedHeights` once. That range is the tallest frame
+         * this encoder does at ANY width; a part that takes 2560 as a WIDTH can refuse it as
+         * a HEIGHT, and a macroblock-RATE limit couples the size to the frame rate on top of
+         * that. `areSizeAndRateSupported` is the question that has all three in it.
+         *
+         * ⚠ Both axes are rounded to EVEN. 4:2:0 chroma is half-size in both directions and
+         * an odd edge has nowhere to put the last row -- the same rule upstream's
+         * normalize_resolution applies, and the same one the encoder alignment is about.
+         */
+        val shortEdge = minOf(uprightW, uprightH)
+        // Created and released HERE rather than held until the encode below: the audio
+        // decode in between can throw, and a MediaCodec leaked on that path is one the next
+        // run may not get back. Its capabilities are a plain value and outlive it.
+        val vcaps = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).let {
+            try {
+                it.codecInfo.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)
+                    .videoCapabilities
+            } finally { it.release() }
+        }
+        // The frame at a given short edge, aspect preserved. This is the size the whole
+        // pipeline works at -- decode, detect, swap, paste -- so it is only ever even.
+        fun outAt(s: Int): Pair<Int, Int> =
+            if (s >= shortEdge) uprightW to uprightH
+            else ((uprightW.toLong() * s / shortEdge).toInt() and 1.inv()) to
+                 ((uprightH.toLong() * s / shortEdge).toInt() and 1.inv())
+        /*
+         * And the size the ENCODER is handed, which is that aligned DOWN and the frame
+         * cropped to match: rounding up would need padding, and a black seam on two edges of
+         * every frame is worse than losing up to 15 px.
+         *
+         * The dimensions a hardware encoder takes are a property of the silicon, so they are
+         * asked for instead of assumed -- a 196x112 clip once threw here because 196 is not
+         * a multiple of 16 and this device's AVC encoder aligns width to 16. It is 2 on some
+         * parts, and hardcoding either is how this breaks again on a different phone.
+         */
+        fun encAt(o: Pair<Int, Int>): Pair<Int, Int> =
+            (o.first / vcaps.widthAlignment * vcaps.widthAlignment) to
+            (o.second / vcaps.heightAlignment * vcaps.heightAlignment)
+        // runCatching, not a bare call: areSizeAndRateSupported THROWS rather than answering
+        // false once a dimension is outside the range it indexes by, which is exactly the
+        // oversize case being asked about.
+        fun takes(s: Int): Boolean {
+            val (w, h) = encAt(outAt(s))
+            return w >= vcaps.supportedWidths.lower && h >= vcaps.supportedHeights.lower &&
+                runCatching { vcaps.areSizeAndRateSupported(w, h, fps.toDouble()) }
+                    .getOrDefault(false)
+        }
+        val wanted = if (outputMaxShortEdge in 1 until shortEdge) outputMaxShortEdge
+                     else shortEdge
+        // One alignment step per try, so every iteration actually moves the aligned size.
+        val sizeStep = maxOf(vcaps.widthAlignment, vcaps.heightAlignment, 2)
+        var shortOut = wanted
+        while (shortOut >= sizeStep && !takes(shortOut)) shortOut -= sizeStep
+        if (shortOut < sizeStep)
+            // A clear sentence rather than a CodecException: nothing about the clip can be
+            // changed by retrying, and the numbers say exactly why.
+            error("this device's video encoder cannot take ${uprightW}x$uprightH at " +
+                  "${fps}fps -- it accepts ${vcaps.supportedWidths} by " +
+                  "${vcaps.supportedHeights}")
+        val capped = shortOut < shortEdge
+        val (outW, outH) = outAt(shortOut)
+        val (encW, encH) = encAt(outW to outH)
+        if (shortOut < wanted) {
+            val (wantW, wantH) = outAt(wanted)
+            onLog("encoder will not encode ${wantW}x$wantH: output is ${outW}x$outH")
+        } else if (capped) {
+            onLog("output capped to ${outW}x$outH from ${uprightW}x$uprightH")
+        }
+        if (encW != outW || encH != outH)
+            onLog("encoder wants multiples of ${vcaps.widthAlignment}x" +
+                  "${vcaps.heightAlignment}: cropping ${outW}x$outH to ${encW}x$encH")
 
         // Sequential decode starts here, so the tracker may be armed. Cleared in the
         // teardown below, on every exit path including cancellation -- a period left set
@@ -245,47 +315,38 @@ class VideoSwapper(
 
         val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
 
-        /*
-         * ASK the encoder what it will accept, rather than handing it the clip's size.
-         *
-         * A 196x112 clip made `encoder.start()` throw MediaCodec.CodecException -- with an
-         * EMPTY message, so it arrived as a failure with nothing in it. 196 is not a
-         * multiple of 16, and this device's AVC encoder has a width alignment of 16. The
-         * dimensions a hardware encoder takes are a property of the silicon, so they are
-         * asked for here instead of assumed; the alignment is 2 on some parts and 16 on
-         * others, and hardcoding either is how this breaks again on a different phone.
-         *
-         * Aligned DOWN and the frame is cropped to match: rounding up would need padding,
-         * and a black seam on two edges of every frame is worse than losing up to 15 px.
-         */
-        val vcaps = encoder.codecInfo
-            .getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC).videoCapabilities
-        val encW = (outW / vcaps.widthAlignment) * vcaps.widthAlignment
-        val encH = (outH / vcaps.heightAlignment) * vcaps.heightAlignment
-        if (encW < vcaps.supportedWidths.lower || encH < vcaps.supportedHeights.lower) {
-            encoder.release()
-            // A clear sentence rather than a CodecException: nothing about the clip can be
-            // changed by retrying, and the numbers say exactly why.
-            error("this device cannot encode ${outW}x$outH video -- the smallest it takes " +
-                  "is ${vcaps.supportedWidths.lower}x${vcaps.supportedHeights.lower}")
-        }
-        if (encW != outW || encH != outH)
-            onLog("encoder wants multiples of ${vcaps.widthAlignment}x" +
-                  "${vcaps.heightAlignment}: cropping ${outW}x$outH to ${encW}x$encH")
-
         // The encoder is sized to the UPRIGHT frame, so the output needs no orientation
         // hint of its own -- the rotation is baked into the pixels.
+        //
+        // ⚠ The bitrate is CLAMPED to what this encoder advertises, for the same reason the
+        // size is: a value outside the range is refused at start(), in the same empty
+        // CodecException, and 0.25 bits per pixel of a big frame is a number some parts do
+        // not go up to. Long arithmetic -- width * height * fps overflows Int at 8K.
+        val bitrate = (encW.toLong() * encH * fps / 4L)
+            .coerceIn(64_000L, Int.MAX_VALUE.toLong()).toInt()
+            .coerceIn(vcaps.bitrateRange.lower, vcaps.bitrateRange.upper)
         val encFormat = MediaFormat.createVideoFormat(
                 MediaFormat.MIMETYPE_VIDEO_AVC, encW, encH).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT,
                 MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
-            setInteger(MediaFormat.KEY_BIT_RATE, (encW * encH * fps * 0.25).toInt()
-                .coerceAtLeast(64_000))
+            setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
             setInteger(MediaFormat.KEY_FRAME_RATE, fps)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
         }
-        encoder.configure(encFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-        encoder.start()
+        // Every knob above has been checked against this codec's own capabilities, so a
+        // refusal here means the capabilities did not describe it. Say what was asked for
+        // and what the component answered -- see [codecWhy]. Without this the bug report
+        // reads "Failed: " and there is nothing in it to act on.
+        runCatching {
+            encoder.configure(encFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            encoder.start()
+        }.onFailure { e ->
+            val name = runCatching { encoder.codecInfo.name }.getOrDefault("encoder")
+            encoder.release()
+            decoder.stop(); decoder.release()
+            error(codecWhy(e, "$name refused ${encW}x$encH @ ${fps}fps, " +
+                              "${bitrate / 1000} kbps"))
+        }
 
         // Started after both codecs are up, so the fps below is the SWAP rate and not
         // diluted by MediaCodec configuration -- which is what a like-for-like comparison
