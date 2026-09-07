@@ -278,6 +278,13 @@ object NativePipe {
      */
     @JvmStatic external fun takeAssignmentResult(): FloatArray
 
+    /** Assign one target face at (x, y) to a source slot and return its normalized embedding. */
+    @JvmStatic external fun assignFaceAt(bgr: ByteArray, w: Int, h: Int,
+                                         x: Float, y: Float, source: Int): FloatArray
+
+    /** Add a previously captured normalized face embedding to the source assignment table. */
+    @JvmStatic external fun addFaceAssignmentEmbedding(embedding: FloatArray, source: Int): Boolean
+
     /** Forget every assignment of the current pipeline. */
     @JvmStatic external fun clearFaceSourceAssignments()
 

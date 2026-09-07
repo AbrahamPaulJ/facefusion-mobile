@@ -225,7 +225,8 @@ class Pipeline {
   void clearSourceSlots();
   void setActiveSource(int index);
   bool setFaceSourceAt(const ffcv::Image& frame, float x, float y, int sourceIndex,
-                       bool disabled, float* outBox);
+                       bool disabled, float* outBox, float* outEmbedding = nullptr);
+  bool addFaceAssignmentEmbedding(const float* embedding, int sourceIndex);
   void clearFaceSourceAssignments();
 
   /**

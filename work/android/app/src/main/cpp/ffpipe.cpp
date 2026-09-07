@@ -1034,7 +1034,7 @@ void Pipeline::setActiveSource(int index) {
 }
 
 bool Pipeline::setFaceSourceAt(const ffcv::Image& frame, float x, float y, int sourceIndex,
-                               bool disabled, float* outBox) {
+                               bool disabled, float* outBox, float* outEmbedding) {
   err_.clear();
   if (sourceIndex < 0 || sourceIndex >= (int)p_->sourceSlots.size()) {
     err_ = "source index out of range"; return false;
@@ -1049,8 +1049,35 @@ bool Pipeline::setFaceSourceAt(const ffcv::Image& frame, float x, float y, int s
   }
   if (!chosen) { err_ = "no face at selected point"; return false; }
   if (outBox) std::memcpy(outBox, chosen->box, sizeof(float) * 4);
+  if (outEmbedding) std::memcpy(outEmbedding, chosen->embeddingNorm, sizeof(float) * 512);
+  const float kSamePerson = 0.15f;
+  p_->faceAssignments.erase(
+      std::remove_if(p_->faceAssignments.begin(), p_->faceAssignments.end(),
+          [&](const Pipeline::Impl::FaceAssignment& existing) {
+            return faceDistance(chosen->embeddingNorm, existing.embedding.data()) < kSamePerson;
+          }),
+      p_->faceAssignments.end());
   Pipeline::Impl::FaceAssignment a{}; std::memcpy(a.embedding.data(), chosen->embeddingNorm, sizeof(float) * 512);
   a.source = sourceIndex; a.disabled = disabled;
+  p_->faceAssignments.push_back(a);
+  return true;
+}
+
+bool Pipeline::addFaceAssignmentEmbedding(const float* embedding, int sourceIndex) {
+  if (!p_ || !embedding || sourceIndex < 0 || sourceIndex >= (int)p_->sourceSlots.size()) {
+    err_ = "invalid face assignment";
+    return false;
+  }
+  const float kSamePerson = 0.15f;
+  p_->faceAssignments.erase(
+      std::remove_if(p_->faceAssignments.begin(), p_->faceAssignments.end(),
+          [&](const Pipeline::Impl::FaceAssignment& existing) {
+            return faceDistance(embedding, existing.embedding.data()) < kSamePerson;
+          }),
+      p_->faceAssignments.end());
+  Pipeline::Impl::FaceAssignment a{};
+  std::memcpy(a.embedding.data(), embedding, sizeof(float) * 512);
+  a.source = sourceIndex;
   p_->faceAssignments.push_back(a);
   return true;
 }
@@ -1610,6 +1637,22 @@ bool Pipeline::swapAll(ffcv::Image& frame, const std::vector<Face>& faces) {
     // vector, but a stale index must still fall back to slot 0 rather than read past
     // it.
     int six = p_->activeSource;
+    // Swap's Assign per person mode uses the target identity assignments on every frame.
+    // Live still fills frameSources for its frame-to-frame tracker, which takes priority.
+    if (p_->assignEnabled && p_->frameSources.size() != faces.size()) {
+      const Pipeline::Impl::FaceAssignment* bestAssignment = nullptr;
+      float bestDistance = cfg.referenceDistance;
+      for (const auto& assignment : p_->faceAssignments) {
+        if (assignment.disabled || assignment.source < 0 ||
+            assignment.source >= (int)p_->sourceSlots.size()) continue;
+        const float distance = faceDistance(f.embeddingNorm, assignment.embedding.data());
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestAssignment = &assignment;
+        }
+      }
+      if (bestAssignment) six = bestAssignment->source;
+    }
     // PER-PERSON ASSIGNMENT (Live, switch ON): the per-face table updateLiveTracking
     // built this frame overrides the slot. A PINNED face keeps ITS source -- sticky,
     // decided once at the tap and never re-scored against per-frame embedding noise,

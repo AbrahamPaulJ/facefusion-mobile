@@ -337,7 +337,15 @@
     <string name="set_theme_desc_light">Светлая</string>
     <string name="live_lens_front">ФРОНТ</string>
     <string name="live_lens_back">ТЫЛ</string>
+    <string name="swap_assign_title">Назначать по людям</string>
+    <string name="swap_assign_off">Один источник используется для всех найденных лиц</string>
+    <string name="swap_assign_on">Выберите человека, затем его источник</string>
+    <string name="swap_assign_choose_person">Люди в цели</string>
+    <string name="swap_assign_set">Источник %1$d назначен человеку %2$d</string>
+    <string name="swap_assign_clear">Очистить назначения</string>
+    <string name="swap_assign_cleared">Назначения очищены</string>
     <string name="swap_show_faces">Показать найденные лица</string>
+
     <string name="status_reference_set">Меняется только это лицо. Нажмите ещё раз для всех лиц.</string>
     <string name="status_reference_missed">В этой точке лица нет.</string>
     <string name="status_reference_cleared">Снова меняются все лица.</string>

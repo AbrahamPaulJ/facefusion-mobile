@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -119,6 +120,11 @@ data class RunUi(
 @Composable
 fun SwapScreen(
     sourceThumb: Bitmap?,
+    /** All selected source thumbnails, in native slot order. */
+    sourceThumbs: List<Bitmap> = emptyList(),
+    activeSource: Int = 0,
+    onSelectSource: (Int) -> Unit = {},
+    onRemoveSource: () -> Unit = {},
     hasSource: Boolean,
     hasTarget: Boolean,
     /**
@@ -179,6 +185,14 @@ fun SwapScreen(
      * upstream's `face_selector_mode = reference`. Tapping the chosen one again clears it.
      */
     onPickFace: (Float, Float) -> Unit,
+    /** Swap video target assignment state. */
+    assignMode: Boolean = false,
+    personThumbs: List<Bitmap> = emptyList(),
+    selectedPerson: Int = -1,
+    personAssignments: Map<Int, Int> = emptyMap(),
+    onToggleAssignMode: () -> Unit = {},
+    onSelectPerson: (Int) -> Unit = {},
+    onClearAssignments: () -> Unit = {},
     /**
      * The run queue, item one being the VISIBLE target -- roadmap 14.
      *
@@ -648,17 +662,126 @@ fun SwapScreen(
                              stringResource(R.string.swap_capture_source), Modifier.size(16.dp))
                     }
                 }
-                // Removing the source is not destructive -- it drops a reference to a photo
-                // the user still has -- so unlike the output it does not confirm.
+                // Removing one source keeps the remaining slots and assignments intact.
                 if (hasSource && idle) {
-                    IconButton(onClearSource, Modifier.size(28.dp)) {
-                        Icon(Icons.Default.Delete,
-                             stringResource(R.string.swap_remove_source),
-                             Modifier.size(16.dp))
+                    IconButton(
+                        onClick = if (sourceThumbs.size > 1) onRemoveSource else onClearSource,
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.Delete,
+                            stringResource(R.string.swap_remove_source),
+                            Modifier.size(16.dp),
+                        )
                     }
                 }
             }
         }
+        if (sourceThumbs.size > 1) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                sourceThumbs.forEachIndexed { index, thumb ->
+                    Column(
+                        Modifier
+                            .width(72.dp)
+                            .clickable(enabled = idle) { onSelectSource(index) },
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Image(
+                            thumb.asImageBitmap(),
+                            contentDescription = "Source ${index + 1}",
+                            modifier = Modifier
+                                .size(62.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .border(
+                                    BorderStroke(
+                                        if (index == activeSource) 3.dp else 1.dp,
+                                        if (index == activeSource) FfRed
+                                        else MaterialTheme.colorScheme.outlineVariant,
+                                    ),
+                                    RoundedCornerShape(10.dp),
+                                ),
+                            contentScale = ContentScale.Crop,
+                        )
+                        Text("Source ${index + 1}", fontSize = 10.sp,
+                             maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        }
+
+        if (!imageTarget && hasTarget) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.swap_assign_title),
+                         style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        stringResource(if (assignMode) R.string.swap_assign_on
+                                      else R.string.swap_assign_off),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (assignMode && personAssignments.isNotEmpty()) {
+                    TextButton(onClick = onClearAssignments) {
+                        Text(stringResource(R.string.swap_assign_clear))
+                    }
+                }
+                Switch(checked = assignMode,
+                       onCheckedChange = { onToggleAssignMode() },
+                       enabled = idle && sourceThumbs.size > 1)
+            }
+            if (assignMode && personThumbs.isNotEmpty()) {
+                Text(stringResource(R.string.swap_assign_choose_person),
+                     style = MaterialTheme.typography.bodySmall)
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    personThumbs.forEachIndexed { index, thumb ->
+                        Column(
+                            Modifier.width(72.dp).clickable(enabled = idle) {
+                                onSelectPerson(index)
+                            },
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Box {
+                                Image(
+                                    thumb.asImageBitmap(),
+                                    contentDescription = "Person ${index + 1}",
+                                    modifier = Modifier
+                                        .size(62.dp)
+                                        .clip(CircleShape)
+                                        .border(
+                                            BorderStroke(
+                                                if (index == selectedPerson) 3.dp else 1.dp,
+                                                if (index == selectedPerson) FfRed
+                                                else MaterialTheme.colorScheme.outlineVariant,
+                                            ), CircleShape),
+                                    contentScale = ContentScale.Crop,
+                                )
+                                personAssignments[index]?.let { source ->
+                                    Text(
+                                        "S${source + 1}",
+                                        color = Color.White,
+                                        fontSize = 10.sp,
+                                        modifier = Modifier
+                                            .align(Alignment.BottomEnd)
+                                            .background(FfRed, CircleShape)
+                                            .padding(horizontal = 4.dp, vertical = 1.dp),
+                                    )
+                                }
+                            }
+                            Text("Person ${index + 1}", fontSize = 10.sp,
+                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+
+        }
+
         // ---------------------------------------------------------------- previews
         //
         // Read as a before/after of ONE frame, so the two are always the same size as each
@@ -707,7 +830,7 @@ fun SwapScreen(
                 // Only while the overlay is on: picking a face you cannot see is not a
                 // feature, and without the boxes a tap here has always meant "choose a
                 // different target".
-                onPickFace = if (showFaceBoxes && idle) onPickFace else null,
+                onPickFace = if (showFaceBoxes && !assignMode && idle) onPickFace else null,
             ) {
                 // CAMERA, beside the gallery pick, and shown while the pane is EMPTY --
                 // which is when someone deciding what to swap needs it. Two buttons because

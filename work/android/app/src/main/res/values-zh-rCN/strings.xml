@@ -353,7 +353,15 @@
     <string name="set_theme_desc_light">浅色</string>
     <string name="live_lens_front">前置</string>
     <string name="live_lens_back">后置</string>
+    <string name="swap_assign_title">按人物分配</string>
+    <string name="swap_assign_off">所有检测到的人脸使用同一个源</string>
+    <string name="swap_assign_on">先选择人物，再选择其源人脸</string>
+    <string name="swap_assign_choose_person">目标人物</string>
+    <string name="swap_assign_set">已将源 %1$d 分配给人物 %2$d</string>
+    <string name="swap_assign_clear">清除分配</string>
+    <string name="swap_assign_cleared">已清除分配</string>
     <string name="swap_show_faces">显示检测到的人脸</string>
+
     <string name="status_reference_set">仅替换该人脸。再次点按可替换所有人脸。</string>
     <string name="status_reference_missed">该位置没有人脸。</string>
     <string name="status_reference_cleared">已恢复替换所有人脸。</string>

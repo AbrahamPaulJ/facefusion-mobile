@@ -1,10 +1,14 @@
 package com.facefusion.mobile.ui
 
 import android.graphics.Bitmap
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -48,6 +52,8 @@ import kotlinx.coroutines.delay
 @Composable
 fun LiveScreen(
     sourceThumb: Bitmap?,
+    /** All Live source thumbnails, in native slot order. */
+    sourceThumbs: List<Bitmap> = emptyList(),
     sourceCount: Int = 0,
     activeSource: Int = 0,
     onSelectSource: (Int) -> Unit = {},
@@ -157,20 +163,40 @@ fun LiveScreen(
             style = MaterialTheme.typography.bodySmall, fontSize = 11.sp,
         )
 
-        if (sourceCount > 0) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth()) {
-                repeat(sourceCount) { index ->
-                    FilterChip(
-                        selected = index == activeSource,
-                        onClick = { onSelectSource(index) },
-                        label = { Text(stringResource(R.string.live_source_label, index + 1)) },
-                        // The whole point of the multi-source mode: switch ON THE FLY,
-                        // including while a recording is in flight -- the native side
-                        // reads the active slot per frame, so the file simply changes
-                        // face at the switch. Only finalization is locked.
-                        enabled = !finalizing,
-                    )
+        if (sourceThumbs.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                sourceThumbs.forEachIndexed { index, thumb ->
+                    Column(
+                        Modifier
+                            .width(72.dp)
+                            .clickable(enabled = !finalizing) { onSelectSource(index) },
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Image(
+                            bitmap = thumb.asImageBitmap(),
+                            contentDescription = "Source ${index + 1}",
+                            modifier = Modifier
+                                .size(62.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .border(
+                                    BorderStroke(
+                                        if (index == activeSource) 3.dp else 1.dp,
+                                        if (index == activeSource) FfRed
+                                        else MaterialTheme.colorScheme.outlineVariant,
+                                    ),
+                                    RoundedCornerShape(10.dp),
+                                ),
+                            contentScale = ContentScale.Crop,
+                        )
+                        Text(
+                            "Source ${index + 1}",
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
         }
