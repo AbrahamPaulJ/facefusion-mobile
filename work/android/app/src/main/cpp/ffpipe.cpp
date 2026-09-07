@@ -69,7 +69,9 @@ struct AudioState {
   std::vector<float> silence;
 };
 
-// content_analyser.py:create_static_model_set -- nsfw_2 is 384x384, mean 0, std 1.
+// content_analyser.py:create_static_model_set -- nsfw_2 is 384x384.
+// ⚠ The normalisation is NOT the identity this comment claimed until 2026-08-30;
+// checkContent carries it, and the reason the wrong one survived every check.
 constexpr int kNsfwSize = 384;
 
 // face_enhancer/core.py -- gpen_bfr_256 is 256x256 on the `arcface_128` template, the
