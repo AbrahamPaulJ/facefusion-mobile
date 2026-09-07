@@ -68,6 +68,8 @@
     <string name="swap_voice_trim">Voice clip</string>
     <!-- The voice's trim handles: only this segment drives the lips / is heard in the output. -->
     <string name="swap_voice_trim_hint">Only this part drives the lips</string>
+    <!-- The foldable card that holds the voice playback and clip/trim controls. -->
+    <string name="swap_voice_settings">Voice settings</string>
     <string name="swap_loading_models">Loading models, this takes a few seconds…</string>
     <string name="swap_swapping_frame">Swapping this frame…</string>
     <string name="swap_pick_a_source">Pick a source face</string>
@@ -85,7 +87,7 @@
 
     <string name="swap_clip">Clip</string>
     <!-- One foldable card holding BOTH the trim and the frame rate -->
-    <string name="swap_clip_rate">Clip &amp; frame rate</string>
+    <string name="swap_clip_rate">Clip</string>
     <!-- %1$d frames, %2$s duration, %3$d frames per second -->
     <string name="swap_clip_summary">%1$d frames of %2$s   %3$d fps</string>
     <string name="swap_frame_rate">Frame rate</string>

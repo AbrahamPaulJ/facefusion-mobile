@@ -40,6 +40,8 @@
     <string name="swap_voice_pause">暫停語音</string>
     <string name="swap_voice_trim">語音片段</string>
     <string name="swap_voice_trim_hint">只有這段會驅動口型</string>
+    <!-- 語音播放與片段裁剪的可折疊面板 -->
+    <string name="swap_voice_settings">語音設定</string>
     <string name="swap_loading_models">正在載入模型，需要幾秒鐘…</string>
     <string name="swap_swapping_frame">正在處理這一格…</string>
     <string name="swap_pick_a_source">請選擇來源人臉</string>
@@ -56,7 +58,7 @@
     <string name="proc_get_cancel">暫不</string>
 
     <string name="swap_clip">片段</string>
-    <string name="swap_clip_rate">片段與影格率</string>
+    <string name="swap_clip_rate">片段</string>
     <string name="swap_clip_summary">%1$d 影格，共 %2$s   %3$d fps</string>
     <string name="swap_frame_rate">影格率</string>
     <string name="swap_rate_same">與原片相同 (%1$d)</string>

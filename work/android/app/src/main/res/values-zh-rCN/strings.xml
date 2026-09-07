@@ -37,6 +37,8 @@
     <string name="swap_voice_pause">暂停语音</string>
     <string name="swap_voice_trim">语音片段</string>
     <string name="swap_voice_trim_hint">只有这段会驱动口型</string>
+    <!-- 语音播放与片段裁剪的可折叠面板 -->
+    <string name="swap_voice_settings">语音设置</string>
     <string name="swap_loading_models">正在加载模型，需要几秒钟…</string>
     <string name="swap_swapping_frame">正在处理这一帧…</string>
     <string name="swap_pick_a_source">请选择源人脸</string>
@@ -53,7 +55,7 @@
     <string name="proc_get_cancel">暂不</string>
 
     <string name="swap_clip">片段</string>
-    <string name="swap_clip_rate">片段与帧率</string>
+    <string name="swap_clip_rate">片段</string>
     <string name="swap_clip_summary">%1$d 帧，共 %2$s   %3$d fps</string>
     <string name="swap_frame_rate">帧率</string>
     <string name="swap_rate_same">与原片相同 (%1$d)</string>

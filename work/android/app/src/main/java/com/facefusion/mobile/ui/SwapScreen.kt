@@ -293,10 +293,14 @@ fun SwapScreen(
     // folded card is not a silent one. The state is saved so a rotation does not silently
     // re-open a row the user just folded away.
     var processorsExpanded by rememberSaveable { mutableStateOf(false) }
-    // Clip + frame rate live on ONE foldable card, default CLOSED: they are per-run
-    // tuning, and two standing controls pushed the Swap button off the first screen
-    // every time a video target was picked.
+    // Output settings live on ONE foldable card, default CLOSED: "Clip" (the trim) is the
+    // first item, followed by output size and frame rate -- per-run tuning that should not
+    // push the Swap button off the first screen.
     var trimExpanded by rememberSaveable { mutableStateOf(false) }
+    // The voice playback and clip/trim controls fold under their own card, below the
+    // processors, same default CLOSED: the voice only matters once Lip Sync is on and a
+    // clip is loaded, and a standing playback row pushed the inputs further down.
+    var voiceSettingsExpanded by rememberSaveable { mutableStateOf(false) }
     // The log panel folds under its caption. Default CLOSED -- it is a debug readout,
     // and a standing 170 dp panel below the buttons made the page longer than it needed
     // to be on every screen, not just while something was running.
@@ -549,69 +553,87 @@ fun SwapScreen(
         // same two-handle control the video gets, because it is the same decision: keep
         // only the part that matters.
         if (opts.lipSync && hasVoice && voiceDurationMs > 0) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onVoicePlayPause, enabled = idle, modifier = Modifier.size(36.dp)) {
-                    if (voicePlaying) {
-                        // Two bars, drawn rather than an icon: the icons artifact this app
-                        // carries (material3's transitive icons-core) has PlayArrow but no
-                        // Pause, and extended-icons is a heavy addition for one glyph.
-                        val pauseTint = MaterialTheme.colorScheme.onSurfaceVariant
-                        Canvas(Modifier.size(16.dp)) {
-                            val bar = 4.dp.toPx()
-                            val gap = 3.dp.toPx()
-                            val top = 0.dp.toPx()
-                            val bottom = size.height
-                            drawRoundRect(
-                                color = pauseTint,
-                                topLeft = Offset(0f, top),
-                                size = Size(bar, bottom - top),
-                                cornerRadius = CornerRadius(1.dp.toPx()),
-                            )
-                            drawRoundRect(
-                                color = pauseTint,
-                                topLeft = Offset(bar + gap, top),
-                                size = Size(bar, bottom - top),
-                                cornerRadius = CornerRadius(1.dp.toPx()),
-                            )
+            SectionCard(
+                stringResource(R.string.swap_voice_settings),
+                collapsible = true,
+                expanded = voiceSettingsExpanded,
+                onToggle = { voiceSettingsExpanded = !voiceSettingsExpanded },
+            ) {
+                // The playback and trim sliders read too high-contrast against the theme,
+                // so every part (thumb, active and inactive track) has its opacity cut by
+                // 31%: 69% alpha keeps the same hue with a much softer contrast -- the
+                // same treatment the output and trim sliders already use.
+                val voiceSliderColors = SliderDefaults.colors(
+                    thumbColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.69f),
+                    activeTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.69f),
+                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.69f),
+                )
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onVoicePlayPause, enabled = idle, modifier = Modifier.size(36.dp)) {
+                        if (voicePlaying) {
+                            // Two bars, drawn rather than an icon: the icons artifact this app
+                            // carries (material3's transitive icons-core) has PlayArrow but no
+                            // Pause, and extended-icons is a heavy addition for one glyph.
+                            val pauseTint = MaterialTheme.colorScheme.onSurfaceVariant
+                            Canvas(Modifier.size(16.dp)) {
+                                val bar = 4.dp.toPx()
+                                val gap = 3.dp.toPx()
+                                val top = 0.dp.toPx()
+                                val bottom = size.height
+                                drawRoundRect(
+                                    color = pauseTint,
+                                    topLeft = Offset(0f, top),
+                                    size = Size(bar, bottom - top),
+                                    cornerRadius = CornerRadius(1.dp.toPx()),
+                                )
+                                drawRoundRect(
+                                    color = pauseTint,
+                                    topLeft = Offset(bar + gap, top),
+                                    size = Size(bar, bottom - top),
+                                    cornerRadius = CornerRadius(1.dp.toPx()),
+                                )
+                            }
+                        } else {
+                            Icon(Icons.Default.PlayArrow,
+                                 stringResource(R.string.swap_voice_play),
+                                 Modifier.size(20.dp),
+                                 tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                    } else {
-                        Icon(Icons.Default.PlayArrow,
-                             stringResource(R.string.swap_voice_play),
-                             Modifier.size(20.dp),
-                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                    Slider(
+                        value = voicePosMs.coerceIn(0f, voiceDurationMs.toFloat()),
+                        onValueChange = onVoiceSeek,
+                        valueRange = 0f..voiceDurationMs.toFloat(),
+                        enabled = idle,
+                        modifier = Modifier.weight(1f),
+                        colors = voiceSliderColors,
+                    )
+                    Text("${fmt(voicePosMs)} / ${fmt(voiceDurationMs.toFloat())}",
+                         style = MaterialTheme.typography.bodySmall,
+                         fontFamily = FontFamily.Monospace,
+                         modifier = Modifier.padding(start = 8.dp))
                 }
-                Slider(
-                    value = voicePosMs.coerceIn(0f, voiceDurationMs.toFloat()),
-                    onValueChange = onVoiceSeek,
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Caption(stringResource(R.string.swap_voice_trim), Modifier.weight(1f))
+                    Text("${fmt(voiceTrimStartMs)} – ${fmt(voiceTrimEndMs)}",
+                         style = MaterialTheme.typography.bodySmall,
+                         fontFamily = FontFamily.Monospace)
+                }
+                RangeSlider(
+                    value = voiceTrimStartMs..voiceTrimEndMs,
+                    onValueChange = { r ->
+                        // The same minimum span as the video trim, for the same reason: the
+                        // mouth needs a mel window, the encoder needs a frame.
+                        onVoiceTrimChange(r.start, maxOf(r.endInclusive, r.start + 333f))
+                    },
                     valueRange = 0f..voiceDurationMs.toFloat(),
                     enabled = idle,
-                    modifier = Modifier.weight(1f),
+                    colors = voiceSliderColors,
                 )
-                Text("${fmt(voicePosMs)} / ${fmt(voiceDurationMs.toFloat())}",
+                Text(stringResource(R.string.swap_voice_trim_hint),
                      style = MaterialTheme.typography.bodySmall,
-                     fontFamily = FontFamily.Monospace,
-                     modifier = Modifier.padding(start = 8.dp))
+                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Caption(stringResource(R.string.swap_voice_trim), Modifier.weight(1f))
-                Text("${fmt(voiceTrimStartMs)} – ${fmt(voiceTrimEndMs)}",
-                     style = MaterialTheme.typography.bodySmall,
-                     fontFamily = FontFamily.Monospace)
-            }
-            RangeSlider(
-                value = voiceTrimStartMs..voiceTrimEndMs,
-                onValueChange = { r ->
-                    // The same minimum span as the video trim, for the same reason: the
-                    // mouth needs a mel window, the encoder needs a frame.
-                    onVoiceTrimChange(r.start, maxOf(r.endInclusive, r.start + 333f))
-                },
-                valueRange = 0f..voiceDurationMs.toFloat(),
-                enabled = idle,
-            )
-            Text(stringResource(R.string.swap_voice_trim_hint),
-                 style = MaterialTheme.typography.bodySmall,
-                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
         // ---------------------------------------------------------------- inputs
@@ -684,7 +706,7 @@ fun SwapScreen(
                     // The tile IS the picker, except while a clip is loaded or the mic is
                     // live -- the record button owns the interaction then, and the whole-tile
                     // tap must not fire mid-capture.
-                    onClick = if (idle && !hasVoice && !recordingVoice) onPickVoice else null,
+                    onClick = if (idle && !recordingVoice) onPickVoice else null,
                     actionIcon = if (hasVoice) null else Icons.Default.Add,
                     actions = {
                         // RECORD. The lip syncer needs a voice that is not the target's own
@@ -699,12 +721,6 @@ fun SwapScreen(
                                      Modifier.size(14.dp),
                                      tint = if (recordingVoice) MaterialTheme.colorScheme.error
                                             else MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                        if (hasVoice && idle) {
-                            IconButton(onPickVoice, modifier = Modifier.size(26.dp)) {
-                                Icon(Icons.Default.Add, stringResource(R.string.swap_choose_another_voice),
-                                     Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     },
@@ -748,16 +764,6 @@ fun SwapScreen(
                             IconButton(onCapturePhoto, enabled = idle, modifier = Modifier.size(26.dp)) {
                                 Icon(painterResource(R.drawable.ic_photo_camera),
                                      stringResource(R.string.swap_capture_photo), Modifier.size(14.dp),
-                                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                        if (hasTarget) {
-                            // Icons rather than the word "Change": two actions fit where one word
-                            // did, and the tile is already the picker, so the word was saying a
-                            // third time what the tap and the + icon already say.
-                            IconButton(onPickTarget, enabled = idle, modifier = Modifier.size(26.dp)) {
-                                Icon(Icons.Default.Add, stringResource(R.string.swap_choose_another_target),
-                                     Modifier.size(14.dp),
                                      tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
@@ -805,35 +811,35 @@ fun SwapScreen(
         // 60% of a portrait photo's 4000 px is 2400 px, which is taller than a phone.
         // The pane used to size itself freely, and the Swap button -- everything below
         // the pane, really -- slid off the first screen; the button was still THERE and
-        // still clickable at the edge of the fold, it just could not be seen. The width
-        // stays the 60% figure; only the height is capped, so the run controls below
-        // always stay visible.
+        // still clickable at the edge of the fold, it just could not be seen.
         //
         // The cap itself was tightened after the first fix because 60% of a portrait
         // frame still measured ~384 dp on a 9:16 clip -- which, on a 720 dp screen with
         // the workbench row and the (now folded) processor card, put the button back
         // below the fold. (screenH - 500) keeps the swap button on the first screen for
-        // every orientation; the pane letterboxes instead, which a preview can afford.
+        // every orientation. Crucially, the cap now scales the WIDTH to match, so the
+        // pane always keeps the target's own aspect: the frame fills its box instead of
+        // shrinking inside a letterbox of the wrong shape.
         val maxResultH = (screenH - 500).dp.coerceIn(140.dp, 260.dp)
         val tW = preview.original?.width ?: 0
         val tH = preview.original?.height ?: 0
         val resultW: Dp
-        var resultH: Dp
+        val resultH: Dp
         if (tW > 0 && tH > 0) {
-            val w = with(density) { (tW * 0.6f).toInt().toDp() }
-            val h = with(density) { (tH * 0.6f).toInt().toDp() }
-            if (w <= maxPaneW) {
-                resultW = w
-                resultH = h
-            } else {
-                resultW = maxPaneW
-                resultH = maxPaneW * (tH.toFloat() / tW.toFloat())
+            val w60 = with(density) { (tW * 0.6f).toInt().toDp() }
+            val aspect = tW.toFloat() / tH.toFloat()   // width / height
+            var w = w60.coerceAtMost(maxPaneW)
+            var h = w / aspect
+            if (h > maxResultH) {
+                h = maxResultH
+                w = h * aspect
             }
+            resultW = w
+            resultH = h
         } else {
             resultW = maxPaneW
-            resultH = paneHeight
+            resultH = paneHeight.coerceAtMost(maxResultH)
         }
-        resultH = resultH.coerceAtMost(maxResultH)
 
         // Hidden until BOTH inputs exist. An empty output pane repeats the
         // instruction the input tiles already give, in the same words, and it takes
@@ -862,7 +868,9 @@ fun SwapScreen(
             },
             // The pane's width is the 60% figure, not fillMaxWidth: the result is meant
             // to read as "the target, at 60%", so a fixed proportional box is the point.
-            modifier = Modifier.width(resultW),
+            // Centred horizontally so the result reads as belonging to the page rather
+            // than hugging the left edge.
+            modifier = Modifier.width(resultW).align(Alignment.CenterHorizontally),
             // The download lives here rather than in a bar of its own: this is the pane
             // that cannot draw anything without the models, so it is where their absence
             // is already visible.
@@ -901,21 +909,30 @@ fun SwapScreen(
         // per-run tuning knobs, not standing controls, and two standing controls -- the
         // range slider plus the rate steps -- pushed the Swap button off the first
         // screen on every video target. The card keeps the chosen range in its header,
-        // so the trim stays readable while folded.
+        // 输出设置（首项为片段，然后是输出尺寸与帧率）
         if (durationMs > 0) {
             SectionCard(
-                stringResource(R.string.swap_clip_rate),
-                trailing = {
+                stringResource(R.string.swap_output_settings),
+                collapsible = true,
+                expanded = trimExpanded,
+                onToggle = { trimExpanded = !trimExpanded },
+            ) {
+                // 片段 — 输出设置首项
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(R.string.swap_clip_rate),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
                     Text(
                         "${fmt(trimStartMs)} – ${fmt(trimEndMs)}",
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
                     )
-                },
-                collapsible = true,
-                expanded = trimExpanded,
-                onToggle = { trimExpanded = !trimExpanded },
-            ) {
+                }
                 val trimSliderColors = SliderDefaults.colors(
                     thumbColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.69f),
                     activeTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.69f),
@@ -947,14 +964,8 @@ fun SwapScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
-                // OUTPUT SETTINGS, behind an accordion. Frame rate and output size are the
-                // same kind of decision -- both trade quality for time and size, both have
-                // a "leave it alone" default that most runs want, and neither is touched
-                // twice in a session. Two open controls between the trim slider and the
-                // Swap button pushed the button off the screen on a short phone for the
-                // sake of settings nobody was changing.
+                // Frame rate and output size are the same kind of decision.
                 Spacer(Modifier.height(6.dp))
-                var outputOpen by rememberSaveable { mutableStateOf(false) }
                 // ⚠ The SOURCE option is named by its own number, not by the word "same".
                 // Sitting in a row that reads 480p / 720p / 1080p, "Same as source" was the
                 // one chip that did not say what it would produce -- and the clip's size is
@@ -969,17 +980,6 @@ fun SwapScreen(
                 val srcName = if (srcShort > 0)
                                   stringResource(R.string.swap_size_source_at, srcShort)
                               else stringResource(R.string.swap_size_source)
-                val sizeLabel = if (opts.outputMaxShortEdge > 0)
-                                    opts.outputMaxShortEdge.toString() + "p"
-                                else srcName
-                val rateLabel = if (opts.outputFps in 1..inputFps) opts.outputFps.toString()
-                                else stringResource(R.string.swap_rate_same, inputFps)
-                Accordion(
-                    stringResource(R.string.swap_output_settings),
-                    stringResource(R.string.swap_output_summary, sizeLabel, rateLabel),
-                    outputOpen,
-                    { outputOpen = !outputOpen },
-                ) {
                 // OUTPUT SIZE, on the SHORT edge so the aspect ratio never changes and
                 // "480p" means what it means everywhere else. Only sizes BELOW the clip's
                 // own are offered, for the same reason the frame rate only offers lower
@@ -1040,7 +1040,6 @@ fun SwapScreen(
                                else stringResource(R.string.swap_rate_hint_drop),
                         enabled = idle,
                     )
-                }
                 }
             }
         }
