@@ -40,6 +40,13 @@ import androidx.compose.ui.unit.sp
  * monochrome accent rather than by a second grey step.
  */
 
+/** ON state / recording / batch-failure red (upstream's red-500), used by UI that is
+ *  red only while something is actively wrong or recording. */
+val FfRed = Color(0xFFEF4444)
+
+/** The mark inside an ON control. Upstream's red-600, one step down so it reads on the red. */
+val FfRedDeep = Color(0xFFDC2626)
+
 private val FfLight = lightColorScheme(
     primary = Color(0xFF1D1D1D),
     onPrimary = Color(0xFFFFFFFF),
