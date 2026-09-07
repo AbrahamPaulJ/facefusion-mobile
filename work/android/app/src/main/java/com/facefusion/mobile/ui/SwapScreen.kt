@@ -37,7 +37,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -305,6 +304,13 @@ fun SwapScreen(
     // and a standing 170 dp panel below the buttons made the page longer than it needed
     // to be on every screen, not just while something was running.
     var logExpanded by rememberSaveable { mutableStateOf(false) }
+    // The batch queue lives in a foldable card, default CLOSED, placed just above Output
+    // settings. Batch is a mode you enter deliberately, not something every fresh target
+    // needs standing open.
+    var batchMenuExpanded by rememberSaveable { mutableStateOf(false) }
+    // The finished output (video player + save/share/delete) folds under its own card,
+    // default CLOSED, above the log.
+    var outputResultExpanded by rememberSaveable { mutableStateOf(false) }
     Column(
         modifier
             .fillMaxSize()
@@ -798,58 +804,36 @@ fun SwapScreen(
         // side, each pane is half as wide and the image fills it.
 // ---------------------------------------------------------------- result
         //
-        // The result of the swap gets a pane of its own, sized from the TARGET: its frame
-        // is the after half of the before/after the workbench row shows, so it inherits the
-        // target's aspect -- at 60% of the target's own width/height, which is what "the
-        // pane opens to the swapped result" reads as without the two panes being identical
-        // in size. The 60% is applied to the target's PIXEL dimensions and converted to dp
-        // at the current density, then clamped to the available width so a wide target
-        // never overflows the screen.
-        val density = LocalDensity.current
+        // The result of the swap gets a full-width pane of its own, sized from the TARGET.
+        // The pane fills the available width; its height follows the target's aspect ratio
+        // capped so a tall target never eats the screen.
         val maxPaneW = (screenW - 36).dp
         // ⚠ The result pane's height has a CEILING, or a tall target eats the screen:
-        // 60% of a portrait photo's 4000 px is 2400 px, which is taller than a phone.
+        // a tall portrait frame scaled to full width would be taller than a phone.
         // The pane used to size itself freely, and the Swap button -- everything below
         // the pane, really -- slid off the first screen; the button was still THERE and
         // still clickable at the edge of the fold, it just could not be seen.
-        //
-        // The cap itself was tightened after the first fix because 60% of a portrait
-        // frame still measured ~384 dp on a 9:16 clip -- which, on a 720 dp screen with
-        // the workbench row and the (now folded) processor card, put the button back
-        // below the fold. (screenH - 500) keeps the swap button on the first screen for
-        // every orientation. Crucially, the cap now scales the WIDTH to match, so the
-        // pane always keeps the target's own aspect: the frame fills its box instead of
-        // shrinking inside a letterbox of the wrong shape.
-        val maxResultH = (screenH - 500).dp.coerceIn(140.dp, 260.dp)
+        val maxResultH = (screenH - 460).dp.coerceIn(180.dp, 420.dp)
         val tW = preview.original?.width ?: 0
         val tH = preview.original?.height ?: 0
-        val resultW: Dp
         val resultH: Dp
         if (tW > 0 && tH > 0) {
-            val w60 = with(density) { (tW * 0.6f).toInt().toDp() }
             val aspect = tW.toFloat() / tH.toFloat()   // width / height
-            var w = w60.coerceAtMost(maxPaneW)
-            var h = w / aspect
+            var h = maxPaneW / aspect
             if (h > maxResultH) {
                 h = maxResultH
-                w = h * aspect
             }
-            resultW = w
             resultH = h
         } else {
-            resultW = maxPaneW
             resultH = paneHeight.coerceAtMost(maxResultH)
         }
 
-        // Hidden until BOTH inputs exist. An empty output pane repeats the
-        // instruction the input tiles already give, in the same words, and it takes
-        // the height of a whole pane to do it -- so before anything is picked the
-        // screen was two thirds placeholder text.
+        // Always shown by default. The placeholder reads as a call to action until the
+        // inputs exist, and once they do it is the after half of the before/after.
         //
-        // `|| modelsMissing` because the download overlay lives on this pane -- it is
-        // the one that cannot draw without the models -- so hiding it unconditionally
-        // would leave a fresh install with no way to fetch them.
-        if ((hasSource && hasTarget) || modelsMissing) PreviewPane(
+        // `modelsMissing` keeps the download overlay reachable on a fresh install: it
+        // lives on this pane because it is the one that cannot draw without the models.
+        PreviewPane(
             label = stringResource(R.string.swap_pane_swapped),
             height = resultH,
             bitmap = preview.swapped,
@@ -866,11 +850,8 @@ fun SwapScreen(
                 // inputs exist, so this is a transient state rather than an instruction.
                 else -> stringResource(R.string.swap_preparing_preview)
             },
-            // The pane's width is the 60% figure, not fillMaxWidth: the result is meant
-            // to read as "the target, at 60%", so a fixed proportional box is the point.
-            // Centred horizontally so the result reads as belonging to the page rather
-            // than hugging the left edge.
-            modifier = Modifier.width(resultW).align(Alignment.CenterHorizontally),
+            // Full width: the result is meant to fill the screen, not sit at 60%.
+            modifier = Modifier.fillMaxWidth(),
             // The download lives here rather than in a bar of its own: this is the pane
             // that cannot draw anything without the models, so it is where their absence
             // is already visible.
@@ -900,6 +881,119 @@ fun SwapScreen(
                     strokeWidth = 2.dp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+        }
+
+        // ---------------------------------------------------------------- batch add
+        //
+        // 批量添加，位于输出设置上方，与输出设置同为可折叠菜单（默认折叠）。
+        // 内部容器采用与"源人脸"输入行相同的卡片样式，承载"添加更多片段"、
+        // "每个片段完成后立即保存到相册"以及已加入的片段列表。
+        if ((hasTarget && !imageTarget) || batch.isNotEmpty()) {
+            SectionCard(
+                stringResource(R.string.swap_batch_menu),
+                collapsible = true,
+                expanded = batchMenuExpanded,
+                onToggle = { batchMenuExpanded = !batchMenuExpanded },
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant,
+                                RoundedCornerShape(16.dp)),
+                ) {
+                    Column(Modifier.padding(vertical = 4.dp)) {
+                        // 添加更多片段按钮（仅视频目标已加载时显示）
+                        if (hasTarget && !imageTarget && idle) {
+                            TextButton(onAddToBatch, modifier = Modifier.fillMaxWidth()) {
+                                Text(stringResource(if (batch.size > 1) R.string.swap_batch_add_more
+                                                    else R.string.swap_batch_add))
+                            }
+                        }
+                        // 自动保存 + 队列列表
+                        if (batch.isNotEmpty()) {
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable(enabled = idle) { onBatchAutoSave(!batchAutoSave) }
+                                    .padding(start = 6.dp, end = 14.dp, top = 2.dp, bottom = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Checkbox(batchAutoSave, { onBatchAutoSave(it) }, enabled = idle)
+                                Text(stringResource(R.string.batch_autosave),
+                                     style = MaterialTheme.typography.bodySmall)
+                            }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                            batch.forEachIndexed { i, item ->
+                                if (i > 0) HorizontalDivider(
+                                    color = MaterialTheme.colorScheme.outlineVariant)
+                                Row(
+                                    Modifier.fillMaxWidth()
+                                        // A finished row IS the way back to its clip.
+                                        .clickable(enabled = idle && item.output != null) {
+                                            onOpenBatchOutput(i)
+                                        }
+                                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    if (item.thumb != null) {
+                                        Image(
+                                            item.thumb!!.asImageBitmap(), null,
+                                            Modifier
+                                                .size(44.dp, 30.dp)
+                                                .clip(RoundedCornerShape(4.dp)),
+                                            contentScale = ContentScale.Crop,
+                                        )
+                                        Spacer(Modifier.width(10.dp))
+                                    }
+                                    Column(Modifier.weight(1f)) {
+                                        Text(item.name, style = MaterialTheme.typography.bodySmall,
+                                             maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        if (item.detail != null) Text(
+                                            item.detail!!,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontSize = 10.sp,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                            color = if (item.state == BatchState.Refused)
+                                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                                    else MaterialTheme.colorScheme.error,
+                                        )
+                                    }
+                                    Text(
+                                        stringResource(when (item.state) {
+                                            BatchState.Waiting -> R.string.batch_waiting
+                                            BatchState.Running -> R.string.batch_running
+                                            BatchState.Done -> R.string.batch_done
+                                            BatchState.Refused -> R.string.batch_refused
+                                            BatchState.Failed -> R.string.batch_failed
+                                            BatchState.Skipped -> R.string.batch_skipped
+                                        }),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontSize = 10.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = when (item.state) {
+                                            BatchState.Done -> FfRed
+                                            BatchState.Failed -> MaterialTheme.colorScheme.error
+                                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                    )
+                                    if (idle) {
+                                        IconButton({ onRemoveFromBatch(i) },
+                                                   modifier = Modifier.size(32.dp)) {
+                                            Icon(Icons.Default.Delete,
+                                                 stringResource(R.string.batch_remove),
+                                                 Modifier.size(16.dp),
+                                                 tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -1124,122 +1218,6 @@ fun SwapScreen(
             }
         }
 
-        // HOW THE QUEUE IS FOUND. Picking several files at once still builds it, but that
-        // needs a long-press in the system picker and is invisible to anyone who does not
-        // already know -- which is exactly what the first field report said. One text
-        // button, under the Swap button, only while a video target is loaded.
-        if (hasTarget && !imageTarget && idle) {
-            TextButton(onAddToBatch, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(if (batch.size > 1) R.string.swap_batch_add_more
-                                    else R.string.swap_batch_add))
-            }
-        }
-
-        // THE QUEUE, whenever one exists -- down to a single row.
-        //
-        // ⚠ It used to draw only at size > 1, which paired with a runner that collapsed the
-        // list at one item to make deleting from a two-clip queue look like a button that
-        // wiped everything. A queue is only ever non-empty because the user built one, so a
-        // one-row card is not furniture: it is the last clip they queued, still there.
-        if (batch.isNotEmpty()) {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(vertical = 4.dp)) {
-                    // AUTO-SAVE, at the top of the queue rather than in a settings screen:
-                    // it is a decision about THIS run, taken while looking at the list it
-                    // applies to. Remembered, because a batch is unattended by nature and
-                    // re-ticking it every time defeats the point of leaving one running.
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable(enabled = idle) { onBatchAutoSave(!batchAutoSave) }
-                            .padding(start = 6.dp, end = 14.dp, top = 2.dp, bottom = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Checkbox(batchAutoSave, { onBatchAutoSave(it) }, enabled = idle)
-                        Text(stringResource(R.string.batch_autosave),
-                             style = MaterialTheme.typography.bodySmall)
-                    }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    batch.forEachIndexed { i, item ->
-                        if (i > 0) HorizontalDivider(
-                            color = MaterialTheme.colorScheme.outlineVariant)
-                        Row(
-                            Modifier.fillMaxWidth()
-                                // A finished row IS the way back to its clip. Only when
-                                // there is something to open: a waiting row that reacted to
-                                // a tap by doing nothing would read as broken.
-                                .clickable(enabled = idle && item.output != null) {
-                                    onOpenBatchOutput(i)
-                                }
-                                .padding(horizontal = 14.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            // The thumbnail is the row's identity: twelve filenames from one
-                            // camera roll look alike, and one frame of the swapped result
-                            // says both WHICH clip this is and what came out of it.
-                            if (item.thumb != null) {
-                                Image(
-                                    item.thumb!!.asImageBitmap(), null,
-                                    Modifier
-                                        .size(44.dp, 30.dp)
-                                        .clip(RoundedCornerShape(4.dp)),
-                                    contentScale = ContentScale.Crop,
-                                )
-                                Spacer(Modifier.width(10.dp))
-                            }
-                            Column(Modifier.weight(1f)) {
-                                Text(item.name, style = MaterialTheme.typography.bodySmall,
-                                     maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                // A refusal says so in the gate's own words. It is not an
-                                // error and must not read like one -- see BatchState.
-                                if (item.detail != null) Text(
-                                    item.detail!!,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontSize = 10.sp,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                    color = if (item.state == BatchState.Refused)
-                                                MaterialTheme.colorScheme.onSurfaceVariant
-                                            else MaterialTheme.colorScheme.error,
-                                )
-                            }
-                            Text(
-                                stringResource(when (item.state) {
-                                    BatchState.Waiting -> R.string.batch_waiting
-                                    BatchState.Running -> R.string.batch_running
-                                    BatchState.Done -> R.string.batch_done
-                                    BatchState.Refused -> R.string.batch_refused
-                                    BatchState.Failed -> R.string.batch_failed
-                                    BatchState.Skipped -> R.string.batch_skipped
-                                }),
-                                style = MaterialTheme.typography.bodySmall,
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace,
-                                color = when (item.state) {
-                                    BatchState.Done -> FfRed
-                                    BatchState.Failed -> MaterialTheme.colorScheme.error
-                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                            )
-                            // EVERY row, in every state. Restricting the bin to
-                            // `Waiting` meant that once a batch had run, nothing in the
-                            // list could be removed at all -- the rows are all Done by
-                            // then, which is exactly when a user wants to clear them out.
-                            if (idle) {
-                                IconButton({ onRemoveFromBatch(i) },
-                                           modifier = Modifier.size(32.dp)) {
-                                    Icon(Icons.Default.Delete,
-                                         stringResource(R.string.batch_remove),
-                                         Modifier.size(16.dp),
-                                         tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         if (run.busy || run.progress > 0f) {
             LinearProgressIndicator(
                 progress = { run.progress.coerceIn(0f, 1f) },
@@ -1268,92 +1246,93 @@ fun SwapScreen(
             }
         }
 
-        // ---------------------------------------------------------------- output
+        // ---------------------------------------------------------------- output result
         //
-        // The result was previously invisible in the app: Save and Share, and no way to see
-        // what you were about to save. A video gets a player with a scrub bar; an image
-        // result is a still, which is all there is to show.
-        if (outputFile != null) {
-            // SWIPE BETWEEN BATCH RESULTS. The indices of everything finished, and where
-            // the pane currently sits in that list.
-            val doneIx = batch.indices.filter { batch[it].output != null }
-            val cur = doneIx.indexOfFirst { batch[it].output == outputFile }
-            var drag by remember(outputFile) { mutableStateOf(0f) }
-            Box(
-                Modifier.pointerInput(doneIx.size, cur) {
-                    if (doneIx.size < 2 || cur < 0) return@pointerInput
-                    // ⚠ HORIZONTAL only, and accumulated to a threshold rather than acted
-                    // on per event. detectHorizontalDragGestures ignores a vertical-dominant
-                    // drag, so the page still scrolls with a finger on the video -- which
-                    // matters, because this pane is most of the screen.
-                    detectHorizontalDragGestures(
-                        onDragEnd = {
-                            val step = if (drag < -60f) 1 else if (drag > 60f) -1 else 0
-                            drag = 0f
-                            if (step != 0)
-                                doneIx.getOrNull(cur + step)?.let(onOpenBatchOutput)
-                        },
-                        onDragCancel = { drag = 0f },
-                    ) { change, amount -> drag += amount; change.consume() }
+        // 输出结果，位于日志上方，与输出设置同为可折叠菜单（默认折叠）。
+        // 标题行带有下载图标，其点击事件和显示状态与"保存到相册"按钮一致。
+        if (outputFile != null || hasOutput) {
+            SectionCard(
+                stringResource(R.string.swap_output_result),
+                collapsible = true,
+                expanded = outputResultExpanded,
+                onToggle = { outputResultExpanded = !outputResultExpanded },
+                trailing = {
+                    if (hasOutput && !outputAutoSaved) {
+                        IconButton(onClick = onSave, enabled = idle, modifier = Modifier.size(26.dp)) {
+                            Icon(
+                                IconDownload,
+                                stringResource(R.string.swap_save_to_gallery),
+                                Modifier.size(18.dp),
+                            )
+                        }
+                    }
+                },
+            ) {
+            if (outputFile != null) {
+                // SWIPE BETWEEN BATCH RESULTS. The indices of everything finished, and where
+                // the pane currently sits in that list.
+                val doneIx = batch.indices.filter { batch[it].output != null }
+                val cur = doneIx.indexOfFirst { batch[it].output == outputFile }
+                var drag by remember(outputFile) { mutableStateOf(0f) }
+                Box(
+                    Modifier.pointerInput(doneIx.size, cur) {
+                        if (doneIx.size < 2 || cur < 0) return@pointerInput
+                        // ⚠ HORIZONTAL only, and accumulated to a threshold rather than acted
+                        // on per event. detectHorizontalDragGestures ignores a vertical-dominant
+                        // drag, so the page still scrolls with a finger on the video -- which
+                        // matters, because this pane is most of the screen.
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                val step = if (drag < -60f) 1 else if (drag > 60f) -1 else 0
+                                drag = 0f
+                                if (step != 0)
+                                    doneIx.getOrNull(cur + step)?.let(onOpenBatchOutput)
+                            },
+                            onDragCancel = { drag = 0f },
+                        ) { change, amount -> drag += amount; change.consume() }
+                    }
+                ) {
+                    OutputPane(
+                        file = outputFile,
+                        height = paneHeight,
+                        onSaveFrame = onSaveFrame,
+                        partial = outputPartial,
+                        enabled = idle,
+                    )
                 }
-            ) {
-                OutputPane(
-                    file = outputFile,
-                    height = paneHeight,
-                    onSaveFrame = onSaveFrame,
-                    partial = outputPartial,
-                    enabled = idle,
-                )
-            }
-            // Says the swipe exists. A gesture with nothing on screen to suggest it is a
-            // gesture only its author knows about -- which is what the batch queue itself
-            // had just been.
-            if (doneIx.size > 1 && cur >= 0) {
-                Text(
-                    stringResource(R.string.batch_output_of, cur + 1, doneIx.size),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Center,
-                )
-            }
-        }
-
-        if (hasOutput) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // Auto-save already put this clip in the gallery, so there is nothing to
-                // offer -- just a line saying where it went. Share stays: sending it
-                // somewhere is a different action from keeping it.
-                if (outputAutoSaved) {
+                // Says the swipe exists. A gesture with nothing on screen to suggest it is a
+                // gesture only its author knows about -- which is what the batch queue itself
+                // had just been.
+                if (doneIx.size > 1 && cur >= 0) {
                     Text(
-                        stringResource(R.string.swap_autosaved_to_gallery),
+                        stringResource(R.string.batch_output_of, cur + 1, doneIx.size),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Center,
                     )
-                } else {
-                    Button(onSave, enabled = idle, modifier = Modifier.weight(1f),
-                           shape = RoundedCornerShape(14.dp),
-                           colors = ButtonDefaults.buttonColors(
-                               containerColor = MaterialTheme.colorScheme.surface,
-                               contentColor = MaterialTheme.colorScheme.onBackground,
-                               disabledContainerColor = MaterialTheme.colorScheme.surface,
-                               disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                           ),
-                           border = BorderStroke(1.dp,
-                                                 MaterialTheme.colorScheme.outlineVariant)) {
-                        Text(stringResource(if (saved) R.string.swap_saved_to_gallery
-                                            else R.string.swap_save_to_gallery))
-                    }
                 }
-                OutlinedButton(onShare, enabled = idle,
+            }
+
+            if (hasOutput) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // Auto-save already put this clip in the gallery, so there is nothing to
+                    // offer -- just a line saying where it went. Share stays: sending it
+                    // somewhere is a different action from keeping it.
+                    if (outputAutoSaved) {
+                        Text(
+                            stringResource(R.string.swap_autosaved_to_gallery),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                    } else {
+                        Button(onSave, enabled = idle, modifier = Modifier.weight(1f),
                                shape = RoundedCornerShape(14.dp),
-                               // Same control background as the Save button next to it:
-                               // card-surface in both schemes, not the default accent.
-                               colors = ButtonDefaults.outlinedButtonColors(
+                               colors = ButtonDefaults.buttonColors(
                                    containerColor = MaterialTheme.colorScheme.surface,
                                    contentColor = MaterialTheme.colorScheme.onBackground,
                                    disabledContainerColor = MaterialTheme.colorScheme.surface,
@@ -1361,25 +1340,14 @@ fun SwapScreen(
                                ),
                                border = BorderStroke(1.dp,
                                                      MaterialTheme.colorScheme.outlineVariant)) {
-                        Text(stringResource(R.string.swap_share))
+                            Text(stringResource(if (saved) R.string.swap_saved_to_gallery
+                                                else R.string.swap_save_to_gallery))
+                        }
                     }
-                // Deleting a render IS destructive -- minutes of NPU time, and the file is
-                // gone from the phone -- so this one asks, unlike the source and target
-                // buttons, which only drop a reference to a file the user still has.
-                //
-                // ⚠ VIDEO ONLY, and that is not an oversight. A still has no output file:
-                // its result is the swapped PANE, regenerated from the source and target
-                // whenever both are present. The button was shown for stills too and did
-                // nothing at all -- discardOutput() deletes outputFile, which is null on
-                // that path -- so it confirmed and then visibly ignored the answer.
-                //
-                // Clearing the pane instead would be worse, not better: the autowarm effect
-                // would redraw it within the same second. The way to get rid of a still's
-                // result is to remove the target, which has its own button on its own pane.
-                if (outputFile != null) {
-                    OutlinedButton({ confirmDeleteOutput = true }, enabled = idle,
+                    OutlinedButton(onShare, enabled = idle,
                                    shape = RoundedCornerShape(14.dp),
-                                   // Same control background as the buttons around it.
+                                   // Same control background as the Save button next to it:
+                                   // card-surface in both schemes, not the default accent.
                                    colors = ButtonDefaults.outlinedButtonColors(
                                        containerColor = MaterialTheme.colorScheme.surface,
                                        contentColor = MaterialTheme.colorScheme.onBackground,
@@ -1388,17 +1356,46 @@ fun SwapScreen(
                                    ),
                                    border = BorderStroke(1.dp,
                                                          MaterialTheme.colorScheme.outlineVariant)) {
-                        Icon(Icons.Default.Delete, stringResource(R.string.out_delete),
-                             Modifier.size(18.dp))
+                        Text(stringResource(R.string.swap_share))
+                    }
+                    // Deleting a render IS destructive -- minutes of NPU time, and the file is
+                    // gone from the phone -- so this one asks, unlike the source and target
+                    // buttons, which only drop a reference to a file the user still has.
+                    //
+                    // ⚠ VIDEO ONLY, and that is not an oversight. A still has no output file:
+                    // its result is the swapped PANE, regenerated from the source and target
+                    // whenever both are present. The button was shown for stills too and did
+                    // nothing at all -- discardOutput() deletes outputFile, which is null on
+                    // that path -- so it confirmed and then visibly ignored the answer.
+                    //
+                    // Clearing the pane instead would be worse, not better: the autowarm effect
+                    // would redraw it within the same second. The way to get rid of a still's
+                    // result is to remove the target, which has its own button on its own pane.
+                    if (outputFile != null) {
+                        OutlinedButton({ confirmDeleteOutput = true }, enabled = idle,
+                                       shape = RoundedCornerShape(14.dp),
+                                       // Same control background as the buttons around it.
+                                       colors = ButtonDefaults.outlinedButtonColors(
+                                           containerColor = MaterialTheme.colorScheme.surface,
+                                           contentColor = MaterialTheme.colorScheme.onBackground,
+                                           disabledContainerColor = MaterialTheme.colorScheme.surface,
+                                           disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                       ),
+                                       border = BorderStroke(1.dp,
+                                                             MaterialTheme.colorScheme.outlineVariant)) {
+                            Icon(Icons.Default.Delete, stringResource(R.string.out_delete),
+                                 Modifier.size(18.dp))
+                        }
                     }
                 }
+                if (savedPath != null)
+                    Text(
+                        savedPath,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
             }
-            if (savedPath != null)
-                Text(
-                    savedPath,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            }
         }
 
         // ---------------------------------------------------------------- log

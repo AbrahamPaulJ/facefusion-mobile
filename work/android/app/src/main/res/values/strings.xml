@@ -121,6 +121,7 @@
     <string name="out_play">Play</string>
     <string name="out_pause">Pause</string>
     <string name="out_log">Log</string>
+    <string name="swap_output_result">Output result</string>
     <string name="out_expand">Expand</string>
     <string name="out_collapse">Collapse</string>
 
@@ -430,6 +431,7 @@
     <string name="batch_autosave">Save each clip to the gallery as it finishes</string>
     <string name="batch_output_of">Clip %1$d of %2$d, swipe to change</string>
     <string name="swap_autosaved_to_gallery">Saved to Movies/FaceFusion automatically.</string>
+    <string name="swap_batch_menu">Batch add</string>
     <string name="swap_batch_add">Add more clips (batch)</string>
     <string name="swap_batch_add_more">Add more clips</string>
     <string name="status_faces_found">%1$d faces found. Tap one to swap only that face.</string>

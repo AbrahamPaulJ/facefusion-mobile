@@ -81,6 +81,7 @@
     <string name="out_play">播放</string>
     <string name="out_pause">暂停</string>
     <string name="out_log">日志</string>
+    <string name="swap_output_result">输出结果</string>
     <string name="out_expand">展开</string>
     <string name="out_collapse">收起</string>
 
@@ -378,6 +379,7 @@
     <string name="notif_batch_channel">批量替换</string>
     <string name="status_batch_queued_some">已排入 %1$d 个片段。已忽略 %2$d 张照片，批量仅支持视频。</string>
     <string name="status_batch_images_only">照片逐张替换；结果已显示在面板上。</string>
+    <string name="swap_batch_menu">批量添加</string>
     <string name="swap_batch_add">添加更多片段（批量）</string>
     <string name="swap_batch_add_more">添加更多片段</string>
     <string name="status_faces_found">检测到 %1$d 张人脸，点按其中一张仅替换该人脸。</string>
