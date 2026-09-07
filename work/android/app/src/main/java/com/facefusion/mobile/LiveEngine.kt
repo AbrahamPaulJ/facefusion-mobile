@@ -88,6 +88,43 @@ class LiveEngine {
     private val kGateIntervalMs = 1000L
     private var lastGateMs = 0L
 
+    /**
+     * Which lens [start] binds. Read at BIND time, so changing it does nothing to a pump
+     * that is already running -- the caller switches by stopping and starting again.
+     *
+     * ⚠ That is deliberate, and it is the cheap half of a real trade. Rebinding in place
+     * (unbindAll + bindToLifecycle on the live executor) would save ~200 ms, and it would
+     * do it on exactly the unbind/rebind path that already carries an unconfirmed
+     * use-after-free (roadmap 11, and the SIGSEGV quoted on [stop]). stop() then start()
+     * reuses the one path that has been debugged: the executor is drained, the buffers are
+     * dropped, and nothing native outlives the switch. A camera flip that takes as long as
+     * opening the camera is what every camera app already does.
+     */
+    @Volatile var frontCamera: Boolean = true
+
+    /**
+     * Set to record what the pump produces — roadmap 13b. Null is not recording.
+     *
+     * Owned by the caller, which starts and stops it; this class only feeds it. That split
+     * is deliberate: where the file goes, what it is called and when it is saved are all
+     * MainActivity's business, and this class has stayed free of them for the same reason
+     * it takes a gate THRESHOLD rather than knowing what a gate is.
+     *
+     * ⚠ Fed from the analyzer thread, in line with the pump. See LiveRecorder.frame for
+     * why it drops a frame rather than blocking: the recording is the guest here, and a
+     * preview that stutters because a recording is running is the wrong trade.
+     */
+    @Volatile var recorder: LiveRecorder? = null
+
+    /**
+     * Where liveFrame writes the full-resolution swapped BGR while recording.
+     *
+     * Allocated once per resolution and reused, like the display bitmaps above and for the
+     * same reason: at 720p this is 2.7 MB, and a fresh one per frame would be ~40 MB/s of
+     * churn to hand the encoder bytes it copies again anyway.
+     */
+    private var recBuf: ByteArray? = null
+
     // Per-stage cost, logged every 30 frames. Live was 6.5 fps on its first run against
     // 26.6 on a file, and no amount of reasoning about which stage was to blame beat
     // asking -- the same lesson the geometry buckets taught.
@@ -128,7 +165,7 @@ class LiveEngine {
     private val kMaxPreview = 1080
 
     /**
-     * Binds the front camera and starts the pump.
+     * Binds [frontCamera]'s lens and starts the pump.
      *
      * The pipeline must already be initialised and hold a source -- this class deliberately
      * does not own that: the same [NativePipe] is shared with the preview and the API, and
@@ -161,6 +198,13 @@ class LiveEngine {
             //
             // ResolutionSelector states the same intent in the API that is actually
             // consulted: nearest supported size to 720p, preferring lower, 16:9.
+            //
+            // ⚠ This is what keeps the BACK camera from costing frame rate. It offers far
+            // larger sizes than the front one, and every stage here scales with frame area
+            // -- detprep, the YUV conversion and the display downsample all do. Asking for
+            // 720p CLOSEST_LOWER_THEN_HIGHER means the better sensor is not followed up
+            // into a slideshow. Analysis resolution is a frame-rate decision, not a
+            // quality one; the swap runs at the size this returns.
             val resolution = androidx.camera.core.resolutionselector.ResolutionSelector.Builder()
                 .setAspectRatioStrategy(
                     androidx.camera.core.resolutionselector.AspectRatioStrategy
@@ -178,9 +222,23 @@ class LiveEngine {
                 .setOutputImageRotationEnabled(true)
                 .build()
             analysis.setAnalyzer(e) { img -> onImage(img, onShot) }
+            // The lens, and a REFUSAL that names itself. bindToLifecycle throws
+            // IllegalArgumentException for a camera the device does not have -- a tablet
+            // with no front camera, a phone with the back one disabled by policy -- and
+            // that arrived as "camera: IllegalArgumentException", which says nothing about
+            // what to do. Asked first, it is one sentence and the other lens still works.
+            val want = if (frontCamera) CameraSelector.DEFAULT_FRONT_CAMERA
+                       else CameraSelector.DEFAULT_BACK_CAMERA
+            if (!runCatching { p.hasCamera(want) }.getOrDefault(false)) {
+                onShot(Shot(null, 0, 0.0,
+                            if (frontCamera) "no front camera on this device"
+                            else "no back camera on this device"))
+                running = false
+                return@addListener
+            }
             runCatching {
                 p.unbindAll()
-                p.bindToLifecycle(owner, CameraSelector.DEFAULT_FRONT_CAMERA, analysis)
+                p.bindToLifecycle(owner, want, analysis)
                 // What was actually GRANTED, logged at bind rather than inferred from the
                 // first frame -- the gap between asked and granted is the whole story here.
                 android.util.Log.i("fflive", "granted ${analysis.resolutionInfo?.resolution}")
@@ -209,18 +267,48 @@ class LiveEngine {
      * expectation. Blocking the caller here is the entire point -- "stopped" has to mean
      * the native side is idle, not that it was asked to be.
      */
-    fun stop() {
+    fun stop(onDrained: (() -> Unit)? = null) {
         running = false
         // Unbind FIRST so no further frames are dispatched, then drain what is in flight.
         runCatching { provider?.unbindAll() }
         provider = null
-        exec?.let { e ->
-            e.shutdown()
-            runCatching { e.awaitTermination(2, java.util.concurrent.TimeUnit.SECONDS) }
-        }
+        val e = exec
         exec = null
         bufs[0] = null; bufs[1] = null
+        recBuf = null
         fps = 0.0
+        if (e == null) { onDrained?.invoke(); return }
+        e.shutdown()
+
+        // ⚠ THE RETURN VALUE OF awaitTermination IS THE WHOLE POINT, and it was being
+        // discarded. `runCatching { e.awaitTermination(2, SECONDS) }` reports a TIMEOUT as
+        // success, so stop() returned claiming the native side was idle while a frame was
+        // still inside processFrame -- and the caller then released the pipeline under it.
+        // That is the SIGSEGV quoted above, reachable again by a different door.
+        //
+        // The doc said "a frame takes ~60 ms, so the wait is imperceptible; 2 s is a bound,
+        // not an expectation". The premise is not always true: on the ncnn backend a frame
+        // is 240-540 ms, "use my Swap settings" can turn the enhancer on at pixel boost
+        // 1024, and a hot phone is slower again. 2 s is reachable, and when it was reached
+        // nothing said so.
+        val drained = runCatching {
+            e.awaitTermination(2, java.util.concurrent.TimeUnit.SECONDS)
+        }.getOrDefault(false)
+        if (drained) { onDrained?.invoke(); return }
+
+        // It did NOT drain. The caller must not free anything the analyzer thread is still
+        // using, so the teardown is DEFERRED rather than skipped: this thread waits for the
+        // frame to finish and runs it then. Stopping stays instant for the UI, and the
+        // native release happens when it is actually safe.
+        //
+        // PipeGuard is what makes the late release safe against a restart: startLive
+        // acquires it before init, and the caller releases it only inside onDrained, so a
+        // user who presses Start again waits rather than racing.
+        android.util.Log.w("fflive", "pump did not drain in 2 s; deferring teardown")
+        Thread({
+            runCatching { e.awaitTermination(30, java.util.concurrent.TimeUnit.SECONDS) }
+            onDrained?.invoke()
+        }, "live-drain").start()
     }
 
     /**
@@ -257,6 +345,10 @@ class LiveEngine {
             // Sample on the first frame of a session and every kGateIntervalMs after.
             // lastGateMs is zeroed in start(), so the first frame always samples: a session
             // that will be refused should be refused before it has shown anything.
+            // Read ONCE per frame. It is volatile and the caller may clear it at any
+            // moment; testing it twice could hand liveFrame a buffer and then find no
+            // recorder to give the result to, or the reverse.
+            val rec = recorder
             val nowMs = System.currentTimeMillis()
             val gateNow = !gateThreshold.isNaN() && (nowMs - lastGateMs >= kGateIntervalMs)
             if (gateNow) lastGateMs = nowMs
@@ -267,6 +359,13 @@ class LiveEngine {
                 p[2].buffer, p[2].rowStride, p[2].pixelStride,
                 w, h, bmp, dw, dh,
                 if (gateNow) gateThreshold else Float.NaN,
+                // Only while recording: null costs the native side one branch.
+                if (rec != null) {
+                    val need = w * h * 3
+                    var b = recBuf
+                    if (b == null || b.size != need) { b = ByteArray(need); recBuf = b }
+                    b
+                } else null,
             )
             msPump += (System.nanoTime() - t) / 1e6
             // -2 refused, -3 could not measure. Both STOP the pump rather than skipping a
@@ -283,6 +382,11 @@ class LiveEngine {
                 onShot(Shot(null, 0, fps, NativePipe.lastError()))
                 return
             }
+
+            // AFTER the error checks, so a refused or failed frame is never recorded. The
+            // gate stops the pump on a refusal, and the file must not contain the frame
+            // that caused it.
+            if (rec != null) recBuf?.let { rec.frame(it, w, h) }
 
             if (++nStat == 30) {
                 // One bucket, because there is one call -- but one number cannot say

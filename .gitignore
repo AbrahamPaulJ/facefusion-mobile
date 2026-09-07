@@ -61,6 +61,8 @@ work/assets/
 # Build output
 work/android/build/
 work/android/app/build/
+# Kotlin compiler session data, written beside the build dir since Kotlin 2.x.
+work/android/.kotlin/
 work/android/app/.cxx/
 work/android/.gradle/
 work/android/local.properties

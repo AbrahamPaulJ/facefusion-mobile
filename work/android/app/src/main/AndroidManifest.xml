@@ -100,6 +100,22 @@
             android:foregroundServiceType="dataSync" />
 
         <!--
+            The batch run's keep-alive. `dataSync` rather than `mediaProcessing`: the latter
+            arrived in API 34 and carries a system-imposed time budget, and a batch of long
+            clips is exactly the case that would be cut off by it. This service does no work
+            of its own (see BatchService); it only stops the process being reclaimed while
+            the Activity grinds through the queue.
+
+            NB: NO DOUBLE HYPHEN anywhere inside this comment. XML forbids it, and the
+            house style of writing asides that way turned this file into a build failure
+            whose entire message was "Error parsing AndroidManifest.xml".
+        -->
+        <service
+            android:name=".BatchService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!--
             The HTTP API. exported=false is about INTENTS, not about the socket: nothing on
             the phone can start or stop this service except the app itself, while the port
             it opens is reachable by whoever the bind address allows. The token is what

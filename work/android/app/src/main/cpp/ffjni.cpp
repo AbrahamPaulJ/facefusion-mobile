@@ -30,6 +30,49 @@ std::string g_err;
 std::string g_rejectedTier;
 std::vector<std::string> g_skipTiers;
 
+/**
+ * The reference face's embedding, kept OUTSIDE the pipeline so it survives init.
+ *
+ * The same reasoning g_skipTiers is written down with, and not theoretical here: initEx
+ * does `g_pipe.reset(new Pipeline())`, and runSwap inits at the start of EVERY run. Left on
+ * the pipeline alone, a face the user tapped in the preview would be visibly honoured there
+ * and silently forgotten by the export -- the finished video would come back with every
+ * face swapped and nothing on screen to explain why.
+ *
+ * 512 floats, already L2-normalised. Empty means no reference.
+ */
+std::vector<float> g_refEmbedding;
+
+/**
+ * Live's per-person assignment: a TAP from the UI is a REQUEST, consumed by the next
+ * liveFrame against the PRE-SWAP detections, so the embedding recorded is the real
+ * person's -- the frame the display shows is already swapped, and assigning from it
+ * would lock the mode onto the wrong identity.
+ *
+ * Cross-thread by design, and safe for the same reason the pipeline's other live flags
+ * are: Kotlin writes `pending` LAST, so the analyzer thread can only ever consume a
+ * fully-written request, and it clears it before anything else, so a request is
+ * consumed exactly once.
+ */
+struct AssignRequest { volatile bool pending = false; float x = 0; float y = 0; int source = -1; };
+// `consumed` is set on EVERY consumed request (matched or not), so the caller can tell
+// "still in flight" from "consumed and missed" -- the distinction a wall-clock timeout
+// gets wrong when a frame is slow. `have` means it matched.
+struct AssignResult { volatile bool consumed = false; volatile bool have = false;
+                      float box[4]{}; int source = -1; };
+static AssignRequest g_assignReq;
+static AssignResult g_assignResult;
+// RAW -> DISPLAY scale of the live frame, written every liveFrame and read by
+// takeSelectionBox (called from the shot callback, outside liveFrame, which is the one
+// place that knows both sizes).
+static float g_scaleX = 1.f, g_scaleY = 1.f;
+// Mirror of the pipeline's assign flag, read by liveFrame to pick the analysis mode:
+// assign mode forces a FRESH detection (noTrack) instead of the tracker's reconstructed
+// boxes -- a tap and the per-person tracking both need the truth about where faces are,
+// and the reconstructed box jumps at detector boundaries, which is exactly the jitter
+// that made taps miss and associations churn.
+static bool g_assignEnabled = false;
+
 std::string jstr(JNIEnv* env, jstring s) {
   if (!s) return {};
   const char* c = env->GetStringUTFChars(s, nullptr);
@@ -54,7 +97,7 @@ inline uint8_t clamp8(int v) { return (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v))
 void tunables(JNIEnv* env, ffpipe::Config& cfg, jfloat weight, jfloat maskBlur,
               jintArray jPadding, jfloat detScore, jfloat lmkScore, jint pixelBoost,
               jboolean largestOnly, jboolean faceEnhance, jfloat enhanceBlend,
-              jfloat lipSyncWeight) {
+              jfloat lipSyncWeight, jfloat referenceDistance) {
   cfg.swapperWeight = std::fmin(1.f, std::fmax(0.f, weight));
   cfg.maskBlur = std::fmin(1.f, std::fmax(0.f, maskBlur));
   cfg.detectorScore = std::fmin(1.f, std::fmax(0.f, detScore));
@@ -67,6 +110,7 @@ void tunables(JNIEnv* env, ffpipe::Config& cfg, jfloat weight, jfloat maskBlur,
   cfg.faceEnhance = faceEnhance == JNI_TRUE;
   cfg.faceEnhancerBlend = std::fmin(1.f, std::fmax(0.f, enhanceBlend));
   cfg.lipSyncWeight = std::fmin(1.f, std::fmax(0.f, lipSyncWeight));
+  cfg.referenceDistance = std::fmin(1.f, std::fmax(0.f, referenceDistance));
   if (jPadding && env->GetArrayLength(jPadding) == 4) {
     jint pad[4];
     env->GetIntArrayRegion(jPadding, 0, 4, pad);
@@ -92,7 +136,8 @@ Java_com_facefusion_mobile_NativePipe_initEx(JNIEnv* env, jclass, jstring jLib, 
                                              jfloat lmkScore, jint pixelBoost,
                                              jboolean largestOnly,
                                              jboolean faceEnhance, jfloat enhanceBlend,
-                                             jfloat lipSyncWeight) {
+                                             jfloat lipSyncWeight,
+                                             jfloat referenceDistance) {
   g_pipe.reset(new ffpipe::Pipeline());
   ffpipe::Config cfg;
   std::string swapper = jstr(env, jSwapper);
@@ -101,7 +146,7 @@ Java_com_facefusion_mobile_NativePipe_initEx(JNIEnv* env, jclass, jstring jLib, 
     cfg.swapDenorm = false; cfg.swapperIsHyperswap = false;
   }
   tunables(env, cfg, weight, maskBlur, jPadding, detScore, lmkScore, pixelBoost,
-           largestOnly, faceEnhance, enhanceBlend, lipSyncWeight);
+           largestOnly, faceEnhance, enhanceBlend, lipSyncWeight, referenceDistance);
 
   // PUSHED, not passed. There are four paths into init -- the preview, runSwap, the
   // self-test and the API -- and a per-call-site argument is a list you can be absent
@@ -120,6 +165,10 @@ Java_com_facefusion_mobile_NativePipe_initEx(JNIEnv* env, jclass, jstring jLib, 
     g_pipe.reset();
     return JNI_FALSE;
   }
+  // Re-apply the reference face to the pipeline that just replaced the one holding it.
+  // See g_refEmbedding: without this the selection survives only until the next run.
+  if (g_refEmbedding.size() == 512)
+    g_pipe->setReferenceEmbedding(g_refEmbedding.data());
   return JNI_TRUE;
 }
 
@@ -141,11 +190,12 @@ Java_com_facefusion_mobile_NativePipe_setOptionsEx(JNIEnv* env, jclass,
                                                    jboolean largestOnly,
                                                    jboolean faceEnhance,
                                                    jfloat enhanceBlend,
-                                                   jfloat lipSyncWeight) {
+                                                   jfloat lipSyncWeight,
+                                                   jfloat referenceDistance) {
   if (!g_pipe) return JNI_FALSE;
   ffpipe::Config cfg;
   tunables(env, cfg, weight, maskBlur, jPadding, detScore, lmkScore, pixelBoost,
-           largestOnly, faceEnhance, enhanceBlend, lipSyncWeight);
+           largestOnly, faceEnhance, enhanceBlend, lipSyncWeight, referenceDistance);
   g_pipe->updateConfig(cfg);
   return JNI_TRUE;
 }
@@ -164,6 +214,79 @@ Java_com_facefusion_mobile_NativePipe_rejectedTier(JNIEnv* env, jclass) {
 JNIEXPORT void JNICALL
 Java_com_facefusion_mobile_NativePipe_setTrackPeriod(JNIEnv*, jclass, jint frames) {
   if (g_pipe) g_pipe->setTrackPeriod((int)frames);
+}
+
+// ---- Live per-person assignment ------------------------------------------
+//
+// requestFaceAssignment stores a tap for the analyzer thread; the next liveFrame consumes
+// it (see liveFrame) and takeAssignmentResult hands the chosen face's box back for the
+// overlay. Coordinates are DISPLAY bitmap space both ways: Kotlin undoes the pane's crop
+// and mirror (only the UI knows the lens and the layout), and liveFrame maps the point
+// onto the RAW sensor detections -- the one scale only it knows -- then maps the chosen
+// box back to display space.
+
+JNIEXPORT void JNICALL
+Java_com_facefusion_mobile_NativePipe_requestFaceAssignment(JNIEnv*, jclass,
+                                                            jfloat x, jfloat y, jint source) {
+  g_assignReq.x = (float)x; g_assignReq.y = (float)y; g_assignReq.source = (int)source;
+  g_assignReq.pending = true;    // LAST: the consumer reads a fully-written request only
+}
+
+// The result of the last CONSUMED request, exactly once: FIVE floats (x0, y0, x1, y1,
+// source index -- the box in DISPLAY bitmap coordinates, so the overlay can draw it
+// as-is), ONE float [-1] for "consumed but the tap was on no face", or an EMPTY array
+// for "nothing consumed since the last read" (a slow frame can keep a request in flight
+// well past any wall-clock timeout, so Kotlin never guesses between those two).
+JNIEXPORT jfloatArray JNICALL
+Java_com_facefusion_mobile_NativePipe_takeAssignmentResult(JNIEnv* env, jclass) {
+  if (!g_assignResult.consumed) return env->NewFloatArray(0);
+  g_assignResult.consumed = false;
+  if (!g_assignResult.have) {
+    jfloatArray miss = env->NewFloatArray(1);
+    if (miss) { float m = -1.0f; env->SetFloatArrayRegion(miss, 0, 1, &m); }
+    return miss;
+  }
+  g_assignResult.have = false;
+  jfloatArray out = env->NewFloatArray(5);
+  if (out) {
+    float five[5] = {g_assignResult.box[0], g_assignResult.box[1],
+                     g_assignResult.box[2], g_assignResult.box[3],
+                     (float)g_assignResult.source};
+    env->SetFloatArrayRegion(out, 0, 5, five);
+  }
+  return out;
+}
+
+// The mode switch. OFF is the default behaviour -- every face uses the active slot --
+// exactly what the user asked for when they turn the feature off.
+JNIEXPORT void JNICALL
+Java_com_facefusion_mobile_NativePipe_setFaceAssignEnabled(JNIEnv*, jclass, jboolean enabled) {
+  g_assignEnabled = enabled == JNI_TRUE;
+  if (g_pipe) g_pipe->setFaceAssignEnabled(g_assignEnabled);
+}
+
+// The SELECTED person (assign mode): the last one tapped, who follows the source chip
+// until an empty tap deselects them. FIVE floats -- x0, y0, x1, y1 and the person's
+// CURRENT source -- in DISPLAY bitmap coordinates, so the UI can draw a persistent
+// highlight that follows them (moved here from RAW by the scale liveFrame recorded);
+// EMPTY when nobody is selected. A pure query: it does not consume anything.
+JNIEXPORT jfloatArray JNICALL
+Java_com_facefusion_mobile_NativePipe_takeSelectionBox(JNIEnv* env, jclass) {
+  if (!g_pipe) return env->NewFloatArray(0);
+  float raw[4]; int source = -1;
+  if (!g_pipe->selectedFaceBox(raw, &source)) return env->NewFloatArray(0);
+  jfloatArray out = env->NewFloatArray(5);
+  if (out) {
+    float five[5] = {raw[0] * g_scaleX, raw[1] * g_scaleY,
+                     raw[2] * g_scaleX, raw[3] * g_scaleY, (float)source};
+    env->SetFloatArrayRegion(out, 0, 5, five);
+  }
+  return out;
+}
+
+JNIEXPORT void JNICALL
+Java_com_facefusion_mobile_NativePipe_clearFaceSourceAssignments(JNIEnv*, jclass) {
+  if (g_pipe) g_pipe->clearFaceSourceAssignments();
 }
 
 // Comma-separated, because a JNI array of strings costs three more calls and this list is
@@ -206,6 +329,94 @@ Java_com_facefusion_mobile_NativePipe_contentScore(JNIEnv* env, jclass, jbyteArr
   ffpipe::ContentVerdict v = g_pipe->checkContent(img);
   if (!v.ok) { g_err = g_pipe->error(); return NAN; }
   return v.score;
+}
+
+// Which faces are in this frame, as boxes -- five floats each: x0, y0, x1, y1, score.
+//
+// A flat float[] rather than an object array: five numbers per face crossing JNI once beats
+// constructing N Java objects, and the caller draws rectangles from it directly.
+//
+// ⚠ DETECTOR ONLY. It does not run the landmarker or the recogniser, so nothing here is an
+// identity -- that is deliberate. Drawing rectangles needs no embedding, and computing one
+// per face on every preview would pay 3.55 ms/face for a picture. The day a face PICKER
+// needs identities (roadmap 12b), it asks for them explicitly rather than getting them as
+// a side effect of asking what is on screen.
+//
+// Returns an empty array when there is no pipeline or the frame is the wrong size, never
+// null: a UI overlay that has to null-check is a UI overlay that will crash once.
+JNIEXPORT jfloatArray JNICALL
+Java_com_facefusion_mobile_NativePipe_detectFaces(JNIEnv* env, jclass, jbyteArray jBgr,
+                                                  jint w, jint h) {
+  if (!g_pipe) { g_err = "pipeline not initialised"; return env->NewFloatArray(0); }
+  ffcv::Image img(w, h, 3);
+  if ((size_t)env->GetArrayLength(jBgr) != img.data.size()) {
+    g_err = "detectFaces: frame is not w*h*3 bytes";
+    return env->NewFloatArray(0);
+  }
+  env->GetByteArrayRegion(jBgr, 0, (jsize)img.data.size(), (jbyte*)img.data.data());
+  std::vector<ffpipe::Face> faces = g_pipe->analyse(img, /*boxesOnly=*/true);
+
+  std::vector<float> flat;
+  flat.reserve(faces.size() * 5);
+  for (const auto& f : faces) {
+    flat.push_back(f.box[0]); flat.push_back(f.box[1]);
+    flat.push_back(f.box[2]); flat.push_back(f.box[3]);
+    flat.push_back(f.detScore);
+  }
+  jfloatArray out = env->NewFloatArray((jsize)flat.size());
+  if (out && !flat.empty())
+    env->SetFloatArrayRegion(out, 0, (jsize)flat.size(), flat.data());
+  return out;
+}
+
+// Point at a face and swap only that one -- upstream's face_selector_mode = reference.
+//
+// Returns the chosen face's box as four floats, or an EMPTY array when the point was not
+// inside any detected face. The box comes back so the UI can show which face it took: a
+// selector that silently picks the wrong neighbour and a selector that picked nothing look
+// identical from outside, and they need different reactions from the user.
+//
+// ⚠ Runs the FULL analyse, embeddings included -- unlike detectFaces, which deliberately
+// does not. Identity is the entire point here, and it is paid once per tap rather than per
+// frame.
+JNIEXPORT jfloatArray JNICALL
+Java_com_facefusion_mobile_NativePipe_setReferenceFaceAt(JNIEnv* env, jclass,
+                                                         jbyteArray jBgr, jint w, jint h,
+                                                         jfloat x, jfloat y) {
+  if (!g_pipe) { g_err = "pipeline not initialised"; return env->NewFloatArray(0); }
+  ffcv::Image img(w, h, 3);
+  if ((size_t)env->GetArrayLength(jBgr) != img.data.size()) {
+    g_err = "setReferenceFaceAt: frame is not w*h*3 bytes";
+    return env->NewFloatArray(0);
+  }
+  env->GetByteArrayRegion(jBgr, 0, (jsize)img.data.size(), (jbyte*)img.data.data());
+  float box[4] = {0, 0, 0, 0};
+  if (!g_pipe->setReferenceFaceAt(img, x, y, box)) {
+    g_err = g_pipe->error();
+    return env->NewFloatArray(0);
+  }
+  // Keep it where an init cannot destroy it.
+  g_refEmbedding.assign(512, 0.f);
+  if (!g_pipe->referenceEmbedding(g_refEmbedding.data())) g_refEmbedding.clear();
+
+  jfloatArray out = env->NewFloatArray(4);
+  if (out) env->SetFloatArrayRegion(out, 0, 4, box);
+  return out;
+}
+
+JNIEXPORT void JNICALL
+Java_com_facefusion_mobile_NativePipe_clearReferenceFace(JNIEnv*, jclass) {
+  // BOTH copies. Clearing only the pipeline's would let the next init put it straight back.
+  g_refEmbedding.clear();
+  if (g_pipe) g_pipe->clearReferenceFace();
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_facefusion_mobile_NativePipe_hasReferenceFace(JNIEnv*, jclass) {
+  // The KEPT copy, not the pipeline's: this is asked while no pipeline is loaded (a target
+  // change releases it), and answering "no" then would drop a selection that is still set.
+  return (!g_refEmbedding.empty() || (g_pipe && g_pipe->hasReferenceFace()))
+             ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL
@@ -417,6 +628,33 @@ Java_com_facefusion_mobile_NativePipe_setSource(JNIEnv* env, jclass, jbyteArray 
   return JNI_TRUE;
 }
 
+JNIEXPORT jint JNICALL
+Java_com_facefusion_mobile_NativePipe_addSource(JNIEnv* env, jclass, jbyteArray jBgr,
+                                                jint w, jint h) {
+  if (!g_pipe) { g_err = "pipeline not initialised"; return -1; }
+  ffcv::Image img(w, h, 3);
+  env->GetByteArrayRegion(jBgr, 0, (jsize)img.data.size(), (jbyte*)img.data.data());
+  return (jint)g_pipe->addSource(img);
+}
+
+JNIEXPORT void JNICALL
+Java_com_facefusion_mobile_NativePipe_setActiveSource(JNIEnv* env, jclass, jint index) {
+  if (g_pipe) g_pipe->setActiveSource(index);
+}
+
+JNIEXPORT void JNICALL
+Java_com_facefusion_mobile_NativePipe_setSwapEnabled(JNIEnv* env, jclass, jboolean enabled) {
+  if (g_pipe) g_pipe->setSwapEnabled(enabled);
+}
+
+// The `one`-face selector at runtime, WITHOUT a pipeline restart -- swapAll and enhance
+// both read it per frame. Restarting instead would tear down the pipeline and with it
+// every face assignment of the live session.
+JNIEXPORT void JNICALL
+Java_com_facefusion_mobile_NativePipe_setSwapLargestOnly(JNIEnv* env, jclass, jboolean enabled) {
+  if (g_pipe) g_pipe->setSwapLargestOnly(enabled);
+}
+
 /** Swap every face in a BGR frame, in place.  Returns the face count, or -1 on error. */
 JNIEXPORT jint JNICALL
 Java_com_facefusion_mobile_NativePipe_processFrame(JNIEnv* env, jclass, jbyteArray jBgr,
@@ -569,6 +807,32 @@ Java_com_facefusion_mobile_NativePipe_argbToBgr(JNIEnv* env, jclass, jintArray j
  * A pure index remap, so it is exact -- no resampling and nothing to verify numerically.
  * 90 and 270 SWAP the dimensions; the caller must size everything downstream to match.
  */
+// Resample a BGR frame to another size -- the output-size cap in VideoSwapper.
+//
+// ffcv::resizeLinear, the SAME resampler the pipeline uses everywhere else, so a capped run
+// and an uncapped one differ only in the size of the picture and not in how it was made.
+// It is bit-identical to cv2 INTER_AREA at a 2x downscale, which is the common case here
+// (4K to 1080p is exactly 2x).
+//
+// Downscaling only is the caller's rule, not this function's: it will happily enlarge, and
+// nothing in the app asks it to.
+JNIEXPORT jbyteArray JNICALL
+Java_com_facefusion_mobile_NativePipe_resizeBgr(JNIEnv* env, jclass, jbyteArray jBgr,
+                                                jint w, jint h, jint dw, jint dh) {
+  if (w <= 0 || h <= 0 || dw <= 0 || dh <= 0) { g_err = "resizeBgr: bad size"; return nullptr; }
+  ffcv::Image src(w, h, 3);
+  if ((size_t)env->GetArrayLength(jBgr) != src.data.size()) {
+    g_err = "resizeBgr: buffer is not w*h*3 bytes";
+    return nullptr;
+  }
+  env->GetByteArrayRegion(jBgr, 0, (jsize)src.data.size(), (jbyte*)src.data.data());
+  ffcv::Image dst = ffcv::resizeLinear(src, dw, dh);
+  jbyteArray out = env->NewByteArray((jsize)dst.data.size());
+  if (out)
+    env->SetByteArrayRegion(out, 0, (jsize)dst.data.size(), (const jbyte*)dst.data.data());
+  return out;
+}
+
 JNIEXPORT jbyteArray JNICALL
 Java_com_facefusion_mobile_NativePipe_rotateBgr(JNIEnv* env, jclass, jbyteArray jBgr,
                                                 jint w, jint h, jint degrees) {
@@ -726,7 +990,7 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
                                                 jobject jV, jint vRow, jint vPix,
                                                 jint w, jint h,
                                                 jobject jBitmap, jint dstW, jint dstH,
-                                                jfloat gateThreshold) {
+                                                jfloat gateThreshold, jbyteArray jBgrOut) {
   if (!g_pipe) { g_err = "pipeline not initialised"; return -1; }
   if (w <= 0 || h <= 0) { g_err = "liveFrame: empty frame"; return -1; }
 
@@ -789,11 +1053,65 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
     if (!(v.score <= gateThreshold)) return -2;
   }
 
-  auto faces = g_pipe->analyse(frame);
+  // Assign mode analyses with noTrack: the tracker's reconstructed boxes are a speed
+  // optimisation that jitters at detector boundaries, and both the tap hit-test and the
+  // per-person association need accurate boxes. Costs one yoloface per frame while the
+  // mode is on -- the price of the feature being correct.
+  auto faces = g_pipe->analyse(frame, /*boxesOnly=*/false, /*noTrack=*/g_assignEnabled);
+
+  // Assignment taps, consumed HERE on the PRE-SWAP detections: the identity pinned is
+  // the real person's, not the swapped result the display will draw. The tap arrives in
+  // DISPLAY coordinates (what the user touched) and the detections are in RAW sensor
+  // coordinates, so it is mapped across by the frame's own scale -- the one piece of
+  // geometry only this function knows. consumed is set whether or not the tap hit a
+  // face: a miss must be reported, not left hanging.
+  const bool tapPending = g_assignReq.pending;
+  if (tapPending) {
+    g_assignReq.pending = false;
+    g_assignResult.consumed = true;
+    g_assignResult.have = false;
+  }
+  const int dw = dstW > 0 ? (int)dstW : w, dh = dstH > 0 ? (int)dstH : h;
+  g_scaleX = (float)dw / (float)w; g_scaleY = (float)dh / (float)h;
+  // updateLiveTracking runs on EVERY live frame: it is the per-frame bookkeeping that
+  // makes an assignment STICKY (faces are associated by box, never re-scored against
+  // the assignments), and it pins the tapped face so the swap on THIS very frame
+  // already applies the new source.
+  float tapBox[4];
+  const bool tapped = g_pipe->updateLiveTracking(
+      faces,
+      tapPending ? g_assignReq.x * (float)w / (float)dw : 0.f,
+      tapPending ? g_assignReq.y * (float)h / (float)dh : 0.f,
+      tapPending ? (int)g_assignReq.source : -1,
+      tapBox);
+  if (tapPending && tapped) {
+    g_assignResult.have = true;
+    // Back into display space, so the overlay can draw the box without knowing the
+    // sensor size.
+    g_assignResult.box[0] = tapBox[0] * (float)dw / (float)w;
+    g_assignResult.box[1] = tapBox[1] * (float)dh / (float)h;
+    g_assignResult.box[2] = tapBox[2] * (float)dw / (float)w;
+    g_assignResult.box[3] = tapBox[3] * (float)dh / (float)h;
+    g_assignResult.source = (int)g_assignReq.source;
+  }
+
   if (!faces.empty()) {
     if (!g_pipe->swapAll(frame, faces)) { g_err = g_pipe->error(); return -1; }
     // Its own pass, after the swap, never fused -- see Pipeline::enhance's doc.
     if (!g_pipe->enhance(frame, faces)) { g_err = g_pipe->error(); return -1; }
+  }
+
+  // RECORDING taps the swapped frame here, at FULL resolution, before it is downsampled
+  // for the display. Only while a recording is running: jBgrOut is null otherwise and this
+  // costs a branch. One w*h*3 copy is the whole price of recording -- the alternative,
+  // re-reading the display Bitmap and converting it back, would both cost more and record
+  // the downsampled picture instead of the one that was computed.
+  if (jBgrOut) {
+    const jsize want = (jsize)(w * h * 3);
+    if (env->GetArrayLength(jBgrOut) == want)
+      env->SetByteArrayRegion(jBgrOut, 0, want, (const jbyte*)frame.data.data());
+    // A wrong-sized array is the caller's bug and must not be half-filled: a partial frame
+    // would be recorded as a torn picture rather than reported.
   }
 
   if (dstW <= 0 || dstH <= 0) { dstW = w; dstH = h; }

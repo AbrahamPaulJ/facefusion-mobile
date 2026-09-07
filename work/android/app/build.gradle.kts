@@ -1,4 +1,4 @@
-﻿import java.util.Properties
+import java.util.Properties
 
 plugins {
     id("com.android.application")
@@ -95,6 +95,15 @@ val qnnStage by tasks.registering {
 
 tasks.named("preBuild") {
     dependsOn(qnnStage)
+}
+
+// Optional matching native binaries for Kotlin/UI-only builds without the Qualcomm SDK.
+// Supply a directory containing arm64-v8a/libffnative.so and its runtime dependencies.
+val prebuiltNativeDir = providers.gradleProperty("prebuiltNativeDir").orNull?.let { file(it) }
+if (prebuiltNativeDir != null) {
+    require(File(prebuiltNativeDir, "arm64-v8a/libffnative.so").isFile) {
+        "prebuiltNativeDir must contain arm64-v8a/libffnative.so"
+    }
 }
 
 android {
@@ -390,12 +399,22 @@ android {
         // 59 = the chip that triggered the download now comes ON when it lands. The
         // tap was an enable; 58 made the model arrive and left the stage off, so the
         // user had to ask twice and the first ask looked like it had failed.
-        versionCode = 59
-        versionName = "0.7.0$variantTag"    // "-dev" == NO content gate
+        // 60 = 0.8.0 opens. 0.7.0 is published and its asset is versionCode 59, so
+        // the moment a feature lands locally the build stops being that release and
+        // must stop calling itself one -- a bug report naming "0.7.0" has to mean the
+        // thing on GitHub. Features from here (roadmap 13a, 2b, 12b, 14, 13b) bump
+        // the CODE only; the name moves again when 0.8.0 is actually released.
+        // ⚠ THE NAME MOVES WITH EVERY BUILD THAT LEAVES THIS MACHINE, not just with
+        // every release. Asked for 2026-09-06: quoting a versionCode to say which
+        // build someone is holding is precise and useless to them. 0.7.0 had four
+        // APKs and 0.8.0 had ten, and in both cases the NAME could not tell them
+        // apart -- which is the whole ambiguity the version rule exists to stop.
+        versionCode = 83
+        versionName = "0.9.11$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }
-        externalNativeBuild {
+        if (prebuiltNativeDir == null) externalNativeBuild {
             cmake {
                 arguments += listOf("-DANDROID_STL=c++_shared")
                 if (hasNcnn) {
@@ -411,7 +430,7 @@ android {
         }
     }
 
-    externalNativeBuild {
+    if (prebuiltNativeDir == null) externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
             version = "3.28.3"
@@ -419,6 +438,9 @@ android {
     }
     // The build sandbox provides NDK r29; keep this aligned with the selected toolchain.
     ndkVersion = "29.0.14206865"
+    if (prebuiltNativeDir != null) {
+        sourceSets.getByName("main").jniLibs.srcDir(prebuiltNativeDir)
+    }
 
     // The QNN runtime .so files ship in jniLibs and are dlopen'd by libffnative.so at
     // runtime.  They are NOT exec'd: a process exec'd out of the APK is denied the Hexagon
@@ -444,7 +466,12 @@ android {
     }
 
     buildTypes {
-        debug { isMinifyEnabled = false }
+        debug {
+            isMinifyEnabled = false
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-mic-debug"
+            manifestPlaceholders["appLabel"] = "$appLabel Debug"
+        }
         release {
             isMinifyEnabled = false
             signingConfig = signingConfigs.findByName("release")

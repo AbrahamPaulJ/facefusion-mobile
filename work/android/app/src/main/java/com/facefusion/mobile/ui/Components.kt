@@ -3,6 +3,7 @@ package com.facefusion.mobile.ui
 import android.graphics.Bitmap
 import android.widget.VideoView
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -23,6 +24,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
@@ -36,6 +39,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -123,13 +127,21 @@ val IconDownload: ImageVector = ImageVector.Builder(
 
 /** A small all-caps caption. Used for the pane labels and settings section headers. */
 @Composable
-fun Caption(text: String, modifier: Modifier = Modifier) {
+fun Caption(text: String, modifier: Modifier = Modifier, singleLine: Boolean = false) {
     Text(
         text.uppercase(),
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         letterSpacing = 1.5.sp,
         fontSize = 11.sp,
+        // ⚠ A PANE's caption must never wrap. It shares its row with that pane's buttons,
+        // so a second line makes the row taller -- and since ORIGINAL carries three icons
+        // and SWAPPED carries one, only ORIGINAL grew, leaving two panes that are supposed
+        // to be the same size sitting at different heights. It showed up on PORTRAIT
+        // targets, where the two panes go side by side and each has half the width to fit
+        // "ORIGINAL AT 0:03" and three buttons into.
+        maxLines = if (singleLine) 1 else Int.MAX_VALUE,
+        overflow = if (singleLine) TextOverflow.Ellipsis else TextOverflow.Clip,
         modifier = modifier,
     )
 }
@@ -289,6 +301,29 @@ fun PreviewPane(
      * null disables gestures entirely (the output pane, which owns its own surface).
      */
     zoom: ZoomState? = null,
+    /**
+     * Face boxes to outline, in [bitmap]'s OWN pixel coordinates: five floats per face --
+     * x0, y0, x1, y1, score -- exactly as `NativePipe.detectFaces` returns them.
+     *
+     * In image space rather than pane space on purpose: the pane knows its own letterbox
+     * and its own zoom, and the detector does not. Converting here is four lines; converting
+     * at the call site would mean teaching MainActivity about ContentScale.Fit.
+     */
+    faceBoxes: FloatArray? = null,
+    /**
+     * The box of the face currently chosen as the reference, drawn differently from the
+     * rest. Four floats, same coordinates as [faceBoxes].
+     */
+    referenceBox: FloatArray? = null,
+    /**
+     * A tap landed inside one of [faceBoxes]; the arguments are the tap in the BITMAP's own
+     * pixel coordinates.
+     *
+     * ⚠ Only consulted when there are boxes to hit. A tap that misses every box still runs
+     * [onClick] -- the pane is the target picker first and a face picker second, and
+     * swallowing misses would break the way every other pane on the screen behaves.
+     */
+    onPickFace: ((Float, Float) -> Unit)? = null,
     trailing: @Composable RowScope.() -> Unit = {},
 ) {
     // ONE container around the caption row AND the image, rather than a caption floating
@@ -395,12 +430,48 @@ fun PreviewPane(
                                     } while (ev.changes.any { it.pressed })
                                 }
                             }
-                            .pointerInput(zoom, onClick) {
+                            .pointerInput(zoom, onClick, onPickFace, faceBoxes) {
                                 detectTapGestures(
                                     // The only way back from a deep zoom, and the
                                     // conventional one.
                                     onDoubleTap = { zoom.reset() },
-                                    onTap = { onClick?.invoke() },
+                                    onTap = { tap ->
+                                        // PANE COORDINATES BACK TO IMAGE COORDINATES, in
+                                        // the reverse order they were applied: undo the
+                                        // zoom layer (scale about the box's centre, then
+                                        // translate), then undo ContentScale.Fit's
+                                        // letterbox. Getting this backwards does not throw
+                                        // -- it picks a face a few dozen pixels from the
+                                        // one under the finger, which is indistinguishable
+                                        // from a bad detector.
+                                        var picked = false
+                                        val boxes = faceBoxes
+                                        if (onPickFace != null && boxes != null &&
+                                            boxes.size >= 5) {
+                                            val bw = size.width.toFloat()
+                                            val bh = size.height.toFloat()
+                                            val iw = bitmap.width.toFloat()
+                                            val ih = bitmap.height.toFloat()
+                                            val z = zoom.scale
+                                            val ux = bw / 2f + (tap.x - bw / 2f -
+                                                                zoom.offset.x) / z
+                                            val uy = bh / 2f + (tap.y - bh / 2f -
+                                                                zoom.offset.y) / z
+                                            val k = minOf(bw / iw, bh / ih)
+                                            val ix = (ux - (bw - iw * k) / 2f) / k
+                                            val iy = (uy - (bh - ih * k) / 2f) / k
+                                            for (i in 0 until boxes.size / 5) {
+                                                val b = i * 5
+                                                if (ix >= boxes[b] && ix <= boxes[b + 2] &&
+                                                    iy >= boxes[b + 1] && iy <= boxes[b + 3]) {
+                                                    onPickFace(ix, iy)
+                                                    picked = true
+                                                    break
+                                                }
+                                            }
+                                        }
+                                        if (!picked) onClick?.invoke()
+                                    },
                                 )
                             }
                     } else if (onClick != null) {
@@ -426,6 +497,58 @@ fun PreviewPane(
                         ),
                     contentScale = ContentScale.Fit,
                 )
+                if (faceBoxes != null && faceBoxes.size >= 5) {
+                    // The SAME graphicsLayer as the Image above, so the outlines pan and
+                    // zoom with what they are outlining rather than sliding off it.
+                    Canvas(
+                        Modifier
+                            .fillMaxSize()
+                            .then(
+                                if (zoom != null) Modifier.graphicsLayer {
+                                    scaleX = zoom.scale
+                                    scaleY = zoom.scale
+                                    translationX = zoom.offset.x
+                                    translationY = zoom.offset.y
+                                } else Modifier
+                            )
+                    ) {
+                        // ContentScale.Fit, recomputed rather than guessed: uniform scale
+                        // to the smaller ratio, then centred. Getting this wrong does not
+                        // fail loudly -- it draws rectangles that are slightly off the
+                        // faces, which reads as a bad detector.
+                        val iw = bitmap.width.toFloat()
+                        val ih = bitmap.height.toFloat()
+                        if (iw > 0f && ih > 0f) {
+                            val k = minOf(size.width / iw, size.height / ih)
+                            val ox = (size.width - iw * k) / 2f
+                            val oy = (size.height - ih * k) / 2f
+                            // 2 dp at scale 1, thinned as the pane zooms in so the stroke
+                            // stays the same width on screen instead of growing into a slab.
+                            val w = 2.dp.toPx() / (zoom?.scale ?: 1f)
+                            for (i in 0 until faceBoxes.size / 5) {
+                                val b = i * 5
+                                // The CHOSEN face is drawn twice as thick and opaque; the
+                                // others are dimmed. A selector that picked the wrong
+                                // neighbour and one that picked nothing look identical
+                                // otherwise, and they need different reactions.
+                                val chosen = referenceBox != null &&
+                                    referenceBox.size >= 4 &&
+                                    kotlin.math.abs(referenceBox[0] - faceBoxes[b]) < 1f &&
+                                    kotlin.math.abs(referenceBox[1] - faceBoxes[b + 1]) < 1f
+                                drawRect(
+                                    color = if (chosen) FfRed
+                                            else FfRed.copy(alpha =
+                                                if (referenceBox != null) 0.35f else 1f),
+                                    topLeft = Offset(ox + faceBoxes[b] * k,
+                                                     oy + faceBoxes[b + 1] * k),
+                                    size = Size((faceBoxes[b + 2] - faceBoxes[b]) * k,
+                                                (faceBoxes[b + 3] - faceBoxes[b + 1]) * k),
+                                    style = Stroke(width = if (chosen) w * 2f else w),
+                                )
+                            }
+                        }
+                    }
+                }
             } else {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -607,6 +730,21 @@ fun OutputPane(
                 .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center,
         ) {
+            // ⚠ KEYED ON THE PATH, and this is not decoration. AndroidView's `factory`
+            // runs ONCE; nothing re-points a VideoView when the composable's `file`
+            // changes, so swapping the file left the previous video loaded and playing.
+            //
+            // It went unnoticed because a single run never exercises it: between two runs
+            // `outputFile` is null while discardOutput deletes the old file, the pane
+            // leaves composition, and the next run builds a fresh view. Batch swipe is the
+            // first path that goes from one file straight to another, and it showed clip
+            // one's frames under clip two's name.
+            //
+            // key() rather than an `update` block: VideoView is a stateful legacy view with
+            // a prepared/playing lifecycle, and re-targeting one mid-playback is a longer
+            // list of things to get right than throwing it away. Every piece of state
+            // around it is already `remember(file)`, so it resets with the view.
+            key(file.absolutePath) {
             AndroidView(
                 factory = { ctx ->
                     VideoView(ctx).apply {
@@ -623,6 +761,7 @@ fun OutputPane(
                 },
                 modifier = Modifier.fillMaxSize(),
             )
+            }
         }
         Row(
             Modifier.fillMaxWidth(),

@@ -36,6 +36,10 @@
     <string name="swap_voice_picked">音訊已就緒</string>
     <string name="swap_choose_another_voice">更換語音</string>
     <string name="swap_remove_voice">移除語音</string>
+    <string name="swap_voice_play">播放語音</string>
+    <string name="swap_voice_pause">暫停語音</string>
+    <string name="swap_voice_trim">語音片段</string>
+    <string name="swap_voice_trim_hint">只有這段會驅動口型</string>
     <string name="swap_loading_models">正在載入模型，需要幾秒鐘…</string>
     <string name="swap_swapping_frame">正在處理這一格…</string>
     <string name="swap_pick_a_source">請選擇來源人臉</string>
@@ -99,7 +103,7 @@
     <string name="opt_weight_hint_default">直接使用來源人臉特徵，不做修改（預設）</string>
     <string name="opt_pixel_boost">像素增強</string>
     <string name="opt_pixel_boost_native">模型的原生尺寸</string>
-    <string name="opt_pixel_boost_cost">每張臉的換臉成本變為 %1$d 倍 —— 處理相片沒問題，處理影片會很慢</string>
+    <string name="opt_pixel_boost_cost">每張臉的換臉成本變為 %1$d 倍 ， 處理相片沒問題，處理影片會很慢</string>
     <string name="opt_model">模型</string>
     <string name="opt_model_hint">hyperswap 為 256²，inswapper 為 128² 且更慢</string>
 
@@ -127,14 +131,14 @@
     <string name="opt_faces_every_short">所有人臉</string>
     <string name="opt_faces_largest_short">最大的人臉</string>
     <string name="opt_faces_hint">替換畫面中的所有人臉，或只替換最大的一張</string>
-    <string name="opt_detector_note">偵測尺寸固定為 640，換臉尺寸固定為 256 —— 兩者都已編譯進 NPU 二進位檔</string>
+    <string name="opt_detector_note">偵測尺寸固定為 640，換臉尺寸固定為 256 ， 兩者都已編譯進 NPU 二進位檔</string>
 
     <string name="opt_face_enhancer">人臉增強</string>
     <string name="opt_enhancer_summary">gpen_bfr_256   混合 %1$s</string>
     <string name="opt_enhancer_off_summary">關閉</string>
     <string name="opt_blend">混合</string>
     <string name="opt_blend_hint_full">只使用增強後的結果</string>
-    <string name="opt_blend_hint_none">沒有效果 —— 換臉結果維持不變</string>
+    <string name="opt_blend_hint_none">沒有效果 ， 換臉結果維持不變</string>
     <string name="opt_blend_hint_mixed">與未增強的換臉結果混合（預設 0.80）</string>
     <string name="opt_enhancer_note">在貼回原圖之前，以 %1$s 處理換好的人臉</string>
     <string name="opt_lip_sync_weight_hint">音訊驅動口型的強度（預設 0.50）</string>
@@ -179,7 +183,7 @@
     <string name="set_runtime_cpu">CPU</string>
     <string name="set_runtime_none">未啟動</string>
     <string name="set_unknown_dash">-</string>
-    <string name="set_ncnn_note">此裝置沒有高通 NPU，因此換臉在 GPU 與 CPU 上執行：每格耗時約為原本的 13 倍。人臉增強與內容檢查在這裡一律使用 CPU —— 在 GPU 上它們的結果是錯的，而不只是比較慢。</string>
+    <string name="set_ncnn_note">此裝置沒有高通 NPU，因此換臉在 GPU 與 CPU 上執行：每格耗時約為原本的 13 倍。人臉增強與內容檢查在這裡一律使用 CPU ， 在 GPU 上它們的結果是錯的，而不只是比較慢。</string>
     <string name="set_htp_unmeasured">無法測量 HTP。應用程式會退回相容性最好的版本，因此這不一定表示無法執行。</string>
     <string name="set_hexagon_arch">Hexagon 架構</string>
     <string name="set_vtcm">VTCM</string>
@@ -192,7 +196,7 @@
     <string name="set_supported_devices">支援的裝置</string>
     <string name="set_in_use">使用中</string>
 
-    <string name="set_runtime_override_note">本機有 Hexagon NPU 並正在使用它。強制走 GPU/CPU 路徑可以看到沒有高通 NPU 的裝置是什麼表現 —— 它需要另一套模型，而且慢得多。</string>
+    <string name="set_runtime_override_note">本機有 Hexagon NPU 並正在使用它。強制走 GPU/CPU 路徑可以看到沒有高通 NPU 的裝置是什麼表現 ， 它需要另一套模型，而且慢得多。</string>
     <string name="set_runtime_pinned_note">執行方式是手動固定的，而不是依本機自動選擇的。選擇「自動」即可回復：有 NPU 時使用 NPU，沒有時使用 GPU 與 CPU。</string>
     <string name="set_runtime_auto">自動</string>
     <string name="set_runtime_force_npu">NPU</string>
@@ -204,7 +208,7 @@
     <string name="set_api_body">開啟這個開關，然後在電腦的瀏覽器中開啟下面的位址。所有處理仍然在這支手機上進行。</string>
     <string name="set_api_lan_title">允許其他裝置連線</string>
     <string name="set_api_lan_on">已開啟。同一網路中能連到這支手機的任何人都可以開啟該頁面並用它換臉。</string>
-    <string name="set_api_lan_on_pending">已開啟。目前還沒有開始監聽 —— 在上面啟動伺服器後才會生效。</string>
+    <string name="set_api_lan_on_pending">已開啟。目前還沒有開始監聽 ， 在上面啟動伺服器後才會生效。</string>
     <string name="set_api_lan_off">已關閉。僅限本機，或透過 USB 連接的電腦。</string>
     <string name="set_api_open_this">開啟這個位址</string>
     <string name="set_api_over_usb">或透過 USB</string>
@@ -293,7 +297,7 @@
     <string name="out_delete_title">刪除這個輸出？</string>
     <string name="out_delete_body">算好的檔案將從這支手機上刪除。已經儲存到相簿的內容會保留。</string>
     <string name="opt_fast_video">快速影片</string>
-    <string name="opt_fast_video_hint">兩次人臉偵測之間相隔的影格數。中間的影格改為追蹤人臉而非重新偵測，速度較快，但頭部快速移動時略欠精確。僅用於影片處理 — 預覽一律重新偵測人臉。</string>
+    <string name="opt_fast_video_hint">兩次人臉偵測之間相隔的影格數。中間的影格改為追蹤人臉而非重新偵測，速度較快，但頭部快速移動時略欠精確。僅用於影片處理：預覽一律重新偵測人臉。</string>
     <string name="opt_fast_video_off">關閉</string>
     <string name="live_title">即時</string>
     <string name="live_models_missing">未安裝模型</string>
@@ -313,7 +317,7 @@
     <string name="live_fast_confirm_title">關閉快速模式？</string>
     <string name="live_fast_confirm_body">快速模式是即時畫面能夠流暢的原因。它會強制使用相機跟得上的設定：
 
-• 人臉追蹤開啟 — 每四個影格偵測一次
+• 人臉追蹤開啟：每四個影格偵測一次
 • 人臉增強關閉
 • pixel boost 256（不放大）
 • 嘴型同步關閉
@@ -344,4 +348,54 @@
     <string name="set_theme_follow_system">跟隨系統</string>
     <string name="set_theme_desc_dark">深色</string>
     <string name="set_theme_desc_light">淺色</string>
+    <string name="live_lens_front">前鏡頭</string>
+    <string name="live_lens_back">後鏡頭</string>
+    <string name="swap_show_faces">顯示偵測到的臉孔</string>
+    <string name="status_reference_set">僅替換該人臉。再次點按可替換所有人臉。</string>
+    <string name="status_reference_missed">該位置沒有人臉。</string>
+    <string name="status_reference_cleared">已恢復替換所有人臉。</string>
+    <string name="opt_reference_distance">比對所選臉孔</string>
+    <string name="opt_reference_distance_hint">僅在點選目標臉孔後生效。數值越大比對到的人越多；越小則同一個人轉頭時可能不再符合。</string>
+    <string name="swap_action_batch">替換 %1$d 個片段</string>
+    <string name="status_batch_queued">已排入 %1$d 個片段。裁剪與影格率僅適用於第一個。</string>
+    <string name="status_batch_item">第 %1$d / %2$d 個片段：%3$s</string>
+    <string name="status_batch_done">完成 %1$d 個，未替換 %2$d 個</string>
+    <string name="batch_waiting">等待中</string>
+    <string name="batch_running">進行中</string>
+    <string name="batch_done">完成</string>
+    <string name="batch_refused">已拒絕</string>
+    <string name="batch_failed">失敗</string>
+    <string name="batch_skipped">已略過</string>
+    <string name="batch_remove">從佇列移除</string>
+    <string name="batch_unnamed_clip">片段</string>
+    <string name="live_rec_start">錄製</string>
+    <string name="live_rec_stop">停止錄製</string>
+    <string name="live_rec_badge">錄製</string>
+    <string name="status_live_recording">正在錄製即時畫面。</string>
+    <string name="status_live_rec_saved">錄製已儲存，共 %1$d 影格。</string>
+    <string name="status_live_rec_empty">沒有錄製到任何內容。</string>
+    <string name="notif_batch_title">正在替換片段</string>
+    <string name="notif_batch_text">第 %1$d / %2$d 個片段：%3$s</string>
+    <string name="notif_batch_channel">批次替換</string>
+    <string name="status_batch_queued_some">已排入 %1$d 個片段。已略過 %2$d 張相片，批次僅支援影片。</string>
+    <string name="status_batch_images_only">相片逐張替換；結果已顯示在面板上。</string>
+    <string name="swap_batch_add">新增更多片段（批次）</string>
+    <string name="swap_batch_add_more">新增更多片段</string>
+    <string name="status_faces_found">偵測到 %1$d 張臉孔，點按其中一張僅替換該臉孔。</string>
+    <string name="status_reference_warming">正在準備預覽，請稍後再次點按該臉孔。</string>
+    <string name="batch_autosave">每個片段完成後立即儲存到相簿</string>
+    <string name="batch_output_of">第 %1$d / %2$d 個片段，滑動切換</string>
+    <string name="swap_autosaved_to_gallery">已自動儲存到 Movies/FaceFusion。</string>
+    <string name="batch_delete_title">刪除該片段？</string>
+    <string name="batch_delete_body">%1$s 有一個尚未儲存到相簿的成品影片。刪除片段會一併刪除它。</string>
+    <string name="batch_delete_confirm">刪除</string>
+    <string name="status_batch_already_queued">這些片段已在佇列中。</string>
+    <string name="swap_output_settings">輸出設定</string>
+    <string name="swap_output_summary">%1$s，%2$s fps</string>
+    <string name="swap_output_size">輸出尺寸</string>
+    <string name="swap_size_source">與來源相同</string>
+    <string name="swap_size_hint_smaller">檔案更小，處理更快：整個影格以此尺寸處理。這不會讓臉孔更清晰。</string>
+    <string name="swap_size_hint_source">片段保持原有解析度。</string>
+    <string name="swap_size_hint_source_dims">片段保持原有尺寸 %1$d x %2$d。</string>
+    <string name="swap_size_source_at">不變 (%1$dp)</string>
 </resources>

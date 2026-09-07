@@ -63,6 +63,11 @@
     <string name="swap_voice_picked">Audio ready</string>
     <string name="swap_choose_another_voice">Choose another voice</string>
     <string name="swap_remove_voice">Remove voice</string>
+    <string name="swap_voice_play">Play the voice</string>
+    <string name="swap_voice_pause">Pause the voice</string>
+    <string name="swap_voice_trim">Voice clip</string>
+    <!-- The voice's trim handles: only this segment drives the lips / is heard in the output. -->
+    <string name="swap_voice_trim_hint">Only this part drives the lips</string>
     <string name="swap_loading_models">Loading models, this takes a few seconds…</string>
     <string name="swap_swapping_frame">Swapping this frame…</string>
     <string name="swap_pick_a_source">Pick a source face</string>
@@ -140,7 +145,7 @@
     <string name="opt_pixel_boost">Pixel boost</string>
     <string name="opt_pixel_boost_native">the model\'s native size</string>
     <!-- %1$d is how many times the swapper runs per face -->
-    <string name="opt_pixel_boost_cost">%1$dx the swapper cost per face — fine for stills, slow for video</string>
+    <string name="opt_pixel_boost_cost">%1$dx the swapper cost per face: fine for stills, slow for video</string>
     <string name="opt_model">Model</string>
     <string name="opt_model_hint">hyperswap is 256², inswapper 128² and slower</string>
 
@@ -174,9 +179,9 @@
          plainly rather than selling it. zh-rCN/zh-rTW fall back to English until
          translated, which is the intended behaviour for a new string. -->
     <string name="opt_fast_video">Fast video</string>
-    <string name="opt_fast_video_hint">Frames between face detections. The face is tracked in between instead of found again, which is faster but slightly less exact when the head moves quickly. Applies to video runs only — the preview always finds the face.</string>
+    <string name="opt_fast_video_hint">Frames between face detections. The face is tracked in between instead of found again, which is faster but slightly less exact when the head moves quickly. Applies to video runs only; the preview always finds the face.</string>
     <string name="opt_fast_video_off">Off</string>
-    <string name="opt_detector_note">detector size is fixed at 640 and the swapper at 256 — both are compiled into the NPU binaries</string>
+    <string name="opt_detector_note">detector size is fixed at 640 and the swapper at 256; both are compiled into the NPU binaries</string>
 
     <string name="opt_face_enhancer">Face Enhancer</string>
     <!-- %1$s is the blend amount -->
@@ -184,7 +189,7 @@
     <string name="opt_enhancer_off_summary">off</string>
     <string name="opt_blend">Blend</string>
     <string name="opt_blend_hint_full">the enhancer\'s output alone</string>
-    <string name="opt_blend_hint_none">no effect — the swap is left untouched</string>
+    <string name="opt_blend_hint_none">no effect; the swap is left untouched</string>
     <string name="opt_blend_hint_mixed">mixed with the unenhanced swap (default 0.80)</string>
     <!-- %1$s is the resolution the enhancer runs at, e.g. "512" -->
     <string name="opt_enhancer_note">runs on the swapped face at %1$s, before it is pasted back</string>
@@ -239,7 +244,7 @@
     <string name="set_runtime_cpu">CPU</string>
     <string name="set_runtime_none">none started</string>
     <string name="set_unknown_dash">-</string>
-    <string name="set_ncnn_note">This device has no Qualcomm NPU, so the swap runs on the GPU and CPU: expect roughly 13x the time per frame. The face enhancer and the content checker always run on the CPU here — on the GPU they are measurably wrong, not merely slower.</string>
+    <string name="set_ncnn_note">This device has no Qualcomm NPU, so the swap runs on the GPU and CPU: expect roughly 13x the time per frame. The face enhancer and the content checker always run on the CPU here; on the GPU they are measurably wrong, not merely slower.</string>
     <string name="set_htp_unmeasured">The HTP could not be measured. The app falls back to the most permissive build, so this is not necessarily a failure to run.</string>
     <string name="set_hexagon_arch">Hexagon arch</string>
     <string name="set_vtcm">VTCM</string>
@@ -253,7 +258,7 @@
     <string name="set_in_use">in use</string>
 
     <!-- ==================================================== settings: runtime override -->
-    <string name="set_runtime_override_note">This phone has a Hexagon NPU and uses it. Forcing the GPU/CPU path shows what a non-Qualcomm device does — it needs its own model set and is far slower.</string>
+    <string name="set_runtime_override_note">This phone has a Hexagon NPU and uses it. Forcing the GPU/CPU path shows what a non-Qualcomm device does; it needs its own model set and is far slower.</string>
     <!-- Shown when a runtime is pinned, in place of set_runtime_override_note. It has to
          name the way back, because this card is the only way back. -->
     <string name="set_runtime_pinned_note">The runtime is pinned by hand rather than chosen for this phone. Automatic puts it back: the NPU where there is one, GPU and CPU where there is not.</string>
@@ -271,7 +276,7 @@
     <string name="set_api_lan_on">On. Anyone who can reach this phone on your network can open the page and swap faces with it.</string>
     <!-- LAN is on but nothing is listening yet. The alarming version of this sentence
          belongs to an OPEN PORT, not to a preference. -->
-    <string name="set_api_lan_on_pending">On. Nothing is listening yet — it takes effect when you turn the server on above.</string>
+    <string name="set_api_lan_on_pending">On. Nothing is listening yet; it takes effect when you turn the server on above.</string>
     <string name="set_api_lan_off">Off. Only this phone, or a computer connected by USB.</string>
     <string name="set_api_open_this">Open this</string>
     <string name="set_api_over_usb">Or over USB</string>
@@ -395,6 +400,56 @@
     <string name="live_stop">Stop</string>
     <!-- %1$s frames per second, %2$s the face count phrase below -->
     <string name="live_stat">%1$s fps   %2$s</string>
+    <string name="swap_show_faces">Show detected faces</string>
+    <string name="swap_action_batch">Swap %1$d clips</string>
+    <string name="status_batch_queued">%1$d clips queued. Trim and frame rate apply to the first only.</string>
+    <string name="status_batch_item">Clip %1$d of %2$d: %3$s</string>
+    <string name="status_batch_done">%1$d done, %2$d not swapped</string>
+    <string name="batch_waiting">waiting</string>
+    <string name="batch_running">running</string>
+    <string name="batch_done">done</string>
+    <string name="batch_refused">refused</string>
+    <string name="batch_failed">failed</string>
+    <string name="batch_skipped">skipped</string>
+    <string name="batch_remove">Remove from queue</string>
+    <string name="batch_unnamed_clip">clip</string>
+    <string name="swap_output_settings">Output settings</string>
+    <string name="swap_output_summary">%1$s, %2$s fps</string>
+    <string name="swap_output_size">Output size</string>
+    <string name="swap_size_source">Same as source</string>
+    <string name="swap_size_source_at">Same (%1$dp)</string>
+    <string name="swap_size_hint_smaller">Smaller file, and a faster run: the whole frame is processed at this size. It does not make faces sharper.</string>
+    <string name="swap_size_hint_source">The clip keeps its own resolution.</string>
+    <string name="swap_size_hint_source_dims">The clip keeps its own size, %1$d x %2$d.</string>
+    <string name="batch_delete_title">Delete this clip?</string>
+    <string name="batch_delete_body">%1$s has a finished video that is not in your gallery. Deleting the clip deletes it.</string>
+    <string name="batch_delete_confirm">Delete</string>
+    <string name="status_batch_already_queued">Those clips are already in the queue.</string>
+    <string name="batch_autosave">Save each clip to the gallery as it finishes</string>
+    <string name="batch_output_of">Clip %1$d of %2$d, swipe to change</string>
+    <string name="swap_autosaved_to_gallery">Saved to Movies/FaceFusion automatically.</string>
+    <string name="swap_batch_add">Add more clips (batch)</string>
+    <string name="swap_batch_add_more">Add more clips</string>
+    <string name="status_faces_found">%1$d faces found. Tap one to swap only that face.</string>
+    <string name="status_reference_warming">Preparing the preview. Tap the face again in a moment.</string>
+    <string name="status_batch_queued_some">%1$d clips queued. %2$d photos were left out: batches are videos only.</string>
+    <string name="status_batch_images_only">Photos are swapped one at a time; the result is already on the pane.</string>
+    <string name="notif_batch_title">Swapping clips</string>
+    <string name="notif_batch_text">Clip %1$d of %2$d: %3$s</string>
+    <string name="notif_batch_channel">Batch swap</string>
+    <string name="opt_reference_distance">Match the chosen face</string>
+    <string name="opt_reference_distance_hint">Only used after tapping a face on the target. Higher matches more people; lower can stop matching the same person when they turn away.</string>
+    <string name="status_reference_set">Swapping this face only. Tap it again for all faces.</string>
+    <string name="status_reference_missed">No face at that point.</string>
+    <string name="status_reference_cleared">Swapping every face again.</string>
+    <string name="live_rec_start">Record</string>
+    <string name="live_rec_stop">Stop recording</string>
+    <string name="live_rec_badge">REC</string>
+    <string name="status_live_recording">Recording the live feed.</string>
+    <string name="status_live_rec_saved">Recording saved, %1$d frames.</string>
+    <string name="status_live_rec_empty">Nothing was recorded.</string>
+    <string name="live_lens_front">FRONT</string>
+    <string name="live_lens_back">BACK</string>
     <string name="live_faces">%1$d face(s)</string>
     <string name="live_no_face">no face</string>
     <string name="live_stop_to_change">Stop to change the source</string>
@@ -405,7 +460,7 @@
     <string name="live_fast_confirm_title">Turn off Fast mode?</string>
     <string name="live_fast_confirm_body">Fast mode is what makes the live feed watchable. It forces the settings a camera can keep up with:
 
-• face tracking ON — the detector runs on one frame in four
+• face tracking ON: the detector runs on one frame in four
 • face enhancer OFF
 • pixel boost 256 (no upscale)
 • lip sync OFF
@@ -432,4 +487,24 @@ Turning it off runs your own Swap settings instead. This is experimental: the en
     <string name="set_theme_follow_system">Following system</string>
     <string name="set_theme_desc_dark">Dark</string>
     <string name="set_theme_desc_light">Light</string>
+    <string name="live_mic">Microphone</string>
+    <string name="live_mic_on">Record microphone audio. Change before recording.</string>
+    <string name="live_mic_off">Video only. Microphone is off.</string>
+    <string name="live_mic_busy">Stop the voice recording before recording Live with the microphone.</string>
+    <string name="live_assign_title">Assign per person</string>
+    <string name="live_assign_off">Each face takes the selected source</string>
+    <string name="live_assign_on">Nothing changes until you tap a face</string>
+    <string name="live_assign_hint">Assign per person: select a source, then tap a face. Untapped faces keep their source.</string>
+    <string name="live_assign_set">Source %1$d assigned to this person</string>
+    <string name="live_assign_missed">No face — selection cleared</string>
+    <string name="live_assign_cleared">Assignments cleared</string>
+    <string name="live_assign_clear">Clear</string>
+    <string name="live_assign_count">%1$d assigned</string>
+    <string name="live_target_all">Swap all detected faces</string>
+    <string name="live_target_one">Swap largest face only</string>
+    <string name="live_target_locked">Locked while Assign per person is on</string>
+    <string name="live_assign_help">How Assign per person works</string>
+    <string name="live_assign_help_title">Assign per person</string>
+    <string name="live_assign_help_body">1. Turn the switch on. The feed keeps its current look.\n2. Select a source chip (Source 1, Source 2…).\n3. Tap the person who should have that source — they are now SELECTED (white box) and take that source right away.\n4. While they are selected, changing the chip changes THEM — you can try different sources on one person.\n5. For the next person, tap them (the selection moves), or tap empty space to DESELECT — the person keeps their last source and nothing can change them anymore.\n\nTapped people keep their source for the whole session. Untapped people keep the look from when the mode was switched on.\n\nClear removes all assignments. Turning the switch off goes back to the default behaviour (every face follows the chip).</string>
+    <string name="live_assign_help_gotit">Got it</string>
 </resources>

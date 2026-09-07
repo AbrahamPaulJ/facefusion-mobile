@@ -27,17 +27,29 @@ Ruhs. The pipeline, the models, and the option names, defaults and ranges are Fa
 - Falls back to the GPU and CPU on phones without a Qualcomm NPU. Same result, about four
   times the time per frame.
 - Shows the target frame and the swapped frame side by side before you commit to a run.
-- Trims the clip, drops the frame rate if you want it faster, and lets you cancel mid run.
+- Trims the clip, and under **Output settings** drops the frame rate or caps the size
+  (1080p, 720p, 480p) for a smaller file and a faster run. Any run can be cancelled.
 - **Fast video** (the gear on the `face_swapper` chip → Face detector): tracks the face
   between frames instead of finding it again every frame, for about 15% more speed. Off by
   default.
-- **Live**: the front camera, swapped, in real time. Fast mode forces the settings a camera
-  can keep up with; turning it off is experimental and asks first.
+- **Live**: the front or back camera, swapped, in real time, and you can record what it
+  shows. Enable **Microphone** before recording to include microphone audio in the MP4
+  (Android asks for permission); leave it off for silent video. The switch is locked while
+  recording and saving. Fast mode forces the settings a camera can keep up with; turning it
+  off is experimental and asks first.
+- **Assign per person** (Live): with more than one source face loaded, tap a person to give
+  them a specific source. They keep it for as long as they are in frame, while everyone
+  else follows whichever source is selected.
+- **Batch**: queue several clips and swap them all in one run, with one source face. Each
+  finished clip gets a thumbnail you can tap, and can be saved to your gallery as it lands.
+- **Pick the face**: tap a face on the target to swap only that person. The boxes appear on
+  their own when there is more than one face in the frame.
 - Takes its inputs from the camera and microphone as well as your files — shoot a source
   face, film a target, or record the voice that drives the lip syncer.
 - Saves to your gallery, or hands a still straight out of the preview.
 - Lip sync, optionally: redraws the mouth to match a voice you pick — a dub, a different
-  take, any audio or video file — at about 1-2 ms per frame on the NPU.
+  take, any audio or video file — at about 1-2 ms per frame on the NPU. Play the voice back
+  and trim it first, so only the part you want drives the mouth.
 - Speaks English, Русский, 简体中文 and 繁體中文.
 - Can be driven from a browser on your PC over the local network, if you turn that on.
 
@@ -127,9 +139,9 @@ you say otherwise.
 
 The app includes FaceFusion's content checker and it blocks. Flagged material is refused,
 with no output file and nothing shown. Every path that processes an image is checked: the
-source face, the target photo or video, the preview, the Live camera and the remote API. If
-the checker cannot run, for instance if its model is missing, the app refuses to process
-anything rather than continuing unchecked.
+source face, the target photo or video, the preview, the Live camera, every clip in a batch
+and the remote API. If the checker cannot run, for instance if its model is missing, the app
+refuses to process anything rather than continuing unchecked.
 
 **Do not use this on real people without their consent.** That is the main way software of
 this kind causes harm, and it is prohibited by the upstream licence.

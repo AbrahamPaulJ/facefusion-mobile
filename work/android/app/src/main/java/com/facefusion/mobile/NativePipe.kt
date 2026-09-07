@@ -28,7 +28,7 @@ object NativePipe {
         detectorScore: Float, landmarkerScore: Float,
         pixelBoost: Int, largestOnly: Boolean,
         faceEnhance: Boolean, enhanceBlend: Float,
-        lipSyncWeight: Float,
+        lipSyncWeight: Float, referenceDistance: Float,
     ): Boolean
 
     /** Load the pipeline with [opts] applied. */
@@ -38,7 +38,8 @@ object NativePipe {
                opts.weight, opts.maskBlur, opts.maskPadding.toIntArray(),
                opts.detectorScore, opts.landmarkerScore,
                opts.pixelBoost, opts.largestOnly,
-               opts.faceEnhance, opts.enhanceBlend, opts.lipSyncWeight)
+               opts.faceEnhance, opts.enhanceBlend, opts.lipSyncWeight,
+               opts.referenceDistance)
 
     /**
      * Tiers to skip at the next [init], comma-separated; "" clears.
@@ -75,7 +76,7 @@ object NativePipe {
         detectorScore: Float, landmarkerScore: Float,
         pixelBoost: Int, largestOnly: Boolean,
         faceEnhance: Boolean, enhanceBlend: Float,
-        lipSyncWeight: Float,
+        lipSyncWeight: Float, referenceDistance: Float,
     ): Boolean
 
     /** [setOptionsEx] from a [SwapOptions]. `swapper` and `outputFps` are not sent: the
@@ -84,7 +85,8 @@ object NativePipe {
         setOptionsEx(opts.weight, opts.maskBlur, opts.maskPadding.toIntArray(),
                      opts.detectorScore, opts.landmarkerScore,
                      opts.pixelBoost, opts.largestOnly,
-                     opts.faceEnhance, opts.enhanceBlend, opts.lipSyncWeight)
+                     opts.faceEnhance, opts.enhanceBlend, opts.lipSyncWeight,
+                     opts.referenceDistance)
 
     /**
      * The tier that LOADED and then would not execute, or "".
@@ -197,10 +199,96 @@ object NativePipe {
      */
     @JvmStatic external fun contentScore(bgr: ByteArray, w: Int, h: Int): Float
 
+    /**
+     * The faces in one BGR frame, as boxes: **five floats each** -- x0, y0, x1, y1, score,
+     * in the frame's own pixel coordinates.
+     *
+     * Detector only. No landmarks and no embeddings, so this answers "what is on screen"
+     * and nothing about identity; it costs one yoloface pass rather than that plus 3.55 ms
+     * per face. It touches no tracker state either, so calling it while a run is warm
+     * cannot move what the run depends on.
+     *
+     * Empty when there is no pipeline or the frame is the wrong size -- never null.
+     */
+    /**
+     * Resample a BGR frame, for the output-size cap.
+     *
+     * The same `resizeLinear` the pipeline uses elsewhere, so a capped run differs from an
+     * uncapped one only in the size of the picture. Null on a bad size.
+     */
+    @JvmStatic external fun resizeBgr(bgr: ByteArray, w: Int, h: Int,
+                                      dw: Int, dh: Int): ByteArray?
+
+    @JvmStatic external fun detectFaces(bgr: ByteArray, w: Int, h: Int): FloatArray
+
+    /**
+     * Remember the face at (x, y) -- in the frame's OWN pixel coordinates -- as the one to
+     * swap. Upstream's `face_selector_mode = reference`.
+     *
+     * Returns that face's box as four floats, or an EMPTY array when the point was inside
+     * no detected face. The box is how the UI shows which face was taken: "picked the
+     * wrong neighbour" and "picked nothing" look identical without it.
+     *
+     * Costs a full analyse, embeddings included -- once per tap, not per frame.
+     */
+    @JvmStatic external fun setReferenceFaceAt(bgr: ByteArray, w: Int, h: Int,
+                                               x: Float, y: Float): FloatArray
+
+    /** Forget the reference face: back to every face, or the largest if that is set. */
+    @JvmStatic external fun clearReferenceFace()
+
+    /** Whether a reference face is set. Survives an options change; init clears it. */
+    @JvmStatic external fun hasReferenceFace(): Boolean
+
     /** True when this tier had no fp32 gate context; see [ContentGate.QUANTISED_BIAS]. */
     @JvmStatic external fun contentGateIsQuantised(): Boolean
 
     @JvmStatic external fun setSource(bgr: ByteArray, w: Int, h: Int): Boolean
+    @JvmStatic external fun addSource(bgr: ByteArray, w: Int, h: Int): Int
+    @JvmStatic external fun setActiveSource(index: Int)
+    @JvmStatic external fun setSwapEnabled(enabled: Boolean)
+
+    /**
+     * The `one`-face selector (largest detected face) at runtime. The native side reads
+     * it per frame, so flipping it does NOT restart the pipeline -- a restart would tear
+     * down the pipeline and with it every face assignment of the live session.
+     */
+    @JvmStatic external fun setSwapLargestOnly(enabled: Boolean)
+
+    /**
+     * Live's per-person assignment mode. OFF is the default behaviour (active slot for
+     * every face); ON lets a face the user assigned keep its own source.
+     */
+    @JvmStatic external fun setFaceAssignEnabled(enabled: Boolean)
+
+    /**
+     * Queue a tap (DISPLAY bitmap coordinates -- the frame [LiveScreen] draws) for the
+     * next [liveFrame] to resolve against the PRE-SWAP detections: the embedding stored
+     * is the real person's, not the swapped frame on the display. The source chip
+     * selected at tap time is the one assigned.
+     */
+    @JvmStatic external fun requestFaceAssignment(x: Float, y: Float, source: Int)
+
+    /**
+     * The result of the last consumed request: FIVE floats -- x0, y0, x1, y1 and the
+     * source index -- in DISPLAY bitmap coordinates, so the overlay can draw it as-is;
+     * ONE float [-1] when the tap was consumed but landed on no face; EMPTY when nothing
+     * was consumed since the last read (a slow frame can keep a request in flight past
+     * any timeout, so "miss" is never guessed). Each result is returned exactly once.
+     */
+    @JvmStatic external fun takeAssignmentResult(): FloatArray
+
+    /** Forget every assignment of the current pipeline. */
+    @JvmStatic external fun clearFaceSourceAssignments()
+
+    /**
+     * The SELECTED person (assign mode): the last one tapped, who follows the source
+     * chip until an empty tap deselects them. FIVE floats -- x0, y0, x1, y1 and their
+     * current source -- in DISPLAY bitmap coordinates (moved from RAW by the scale the
+     * native side records per frame), or EMPTY when nobody is selected. A pure query,
+     * safe to poll every shot: it does not consume anything.
+     */
+    @JvmStatic external fun takeSelectionBox(): FloatArray
     /** Swaps every face in place; returns the face count, or -1 on error. */
     @JvmStatic external fun processFrame(bgr: ByteArray, w: Int, h: Int): Int
 
@@ -308,6 +396,14 @@ object NativePipe {
         w: Int, h: Int,
         bmp: android.graphics.Bitmap, dstW: Int, dstH: Int,
         gateThreshold: Float,
+        /**
+         * Where to copy the FULL-RESOLUTION swapped frame as BGR, or null.
+         *
+         * Non-null only while a recording is running (roadmap 13b). It must be exactly
+         * w*h*3 bytes; a wrong size is ignored rather than partly filled, because half a
+         * frame would be recorded as a torn picture instead of reported as a bug.
+         */
+        bgrOut: ByteArray?,
     ): Int
 
     @JvmStatic external fun lastError(): String

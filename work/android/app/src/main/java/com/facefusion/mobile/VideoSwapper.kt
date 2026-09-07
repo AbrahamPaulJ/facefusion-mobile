@@ -34,6 +34,14 @@ class VideoSwapper(
      * a swap is ~19 ms of NPU per frame, so the frames not kept are the frames not swapped.
      */
     private val outputFps: Int = 0,
+    /**
+     * Cap the output's SHORT EDGE in pixels. 0 keeps the source's size.
+     *
+     * Applied at DECODE, so it is a SPEED knob as much as a size one: detector prep and
+     * paste-back both scale with frame AREA, and 4K is ~9x the area of 1080p. It never
+     * enlarges -- a clip already under the cap is passed through untouched.
+     */
+    private val outputMaxShortEdge: Int = 0,
     private val trimStartUs: Long = 0L,
     private val trimEndUs: Long = Long.MAX_VALUE,
     private val onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
@@ -76,11 +84,21 @@ class VideoSwapper(
      * own reason for this feature is dubbing onto a DIFFERENT voice, not re-deriving the
      * one already there.
      *
-     * Decoded on ITS OWN timeline from sample 0, never the target's [trimStartUs] --
-     * the two clips are unrelated recordings and the target's trim has no meaning against
-     * a file that was never trimmed alongside it.
+     * Decoded on ITS OWN timeline, never the target's [trimStartUs] -- the two clips are
+     * unrelated recordings and the target's trim has no meaning against a file that was
+     * never trimmed alongside it. The voice's own trim (below) is the only range applied
+     * to it.
      */
     private val voicePath: String? = null,
+    /**
+     * The part of the VOICE the user kept, in its own timeline -- the audio equivalent of
+     * [trimStartUs]/[trimEndUs] on the target. Applied to both uses of the voice: the PCM
+     * that drives the mouth and the track copied into the output, so the viewer hears
+     * exactly the segment that was chosen, starting at 0 (see the copy loop's rebase).
+     * Defaults keep the whole file.
+     */
+    private val voiceTrimStartUs: Long = 0L,
+    private val voiceTrimEndUs: Long = Long.MAX_VALUE,
 ) {
 
     private var encTrack = -1
@@ -156,9 +174,24 @@ class VideoSwapper(
             }.getOrDefault(0)
         }.let { ((it % 360) + 360) % 360 }
 
-        // What everything downstream sees: 90 and 270 swap the axes.
-        val outW = if (rotation == 90 || rotation == 270) height else width
-        val outH = if (rotation == 90 || rotation == 270) width else height
+        // The upright frame, before any cap: 90 and 270 swap the axes.
+        val uprightW = if (rotation == 90 || rotation == 270) height else width
+        val uprightH = if (rotation == 90 || rotation == 270) width else height
+
+        // THE OUTPUT SIZE CAP, on the SHORT edge, so the aspect ratio is untouched and
+        // "720p" means the same thing for a portrait clip as for a landscape one.
+        //
+        // ⚠ Both axes are rounded to EVEN. 4:2:0 chroma is half-size in both directions and
+        // an odd edge has nowhere to put the last row -- the same rule upstream's
+        // normalize_resolution applies, and the same one the encoder alignment below is
+        // about.
+        val shortEdge = minOf(uprightW, uprightH)
+        val capped = outputMaxShortEdge in 1 until shortEdge
+        val outW = if (!capped) uprightW
+                   else ((uprightW.toLong() * outputMaxShortEdge / shortEdge).toInt()) and 1.inv()
+        val outH = if (!capped) uprightH
+                   else ((uprightH.toLong() * outputMaxShortEdge / shortEdge).toInt()) and 1.inv()
+        if (capped) onLog("output capped to ${outW}x$outH from ${uprightW}x$uprightH")
         val inFps = if (vf.containsKey(MediaFormat.KEY_FRAME_RATE))
             vf.getInteger(MediaFormat.KEY_FRAME_RATE) else 30
         // Never above the input: duplicating frames would cost a full swap each and add
@@ -183,7 +216,8 @@ class VideoSwapper(
         // so up front instead of half way through.
         var syncing = false
         if (lipSync && NativePipe.hasLipSyncer()) {
-            val pcm = if (voicePath != null) AudioDecoder.decode(voicePath)
+            val pcm = if (voicePath != null)
+                          AudioDecoder.decode(voicePath, voiceTrimStartUs, voiceTrimEndUs)
                       else AudioDecoder.decode(inputPath, trimStartUs, trimEndUs)
             when {
                 pcm == null || pcm.frames == 0 ->
@@ -262,12 +296,14 @@ class VideoSwapper(
         var muxAudio = -1
         var muxing = false
         // A separate voice file has its OWN timeline, unrelated to the target's trim -- take
-        // it from its own start, capped at the video's post-trim LENGTH so a longer voice
-        // file does not produce an audio track past where the video ends.  Hoisted out of
-        // the copy-through below because the transcode fallback has to agree with it: the
-        // two must not disagree about which span of audio the output carries.
-        val copyStartUs = if (voicePath != null) 0L else trimStartUs
-        val copyEndUs = if (voicePath != null) spanUs else trimEndUs
+        // the user's chosen [voiceTrimStartUs, voiceTrimEndUs] segment, capped at the
+        // video's post-trim LENGTH so a voice longer than the clip does not produce an
+        // audio track past where the video ends.  Hoisted out of the copy-through below
+        // because the transcode fallback has to agree with it: the two must not disagree
+        // about which span of audio the output carries.
+        val copyStartUs = if (voicePath != null) voiceTrimStartUs else trimStartUs
+        val copyEndUs = if (voicePath != null)
+            minOf(voiceTrimEndUs, voiceTrimStartUs + spanUs) else trimEndUs
         // Non-null only when the pass-through was refused and a transcode replaced it.
         var aacPackets: List<AacPacket>? = null
         // Audio is PASS-THROUGH, and the MP4 muxer accepts a strictly narrower set of codecs
@@ -392,8 +428,15 @@ class VideoSwapper(
                         // preview, the encoder -- works on the frame the viewer will see.
                         val decoded = imageToBgr(image, width, height)
                         image.close()
-                        val bgr = if (rotation == 0) decoded
-                                  else NativePipe.rotateBgr(decoded, width, height, rotation)
+                        val upright = if (rotation == 0) decoded
+                                      else NativePipe.rotateBgr(decoded, width, height, rotation)
+                        // Downscale BEFORE anything looks at the frame, so the detector,
+                        // the swap and the paste all work at the smaller size. Resizing at
+                        // encode time instead would shrink the file and save nothing else.
+                        val bgr = if (!capped) upright
+                                  else NativePipe.resizeBgr(upright, uprightW, uprightH,
+                                                            outW, outH)
+                                      ?: error("resize to ${outW}x$outH failed")
                         // `swapped` is the OUTPUT frame index: it counts frames written,
                         // so it already accounts for the ones decimation dropped.
                         val faces = NativePipe.processFrameAt(bgr, outW, outH,

@@ -65,6 +65,19 @@ struct Config {
   // --face-selector-mode, reduced to the two that need no reference-face UI.
   // false = `many`, every detected face; true = `one`, the largest by box area.
   bool swapLargestOnly = false;
+  bool swapEnabled = true;
+
+  // --reference-face-distance, upstream's default. The comparison is upstream's too, in
+  // face_selector.py:compare_faces:
+  //
+  //     d = 1 - dot(embedding_norm, reference.embedding_norm)   // 0..2
+  //     d = interp(d, [0, 2], [0, 1])                           // i.e. d / 2
+  //     match = d < reference_face_distance
+  //
+  // So 0.3 accepts everything with cosine similarity above 0.4. Raising it swaps more
+  // faces including the wrong ones; lowering it eventually matches nobody, which on a
+  // clip where the reference was picked from one frame is the failure to expect.
+  float referenceDistance = 0.3f;
   // hyperswap: 256, mean/std 0.5, denormalise.  inswapper: 128, mean 0/std 1, no denorm.
   int swapSize = 256;
   float swapMean = 0.5f, swapStd = 0.5f;
@@ -184,7 +197,19 @@ class Pipeline {
   bool hasEnhancer() const;
 
   // Every face in one frame, fully analysed (detector + landmarker + recogniser).
-  std::vector<Face> analyse(const ffcv::Image& frame);
+  //
+  // `boxesOnly` stops after the detector: box, detector landmark5 and score are filled,
+  // landmark68 / landmark5_68 / embedding are NOT. It is the UI's question -- "which faces
+  // are in this frame" -- and it costs one yoloface pass instead of yoloface plus 3.55 ms
+  // per face. It also touches no tracker state, so it is safe to call while a run is warm.
+  //
+  // `noTrack` forbids BOTH uses of the tracker: the box is never reconstructed from a
+  // previous frame, and the tracker is never updated from this one. Source images are the
+  // one caller that needs it -- a photo of a different face at a different scale must not
+  // inherit (or reseed) the live tracker's geometry -- and it is what makes setSource /
+  // addSource safe to call while a live pump is configured for tracking.
+  std::vector<Face> analyse(const ffcv::Image& frame, bool boxesOnly = false,
+                            bool noTrack = false);
 
   // The source identity: the largest face of the source image, embedding only.
   // Detector tracking, in FRAMES between real detections. 0 disables it.
@@ -196,6 +221,97 @@ class Pipeline {
   void setTrackPeriod(int frames);
 
   bool setSource(const ffcv::Image& sourceImage);
+  int addSource(const ffcv::Image& sourceImage);
+  void clearSourceSlots();
+  void setActiveSource(int index);
+  bool setFaceSourceAt(const ffcv::Image& frame, float x, float y, int sourceIndex,
+                       bool disabled, float* outBox);
+  void clearFaceSourceAssignments();
+
+  /**
+   * Live's per-person assignment mode. When ON, a face the user tapped KEEPS its
+   * source for as long as it is in frame -- the decision is made once, at the tap, and
+   * never re-scored against per-frame embedding noise (that re-scoring is what made
+   * the old per-frame distance match flicker between sources). Untapped faces keep
+   * the source that was active when the mode was switched on -- the chip is a BRUSH
+   * while the mode is on, and changing it changes nothing on the feed until a face is
+   * tapped.
+   *
+   * Disabled is the default behaviour -- every face uses the active slot -- and it is
+   * the switch the user asked for: off means nothing about a session changes.
+   */
+  void setFaceAssignEnabled(bool enabled);
+
+  /**
+   * Record that [f] -- a face of a LIVE frame, embedding included -- belongs to
+   * [sourceIndex]. Called from liveFrame against the PRE-SWAP detections, so the
+   * identity stored is the real person's, not the swapped result the display shows.
+   */
+  bool addFaceAssignment(const Face& f, int sourceIndex);
+
+  /**
+   * Live assign mode's per-frame bookkeeping. Call ONCE per frame, right after
+   * analyse() and before swapAll() -- it is what makes an assignment sticky.
+   *
+   * Associates this frame's faces with the people it is tracking (box overlap, with an
+   * embedding fallback for fast moves -- never a re-scoring of the assignments), pins
+   * the face the user just tapped to [tapSource] so the swap on THIS frame already
+   * applies it, and fills the per-face source table swapAll() reads. A face with no
+   * pin keeps following the active slot.
+   *
+   * [tapX]/[tapY] are in RAW frame coordinates; pass tapSource = -1 when there is no
+   * tap. When a tap is given and hits a face, returns true and fills [outTapBox] with
+   * that face's raw box so the caller can draw the confirmation. A tap that misses a
+   * face still runs the tracking -- the per-face table must stay valid -- and returns
+   * false.
+   */
+  bool updateLiveTracking(const std::vector<Face>& faces,
+                          float tapX, float tapY, int tapSource, float* outTapBox);
+
+  /**
+   * The SELECTED person (assign mode): the last one tapped, who follows the source
+   * chip until an empty tap deselects them. Copies their current box (RAW frame
+   * coordinates) into [out] and their source into [outSource]; false when nobody is
+   * selected or the person is no longer tracked. The box moves with the person, so the
+   * UI can draw a persistent highlight over them.
+   */
+  bool selectedFaceBox(float* out, int* outSource) const;
+
+  /**
+   * Remember the face at (x, y) in [frame] as the one to swap -- upstream's
+   * `face_selector_mode = reference`.
+   *
+   * Returns false when no detected face contains that point, and fills `outBox` with the
+   * chosen face's box when it returns true, so the UI can show WHICH face it took.
+   *
+   * ⚠ The reference lives on the pipeline, NOT in Config. Config is copied field by field
+   * by updateConfig on every options change, and a 512-float identity riding in it would
+   * be one careless `p_->cfg = c` away from being cleared -- or, worse, from being
+   * half-copied. Keeping it here means an options change cannot touch it and a selector
+   * that is set stays set until something explicitly clears it.
+   */
+  bool setReferenceFaceAt(const ffcv::Image& frame, float x, float y, float* outBox);
+
+  /**
+   * Set the reference identity directly, from an embedding already chosen.
+   *
+   * ⚠ Exists because init() builds a NEW Pipeline, so a reference picked in the preview is
+   * destroyed by the very run that should honour it -- the tap would appear to work and the
+   * exported video would swap every face. The JNI layer keeps the embedding and re-applies
+   * it after every init, the same way `skipVariants` is pushed rather than passed.
+   *
+   * [e] is 512 floats, ALREADY L2-normalised: it is compared with a dot product and
+   * normalising twice would quietly change the distance.
+   */
+  void setReferenceEmbedding(const float* e);
+
+  /** The reference embedding into [out] (512 floats). False when none is set. */
+  bool referenceEmbedding(float* out) const;
+
+  /** Forget it: back to `many`, or to `one` if swapLargestOnly is set. */
+  void clearReferenceFace();
+
+  bool hasReferenceFace() const;
 
   /**
    * Take the clip's audio once, and hold one 80x16 mel window per video frame.
@@ -247,6 +363,15 @@ class Pipeline {
   // Swap every face in `frame`, in place. Never enhances -- see `enhance()`, always
   // called separately now, after `syncLip` when the caller has one.
   bool swapAll(ffcv::Image& frame, const std::vector<Face>& faces);
+  void setSwapEnabled(bool enabled);
+
+  /**
+   * The `one`-face selector (largest detected face) at runtime, WITHOUT a pipeline
+   * restart. swapAll and enhance both read cfg.swapLargestOnly per frame, so a live
+   * switch can flip it directly -- restarting instead would tear down the pipeline and
+   * with it every face assignment of the session.
+   */
+  void setSwapLargestOnly(bool enabled);
 
   /**
    * The enhancer, as its OWN pass -- ALWAYS called separately, never fused into

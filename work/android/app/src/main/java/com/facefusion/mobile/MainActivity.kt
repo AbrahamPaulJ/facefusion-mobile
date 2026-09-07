@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
@@ -41,8 +42,13 @@ import androidx.compose.ui.res.stringResource
  */
 class MainActivity : ComponentActivity() {
 
+    private data class LiveSource(val uri: Uri, val thumb: Bitmap)
+
     private var sourceUri by mutableStateOf<Uri?>(null)
     private var sourceThumb by mutableStateOf<Bitmap?>(null)
+    private var liveSources by mutableStateOf<List<LiveSource>>(emptyList())
+    private var liveSourceIndex by mutableIntStateOf(0)
+    private var liveLargestOnly by mutableStateOf(false)
     private var targetFile by mutableStateOf<File?>(null)
     private var targetName by mutableStateOf<String?>(null)
 
@@ -54,6 +60,20 @@ class MainActivity : ComponentActivity() {
      */
     private var voiceFile by mutableStateOf<File?>(null)
     private var voiceName by mutableStateOf<String?>(null)
+    /** The loaded voice's full length, ms. 0 until a file is loaded. */
+    private var voiceDurationMs by mutableStateOf(0L)
+    /**
+     * The part of the voice that DRIVES the lips, ms -- the audio equivalent of
+     * [trimStartMs]/[trimEndMs]. Only this range is decoded for the mouth and copied into
+     * the output's audio track. Reset to the whole file when a voice is loaded.
+     */
+    private var voiceTrimStartMs by mutableStateOf(0f)
+    private var voiceTrimEndMs by mutableStateOf(0f)
+    /** Playback of the loaded voice: where the playhead is, and whether it is running. */
+    private var voicePosMs by mutableStateOf(0f)
+    private var voicePlaying by mutableStateOf(false)
+    private var voicePlayer: android.media.MediaPlayer? = null
+    private var voicePollJob: kotlinx.coroutines.Job? = null
     /** True while the microphone is capturing a driving voice. */
     private var recordingVoice by mutableStateOf(false)
 
@@ -152,11 +172,110 @@ class MainActivity : ComponentActivity() {
     private var liveFps by mutableStateOf(0.0)
     private var liveFaces by mutableStateOf(0)
     private var liveNote by mutableStateOf<String?>(null)
+    /**
+     * Whether the detector's boxes are drawn over the ORIGINAL pane, and what they are.
+     *
+     * Off by default: rectangles over every preview change how the app looks for everyone
+     * in order to answer a question most sessions never ask. While it is ON, every new
+     * original frame costs one yoloface pass (~2 ms) and no identity work at all.
+     */
+    private var showFaceBoxes by mutableStateOf(false)
+
+    /**
+     * The [targetVersion] the overlay has already decided about.
+     *
+     * The decision is "does this clip hold more than one face", and it is made ONCE per
+     * target. Without the marker the next preview frame would re-decide and switch the
+     * overlay back on for a user who had just turned it off.
+     */
+    private var autoBoxTarget by mutableStateOf(-1)
+    private var faceBoxes by mutableStateOf<FloatArray?>(null)
+
+    /**
+     * The frame [faceBoxes] were computed FROM, by identity.
+     *
+     * ⚠ Without this the boxes outlive their frame. A finished run releases the pipeline, so
+     * the detection effect early-returns on `!previewWarm` -- and the old frame's rectangles
+     * stayed on screen over the new frame until the re-warm finished. Reported as "after
+     * swap output the ORIGINAL frame has changed and boxes are misaligned", which is exactly
+     * what it was: right boxes, wrong frame.
+     */
+    private var faceBoxFrame: Bitmap? = null
+
+    /**
+     * The face chosen to swap, as its box -- upstream's `face_selector_mode = reference`.
+     *
+     * The IDENTITY lives natively (see `Pipeline::setReferenceFaceAt`); this is only what
+     * to draw. Kept as a box rather than an index because the boxes are recomputed on every
+     * new frame and an index would silently come to mean a different face.
+     */
+    private var referenceBox by mutableStateOf<FloatArray?>(null)
+
+    /** A queue row whose render would be lost; see [removeFromBatch]. */
+    private var confirmBatchDelete by mutableStateOf<Int?>(null)
+
+    /**
+     * The targets waiting behind the visible one -- roadmap 14.
+     *
+     * ONE SOURCE, MANY TARGETS. That is the whole mode, and it is the shape the warm
+     * pipeline already has: setSource is called once and every target reuses it, so a
+     * twelve-clip batch pays for the models and the identity once rather than twelve
+     * times. Many sources against one target would be a comparison sheet nobody asked
+     * for, and the cartesian product of both is a way to fill a phone by accident.
+     *
+     * ⚠ The visible target is NOT in here. It is targetFile, exactly as it has always
+     * been, so every pane, the trim slider and the frame-rate row keep working on the one
+     * clip they were written for. The queue is what happens AFTER it.
+     */
+    private var batchQueue by mutableStateOf<List<BatchItem>>(emptyList())
+
+    /**
+     * Which lens Live uses. In memory only, deliberately: it is not a [SwapOptions] field
+     * -- nothing about it reaches the pipeline -- and a camera choice that survived a
+     * restart would be a surprise on an app that opens on the Swap tab.
+     */
+    private var liveFrontCamera by mutableStateOf(true)
+
+    /** The Live recording in flight, and whether the UI should say so -- roadmap 13b. */
+    private var liveRecorder: LiveRecorder? = null
+    private var liveRecording by mutableStateOf(false)
+    private var liveMicrophone by mutableStateOf(false)
+    private var liveFinalizing by mutableStateOf(false)
+
     // ⚠ Compose state, NOT live.isRunning. A plain field on the engine is invisible to
     // recomposition, so the first build showed a running feed under a button still saying
     // "Start" -- the pixels updated because the bitmap reference changed and nothing else
     // did.
     private var liveRunning by mutableStateOf(false)
+    private var liveSwapEnabled by mutableStateOf(true)
+    /**
+     * Assign-per-person mode (Live): when ON, a tap on the feed gives the selected source
+     * chip to that face, and the face keeps it for the rest of the session. OFF is the
+     * default behaviour -- every face takes the active slot. In memory only, like the
+     * other Live switches: it is a property of this screen, not of a swap.
+     */
+    private var liveAssignMode by mutableStateOf(false)
+    /**
+     * The last face assigned, as the box+source liveFrame returned (x0,y0,x1,y1,source,
+     * DISPLAY bitmap coordinates), for the overlay to confirm the tap. [liveAssignNonce]
+     * changes with it so LiveScreen can retime its fade.
+     */
+    private var liveAssignBox by mutableStateOf<FloatArray?>(null)
+    private var liveAssignNonce by mutableIntStateOf(0)
+    private var liveAssignCount by mutableIntStateOf(0)
+    /**
+     * The SELECTED person (assign mode): x0, y0, x1, y1, source -- DISPLAY bitmap
+     * coordinates -- polled every shot, so the highlight follows the person. Null when
+     * nobody is selected (or assign mode is off). The native side owns the selection:
+     * tapping a face selects it, tapping empty space deselects it, and a selected
+     * person follows the source chip.
+     */
+    private var liveSelectionBox by mutableStateOf<FloatArray?>(null)
+    /**
+     * A tap is in flight: the next liveFrame consumes it and the shot callback takes the
+     * result. Pending until taken; a consumed-but-empty result is a miss, never guessed.
+     */
+    private var assignTapPending = false
     // Off = the forced fast preset. Kept out of SwapOptions on purpose: it is a property of
     // this screen, not of a swap, and persisting it would let a Live choice change what a
     // file run does.
@@ -230,6 +349,27 @@ class MainActivity : ComponentActivity() {
     private var inputFps by mutableStateOf(30)
 
     /**
+     * The target's own pixel size, UPRIGHT. 0 until a video is loaded.
+     *
+     * The output-size control offers only sizes below the clip's own, the same way the
+     * frame-rate control offers only lower rates -- so it needs the clip's short edge, and
+     * `targetAspect` alone cannot give it (a ratio says nothing about how many pixels).
+     */
+    /**
+     * Decode caps, long edge in pixels. See [decodeOriented].
+     *
+     * A SOURCE is only ever an identity -- 112 for the recogniser, 256 for the swapper --
+     * so 2048 is already far more than the models can use. A photo TARGET is the OUTPUT, so
+     * it keeps four times the area; 4096 is a 12 MP result, which is more than a phone
+     * screen or a message will ever show and still fits in memory four times over.
+     */
+    private val MAX_SOURCE_EDGE = 2048
+    private val MAX_TARGET_EDGE = 4096
+
+    private var targetW by mutableStateOf(0)
+    private var targetH by mutableStateOf(0)
+
+    /**
      * The trim handle the previews are following.
      *
      * Both panes used to show the start frame unconditionally, so dragging the END handle
@@ -299,12 +439,53 @@ class MainActivity : ComponentActivity() {
     private fun setSourceFrom(uri: Uri) {
         sourceUri = uri
         sourceThumb = decodeOriented(uri)
+        sourceThumb?.let { thumb ->
+            if (liveSources.none { it.uri == uri }) liveSources = liveSources + LiveSource(uri, thumb)
+            liveSourceIndex = liveSources.indexOfFirst { it.uri == uri }.coerceAtLeast(0)
+        }
         // A different face means the loaded pipeline is holding the wrong embedding.
         previewOptionsChanged()
     }
 
     private val pickSource = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) setSourceFrom(uri)
+    }
+
+    private val pickLiveSources = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) addLiveSource(uri)
+    }
+
+    private fun pickLiveSource() = pickLiveSources.launch("image/*")
+
+    private fun addLiveSource(uri: Uri) {
+        // ONE decode, two uses: the thumbnail stored for the pane and the pixels handed
+        // to the pipeline are the same image -- a second decode is a full-size allocation
+        // that produces nothing new.
+        val bmp = decodeOriented(uri) ?: return
+        val soft = bmp.asArgb8888()
+        val px = IntArray(soft.width * soft.height)
+        soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
+        val bgr = NativePipe.argbToBgr(px, soft.width, soft.height)
+
+        // While the pump is running, the native slots must stay aligned with this list,
+        // so the new face is registered at the same index the chip will show. Not running,
+        // there is no live pipeline to add to -- startLive registers the whole list.
+        if (liveRunning) NativePipe.addSource(bgr, soft.width, soft.height)
+
+        liveSources = liveSources + LiveSource(uri, bmp)
+        liveSourceIndex = liveSources.lastIndex
+    }
+
+    private fun selectLiveSource(index: Int) {
+        if (index !in liveSources.indices || index == liveSourceIndex) return
+        liveSourceIndex = index
+        if (liveRunning) NativePipe.setActiveSource(index)
+    }
+
+    private fun clearLiveSource() {
+        if (liveRunning || liveSources.isEmpty()) return
+        liveSources = liveSources.filterIndexed { i, _ -> i != liveSourceIndex }
+        liveSourceIndex = liveSourceIndex.coerceAtMost(liveSources.lastIndex.coerceAtLeast(0))
     }
 
     private val takeSourcePhoto = registerForActivityResult(
@@ -378,10 +559,101 @@ class MainActivity : ComponentActivity() {
 
     // OpenDocument rather than GetContent: GetContent takes ONE mime filter, and the
     // target can now be a video or a still.
+    /**
+     * The target picker, which is also the BATCH picker.
+     *
+     * OpenMultipleDocuments rather than OpenDocument, deliberately: picking one file
+     * behaves exactly as it always did, and picking several queues the rest. There is no
+     * separate "batch mode" control to find, because selecting twelve clips is already an
+     * unambiguous statement that you want twelve clips done -- the app just has to stop
+     * throwing eleven of them away.
+     *
+     * The FIRST goes through loadTarget as the visible target, so the panes, the trim and
+     * the frame rate all behave as before; the rest are queue entries and nothing more.
+     */
     private val pickTarget = registerForActivityResult(
-        ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) loadTarget(uri)
+        ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNullOrEmpty()) return@registerForActivityResult
+        // How many came back, in the log: "I picked several and got one clip" and "I picked
+        // one" are the same screen afterwards, and only this line tells them apart.
+        android.util.Log.i("ffbatch", "picker returned " + uris.size + " uri(s)")
+        batchQueue = emptyList()
+        loadTarget(uris.first())
+        // ⚠ VIDEOS ONLY, and the first pick decides whether there is a queue at all.
+        //
+        // A still target has no Swap button -- the pane already IS the result -- so a queue
+        // behind one would be a list with no way to start it. And runBatch drives
+        // VideoSwapper, which has nothing to do with a photo. Both are real limits rather
+        // than oversights, so the picker enforces them here instead of letting the run fail
+        // per item with "cannot read".
+        val images = uris.count {
+            contentResolver.getType(it)?.startsWith("image/") == true
+        }
+        val videos = uris.filter {
+            contentResolver.getType(it)?.startsWith("image/") != true
+        }
+        if (images > 0 && videos.size < 2) {
+            // Nothing to queue: either the visible target is the still, or every other pick
+            // was one. The single-target flow is exactly right for that.
+            if (images == uris.size) status = getString(R.string.status_batch_images_only)
+            return@registerForActivityResult
+        }
+        if (uris.size > 1) {
+            // ⚠ INCLUDING the first. The queue holds every item with the visible target at
+            // index 0, from the pick until the run ends -- one representation, so the UI
+            // and the runner cannot disagree about whether item one is in the list. The
+            // first version kept it out and had both of them add it back, which drew the
+            // visible clip twice.
+            batchQueue = videos.map {
+                BatchItem(it, displayName(it) ?: getString(R.string.batch_unnamed_clip))
+            }
+            status = if (images > 0)
+                         getString(R.string.status_batch_queued_some, videos.size, images)
+                     else getString(R.string.status_batch_queued, videos.size)
+        }
     }
+    /**
+     * Add clips to the queue WITHOUT disturbing the visible target -- roadmap 14.
+     *
+     * ⚠ This exists because the field report was "i didnt see any batch processing from ui
+     * side". The design was that picking several files IS the batch, with no control to
+     * find; that is still true and still works, but it is invisible -- SAF needs a
+     * long-press before a second file can be selected at all, so a user who does not
+     * already know the feature exists has no way to discover it. A named button is how
+     * they find out the queue is there; multi-select stays as the fast path.
+     */
+    private val pickMoreTargets = registerForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNullOrEmpty()) return@registerForActivityResult
+        val tgt = targetFile ?: return@registerForActivityResult
+        val videos = uris.filter {
+            contentResolver.getType(it)?.startsWith("image/") != true
+        }
+        if (videos.isEmpty()) {
+            status = getString(R.string.status_batch_images_only)
+            return@registerForActivityResult
+        }
+        // Seed index 0 with the VISIBLE target the first time, so the queue keeps its one
+        // representation: item 0 is always the clip on screen. runBatch reads targetFile
+        // for that item rather than this URI, so a cache path here would be equivalent.
+        val head = if (batchQueue.isEmpty())
+                       listOf(BatchItem(Uri.fromFile(tgt), targetName ?: tgt.name))
+                   else batchQueue
+        // ⚠ Not the same clip twice. Adding a file that is already queued produced a second
+        // row with the same name that swapped the same video again into a second output --
+        // twice the wait for one result, and two rows nobody could tell apart.
+        val already = head.map { it.uri }.toSet()
+        val fresh = videos.filterNot { it in already }
+        if (fresh.isEmpty()) {
+            status = getString(R.string.status_batch_already_queued)
+            return@registerForActivityResult
+        }
+        batchQueue = head + fresh.map {
+            BatchItem(it, displayName(it) ?: getString(R.string.batch_unnamed_clip))
+        }
+        status = getString(R.string.status_batch_queued, batchQueue.size)
+    }
+
     // Audio or video -- upstream's own `source_paths` takes either and reads whichever
     // track is there, so a dubbed line saved as a short video should not be rejected for
     // carrying pixels it will never use.
@@ -418,20 +690,51 @@ class MainActivity : ComponentActivity() {
      * with getPixels, and a hardware bitmap has no pixel array to read. It throws rather
      * than returning null on a bad file, hence runCatching.
      */
-    private fun decodeOriented(uri: Uri): Bitmap? = runCatching {
-        ImageDecoder.decodeBitmap(ImageDecoder.createSource(contentResolver, uri)) { d, _, _ ->
+    /**
+     * ⚠ AND IT IS CAPPED, which is not an optimisation -- it is why the app survives a
+     * camera photo at all.
+     *
+     * Reported as "freezes and crashes on SOME photos" on an 8 Elite Gen 5. Nothing here
+     * limited the decode, and a flagship shoots 50 MP (8160x6144) or 200 MP. At 50 MP one
+     * photo asks for, in order: a 200 MB ARGB_8888 bitmap, a 200 MB `copy` for the gate, a
+     * 200 MB IntArray for getPixels, and a 150 MB BGR buffer. ~750 MB against an app heap
+     * that is typically 256-512 MB, so it dies -- and thrashes the collector on the way,
+     * which is the freeze that precedes it. A 12 MP shot needs ~48 MB and lives, which is
+     * exactly why it was "some photos".
+     *
+     * setTargetSampleSize decodes SMALLER rather than decoding and shrinking, so the full
+     * bitmap is never allocated. Powers of two only, which is what the decoders do natively
+     * and therefore free.
+     *
+     * The caps differ because the two uses differ. A SOURCE is an identity: it is warped to
+     * 112 for the recogniser and 256 for the swapper, so pixels beyond ~2048 on the long
+     * edge are thrown away untouched. A photo TARGET is the output -- what is capped here
+     * is what gets saved -- so it keeps four times the area, which still leaves a 12 MP
+     * result and a working phone.
+     */
+    private fun decodeOriented(uri: Uri, maxEdge: Int = MAX_SOURCE_EDGE): Bitmap? = runCatching {
+        ImageDecoder.decodeBitmap(ImageDecoder.createSource(contentResolver, uri)) { d, info, _ ->
             d.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
             d.isMutableRequired = true
+            sampleFor(info.size.width, info.size.height, maxEdge)?.let { d.setTargetSampleSize(it) }
         }
     }.getOrNull()
 
     /** As above, for a file the selftest pushed rather than a picked Uri. */
-    private fun decodeOriented(file: File): Bitmap? = runCatching {
-        ImageDecoder.decodeBitmap(ImageDecoder.createSource(file)) { d, _, _ ->
+    private fun decodeOriented(file: File, maxEdge: Int = MAX_SOURCE_EDGE): Bitmap? = runCatching {
+        ImageDecoder.decodeBitmap(ImageDecoder.createSource(file)) { d, info, _ ->
             d.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
             d.isMutableRequired = true
+            sampleFor(info.size.width, info.size.height, maxEdge)?.let { d.setTargetSampleSize(it) }
         }
     }.getOrNull()
+
+    /** The power-of-two subsample that brings the long edge under [maxEdge]; null for none. */
+    private fun sampleFor(w: Int, h: Int, maxEdge: Int): Int? {
+        var s = 1
+        while (maxOf(w, h) / s > maxEdge) s *= 2
+        return if (s > 1) s else null
+    }
 
     /**
      * The fp16 canary pair, unpacked out of assets.
@@ -668,6 +971,59 @@ class MainActivity : ComponentActivity() {
                 // a stale frame filled the pane instead. Now that a target change keeps the
                 // pipeline (see clearPreviewFrames), this is what draws the new target, and
                 // the guard would have left the pane empty.
+                // WHAT THE DETECTOR SEES.
+                //
+                // `previewWarm` is the precondition that matters: detectFaces goes straight
+                // at the shared g_pipe, so it must not be asked while a run owns it --
+                // `busy` covers that, and PipeGuard covers the API.
+                //
+                // ⚠ It also runs ONCE PER TARGET while the overlay is OFF, to answer "is
+                // there more than one face here". That question cannot be answered by the
+                // switch's initial value, because the detector has to have run first -- and
+                // it is exactly the question the user has when a second face is on screen.
+                // One yoloface pass, ~2 ms, and no identity work at all.
+                LaunchedEffect(originalFrame, showFaceBoxes, previewWarm, busy,
+                               targetVersion) {
+                    val frame = originalFrame
+                    // The boxes belong to ONE frame. The moment the frame changes they are
+                    // wrong, and being wrong on screen is worse than being absent -- so they
+                    // go immediately, before anything below decides whether to recompute.
+                    if (faceBoxFrame !== frame) {
+                        faceBoxes = null
+                        faceBoxFrame = null
+                    }
+                    val decide = autoBoxTarget != targetVersion
+                    if (frame == null || !previewWarm || busy ||
+                        (!showFaceBoxes && !decide)) {
+                        if (!showFaceBoxes && !decide) faceBoxes = null
+                        return@LaunchedEffect
+                    }
+                    val found = withContext(Dispatchers.Default) {
+                        runCatching {
+                            val soft = frame.asArgb8888()
+                                ?: return@runCatching null
+                            val px = IntArray(soft.width * soft.height)
+                            soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
+                            NativePipe.detectFaces(
+                                NativePipe.argbToBgr(px, soft.width, soft.height),
+                                soft.width, soft.height)
+                        }.getOrNull()
+                    }
+                    if (decide) {
+                        // Once per target, whatever the answer: a user who turns the
+                        // overlay back off must not have it turned on again by the next
+                        // preview frame of the same clip.
+                        autoBoxTarget = targetVersion
+                        if ((found?.size ?: 0) >= 10) {
+                            showFaceBoxes = true
+                            status = getString(R.string.status_faces_found,
+                                               (found?.size ?: 0) / 5)
+                        }
+                    }
+                    faceBoxes = if (showFaceBoxes) found else null
+                    faceBoxFrame = frame
+                }
+
                 LaunchedEffect(sourceUri, targetVersion, modelsMissing) {
                     android.util.Log.d("ffpreview", "autowarm fired: src=" +
                         (sourceUri != null) + " tgt=" +
@@ -706,6 +1062,8 @@ class MainActivity : ComponentActivity() {
                                 onTrimChange = ::onTrimChanged,
                                 targetAspect = targetAspect,
                                 inputFps = inputFps,
+                                targetW = targetW,
+                                targetH = targetH,
                                 fmt = ::fmt,
                                 preview = PreviewUi(
                                     original = originalFrame,
@@ -721,6 +1079,8 @@ class MainActivity : ComponentActivity() {
                                     warm = previewWarm,
                                     busy = previewBusy,
                                     note = previewNote,
+                                    faceBoxes = if (showFaceBoxes) faceBoxes else null,
+                                    referenceBox = if (showFaceBoxes) referenceBox else null,
                                 ),
                                 run = RunUi(busy, preparing, progress, framesDone,
                                             framesTotal, elapsedS),
@@ -735,6 +1095,15 @@ class MainActivity : ComponentActivity() {
                                 onRequestModel = { label, model ->
                                     confirmModel = label to model
                                 },
+                                showFaceBoxes = showFaceBoxes,
+                                onToggleFaceBoxes = {
+                                    showFaceBoxes = !showFaceBoxes
+                                    // Drop the old answer with the switch. Keeping it would
+                                    // redraw the PREVIOUS frame's boxes over the current one
+                                    // for as long as detection takes.
+                                    faceBoxes = null
+                                },
+                                onPickFace = ::pickReferenceFace,
                                 openCard = openCard,
                                 onToggleCard = { k -> openCard = if (openCard == k) "" else k },
                                 // A still needs no run, so it has no output FILE -- what
@@ -759,11 +1128,72 @@ class MainActivity : ComponentActivity() {
                                 onDeleteOutput = ::discardOutput,
                                 hasVoice = voiceFile != null,
                                 voiceName = voiceName,
+                                voiceDurationMs = voiceDurationMs,
+                                voiceTrimStartMs = voiceTrimStartMs,
+                                voiceTrimEndMs = voiceTrimEndMs,
+                                onVoiceTrimChange = ::onVoiceTrimChanged,
+                                voicePosMs = voicePosMs,
+                                voicePlaying = voicePlaying,
+                                onVoicePlayPause = ::toggleVoicePlayback,
+                                onVoiceSeek = ::onVoiceSeek,
                                 onPickVoice = { pickVoice.launch(arrayOf("audio/*", "video/*")) },
                                 onClearVoice = ::clearVoice,
                                 recordingVoice = recordingVoice,
                                 onToggleRecordVoice = ::toggleVoiceRecording,
-                                onSwap = { runSwap() },
+                                // ONE button. A queue of one is a single run, and the
+                                // batch runner would only add a loop around it -- and its
+                                // own trim rule, which the single case must keep.
+                                onSwap = {
+                                    // ⚠ size > 1, not isEmpty. A queue of exactly one is
+                                    // the ordinary single-clip run and must keep its TRIM:
+                                    // the batch runner deliberately ignores trim, because
+                                    // one range cannot mean anything across clips of
+                                    // different lengths.
+                                    if (batchQueue.size > 1) runBatch() else runSwap()
+                                },
+                                batch = batchQueue,
+                                batchAutoSave = opts.batchAutoSave,
+                                // Already in the gallery, so there is nothing to offer.
+                                // Auto-save writes each clip as it finishes; a Save button
+                                // beside a clip that is already saved is a second copy and
+                                // a question the user has answered once already.
+                                outputAutoSaved = opts.batchAutoSave &&
+                                    outputFile != null &&
+                                    batchQueue.any { it.output == outputFile },
+                                onBatchAutoSave = { on ->
+                                    applyOpts(opts.copy(batchAutoSave = on))
+                                },
+                                onOpenBatchOutput = { i ->
+                                    val q = batchQueue.getOrNull(i)
+                                    q?.output?.let {
+                                        outputFile = it
+                                        outputPartial = false
+                                        // The CLIP's saved state, not a blank one. Nulling
+                                        // it here is what made a hand-saved clip forget it
+                                        // had been saved the moment you swiped past it.
+                                        savedUri = q.savedUri
+                                        savedPathLabel = q.savedUri?.let { _ ->
+                                            "Movies/FaceFusion/" + it.name
+                                        }
+                                        // The NAME alone. "Showing beach.mp4" spends the
+                                        // status line saying what the pane above it is
+                                        // already doing.
+                                        status = batchQueue[i].name
+                                    }
+                                },
+                                onAddToBatch = {
+                                    pickMoreTargets.launch(arrayOf("video/*"))
+                                },
+                                onRemoveFromBatch = { i ->
+                                    // A finished row holds a render. Ask before losing one,
+                                    // exactly as the single output does -- unless auto-save
+                                    // already put it in the gallery, where the file here is
+                                    // a working copy and deleting it costs nothing.
+                                    val it0 = batchQueue.getOrNull(i)
+                                    if (it0?.output != null && !opts.batchAutoSave)
+                                        confirmBatchDelete = i
+                                    else removeFromBatch(i)
+                                },
                                 onCancel = {
                                     cancelRequested = true
                                     status = getString(R.string.status_cancelling)
@@ -780,9 +1210,12 @@ class MainActivity : ComponentActivity() {
                             )
 
                             Screen.Live -> LiveScreen(
-                                sourceThumb = sourceThumb,
-                                onPickSource = { pickSource.launch("image/*") },
-                                onClearSource = ::clearSource,
+                                sourceThumb = liveSources.getOrNull(liveSourceIndex)?.thumb,
+                                sourceCount = liveSources.size,
+                                activeSource = liveSourceIndex,
+                                onSelectSource = ::selectLiveSource,
+                                onPickSource = ::pickLiveSource,
+                                onClearSource = ::clearLiveSource,
                                 onCaptureSource = { capture(video = false, forSource = true) },
                                 frame = liveFrame,
                                 running = liveRunning,
@@ -794,7 +1227,30 @@ class MainActivity : ComponentActivity() {
                                 note = liveNote,
                                 modelsReady = !modelsMissing,
                                 onDownload = { onDownloadTapped() },
+                                frontCamera = liveFrontCamera,
+                                onSwitchCamera = ::switchLiveCamera,
+                                recording = liveRecording,
+                                microphone = liveMicrophone,
+                                finalizing = liveFinalizing,
+                                onMicrophoneChange = ::changeLiveMicrophone,
+                                largestOnly = liveLargestOnly,
+                                // Runtime setter, no pipeline restart: swapLargestOnly is
+                                // read per frame natively, and a restart would tear down
+                                // the pipeline and wipe every face assignment made so far.
+                                onLargestOnlyChange = { liveLargestOnly = it; if (liveRunning) NativePipe.setSwapLargestOnly(it) },
+                                swapEnabled = liveSwapEnabled,
+                                onToggleSwapEnabled = { toggleSwapEnabled() },
+                                assignMode = liveAssignMode,
+                                onToggleAssignMode = ::toggleLiveAssign,
+                                onAssignFace = ::assignLiveFace,
+                                assignBox = liveAssignBox,
+                                assignNonce = liveAssignNonce,
+                                assignCount = liveAssignCount,
+                                selectionBox = liveSelectionBox,
+                                onClearAssignments = ::clearLiveAssignments,
+                                onToggleRecord = ::toggleLiveRecording,
                             )
+
                             Screen.Settings -> SettingsScreen(
                                 sections = modelSections(),
                                 modelDirPath = modelDir().absolutePath,
@@ -869,6 +1325,26 @@ class MainActivity : ComponentActivity() {
                         )
                     }
 
+                    confirmBatchDelete?.let { ix ->
+                        val name = batchQueue.getOrNull(ix)?.name ?: ""
+                        AlertDialog(
+                            onDismissRequest = { confirmBatchDelete = null },
+                            title = { Text(stringResource(R.string.batch_delete_title)) },
+                            text = { Text(stringResource(R.string.batch_delete_body, name)) },
+                            confirmButton = {
+                                TextButton({ removeFromBatch(ix) }) {
+                                    Text(stringResource(R.string.batch_delete_confirm),
+                                         color = MaterialTheme.colorScheme.error)
+                                }
+                            },
+                            dismissButton = {
+                                TextButton({ confirmBatchDelete = null }) {
+                                    Text(stringResource(R.string.proc_get_cancel))
+                                }
+                            },
+                        )
+                    }
+
                     if (confirmMetered) {
                         AlertDialog(
                             onDismissRequest = { confirmMetered = false },
@@ -903,6 +1379,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         scrubJob?.cancel()
+        stopVoicePlayback()
         previews.release()
     }
 
@@ -1496,7 +1973,14 @@ class MainActivity : ComponentActivity() {
             // belongs to which timestamp.
             if (opts.lipSync) {
                 val previewFps = if (opts.outputFps in 1..inputFps) opts.outputFps else inputFps
-                previews.applyVoice(voiceFile?.absolutePath, previewFps.toDouble())
+                // The SAME trim the run will use: the preview's mel windows must index the
+                // same part of the voice the output does, or the scrubbed mouth and the
+                // rendered mouth would disagree on every frame.
+                previews.applyVoice(voiceFile?.absolutePath,
+                                    (voiceTrimStartMs * 1000).toLong(),
+                                    if (voiceTrimEndMs >= voiceDurationMs) Long.MAX_VALUE
+                                    else (voiceTrimEndMs * 1000).toLong(),
+                                    previewFps.toDouble())
             }
             try {
                 val frame = originalFrame ?: previews.frameAt(previewAtMs)?.also {
@@ -1512,7 +1996,7 @@ class MainActivity : ComponentActivity() {
                         previewNote = getString(R.string.status_cannot_read_source)
                         return@launch
                     }
-                    val soft = bmp.copy(Bitmap.Config.ARGB_8888, false)
+                    val soft = bmp.asArgb8888()
                     val px = IntArray(soft.width * soft.height)
                     soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
 
@@ -1630,7 +2114,38 @@ class MainActivity : ComponentActivity() {
         return queried ?: uri.lastPathSegment?.substringAfterLast('/')
     }
 
+    /**
+     * Forget the reference face.
+     *
+     * Called wherever the TARGET changes. An identity picked out of a different video is
+     * not a selection any more -- it is an invisible filter that would silently swap
+     * nobody, and the user has no way to see that it is still set.
+     */
+    private fun dropReferenceFace() {
+        if (referenceBox == null && !NativePipe.hasReferenceFace()) return
+        NativePipe.clearReferenceFace()
+        referenceBox = null
+        faceBoxes = null
+    }
+
+    /**
+     * Copy a picked URI into the cache under [name], for the decoders that need a path.
+     *
+     * ⚠ The name is the caller's because the single-target path uses ONE fixed file --
+     * `cacheDir/target.mp4` -- and a batch item copied over that would destroy the target
+     * the panes, the trim slider and item one of the queue are all still pointing at. Each
+     * queued clip therefore gets its own name, and deletes it when it is done.
+     */
+    private fun copyToCache(uri: Uri, name: String): File? = runCatching {
+        val f = File(cacheDir, name)
+        contentResolver.openInputStream(uri).use { i ->
+            f.outputStream().use { o -> i!!.copyTo(o) }
+        }
+        f
+    }.getOrNull()
+
     private fun loadTarget(uri: Uri) {
+        dropReferenceFace()
         if (contentResolver.getType(uri)?.startsWith("image/") == true) {
             loadTargetImage(uri)
             return
@@ -1692,6 +2207,12 @@ class MainActivity : ComponentActivity() {
                 targetImage = null
                 targetFile = l.file; durationMs = l.durationMs
                 inputFps = l.fps
+                targetW = l.width; targetH = l.height
+                // ⚠ The output choices belong to the clip that is going away. "24 fps" and
+                // "720p" were answers about ITS 30 fps and ITS 2160p; carrying them onto a
+                // new clip applies a decision nobody made about it. Reset, not remembered.
+                if (opts.outputFps != 0 || opts.outputMaxShortEdge != 0)
+                    applyOpts(opts.copy(outputFps = 0, outputMaxShortEdge = 0))
                 trimStartMs = 0f; trimEndMs = l.durationMs.toFloat()
                 targetAspect = if (l.width > 0 && l.height > 0)
                     l.width.toFloat() / l.height else 16f / 9f
@@ -1718,10 +2239,11 @@ class MainActivity : ComponentActivity() {
      * BitmapFactory for the new path.
      */
     private fun loadTargetImage(uri: Uri) {
+        dropReferenceFace()
         preparing = true
         targetName = displayName(uri)
         lifecycleScope.launch {
-            val bmp = withContext(Dispatchers.IO) { decodeOriented(uri) }
+            val bmp = withContext(Dispatchers.IO) { decodeOriented(uri, MAX_TARGET_EDGE) }
             if (bmp == null) {
                 status = getString(R.string.status_cannot_read_image)
                 preparing = false
@@ -1773,6 +2295,13 @@ class MainActivity : ComponentActivity() {
             }
             result.onSuccess { (f, durMs) ->
                 voiceFile = f
+                // The trim is a property of THIS file: a newly picked or recorded voice
+                // always starts whole, never inheriting the previous file's range.
+                voiceDurationMs = durMs
+                voiceTrimStartMs = 0f
+                voiceTrimEndMs = durMs.toFloat()
+                voicePosMs = 0f
+                stopVoicePlayback()
                 status = getString(R.string.status_voice_ready, fmt(durMs.toFloat()))
             }.onFailure {
                 voiceFile = null
@@ -1804,6 +2333,7 @@ class MainActivity : ComponentActivity() {
 
     private fun toggleVoiceRecording() {
         if (recordingVoice) { stopVoiceRecording(); return }
+        if (liveRecording || liveFinalizing) return
         if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) !=
             android.content.pm.PackageManager.PERMISSION_GRANTED) {
             askMic.launch(android.Manifest.permission.RECORD_AUDIO)
@@ -1857,6 +2387,107 @@ class MainActivity : ComponentActivity() {
     private fun clearVoice() {
         voiceFile = null
         voiceName = null
+        voiceDurationMs = 0
+        voiceTrimStartMs = 0f
+        voiceTrimEndMs = 0f
+        voicePosMs = 0f
+        stopVoicePlayback()
+        if (opts.lipSync) previewOptionsChanged(reloads = false)
+    }
+
+    /**
+     * Play or pause the loaded voice, so the user can hear what they picked before it
+     * drives anything.
+     *
+     * Playback is confined to the trimmed range: it starts at the trim start (or the
+     * playhead if that is already inside it) and stops at the trim end -- "play" always
+     * previews exactly the segment that will drive the lips. Dragging the seekbar can
+     * scrub anywhere in the file; the next play snaps back inside the selection.
+     */
+    private fun toggleVoicePlayback() {
+        val f = voiceFile ?: return
+        if (voicePlaying) {
+            voicePollJob?.cancel()
+            voicePlayer?.pause()
+            voicePlaying = false
+            return
+        }
+        val p = voicePlayer ?: run {
+            val np = android.media.MediaPlayer()
+            runCatching {
+                np.setDataSource(f.absolutePath)
+                np.prepare()
+            }.getOrElse {
+                np.release()
+                status = getString(R.string.status_cannot_read_audio, it.message ?: "")
+                return
+            }
+            np.setOnCompletionListener { voicePlaybackEnded() }
+            voicePlayer = np
+            np
+        }
+        val dur = p.duration.toLong().coerceAtLeast(1)
+        if (voiceDurationMs <= 0) voiceDurationMs = dur
+        var at = voicePosMs.coerceIn(0f, voiceDurationMs.toFloat())
+        // Outside the selection (before its start, or after its end from a previous run)
+        // snaps to the start of the selection.
+        if (at >= voiceTrimEndMs) at = voiceTrimStartMs
+        if (at < voiceTrimStartMs) at = voiceTrimStartMs
+        runCatching { p.seekTo(at.toInt()) }
+        p.start()
+        voicePosMs = at
+        voicePlaying = true
+        voicePollJob?.cancel()
+        voicePollJob = lifecycleScope.launch {
+            while (voicePlaying) {
+                delay(200)
+                val pos = voicePlayer?.currentPosition?.toLong() ?: continue
+                if (pos >= voiceTrimEndMs.toLong()) { voicePlaybackEnded(); break }
+                voicePosMs = pos.toFloat()
+            }
+        }
+    }
+
+    /** Playback reached the end of the trimmed selection (or the file ended early). */
+    private fun voicePlaybackEnded() {
+        runCatching { voicePlayer?.pause() }
+        voicePlaying = false
+        // Back to the start of the selection, so the next press of play replays it.
+        voicePosMs = voiceTrimStartMs
+    }
+
+    /** Release the player entirely -- a new voice is loaded, or the screen is going away. */
+    private fun stopVoicePlayback() {
+        voicePollJob?.cancel()
+        voicePollJob = null
+        runCatching { voicePlayer?.release() }
+        voicePlayer = null
+        voicePlaying = false
+    }
+
+    /** The seekbar was dragged: move the playhead, without leaving play mode. */
+    private fun onVoiceSeek(ms: Float) {
+        val p = voicePlayer
+        if (p != null) runCatching { p.seekTo(ms.toInt()) }
+        voicePosMs = ms
+        if (voicePlaying && ms >= voiceTrimEndMs) voicePlaybackEnded()
+    }
+
+    /**
+     * The voice's trim handles moved.
+     *
+     * Keeps at least a third of a second, like the video trim (the encoder needs a frame;
+     * the mouth needs a window). The driving audio is re-decoded with the new range on the
+     * next preview refresh, so the scrubbed preview and the eventual run agree on which
+     * part of the voice drives which frame.
+     */
+    private fun onVoiceTrimChanged(start: Float, end: Float) {
+        voiceTrimStartMs = start
+        voiceTrimEndMs = end
+        // Keep the playhead inside the selection: scrubbing the handles past where the
+        // playhead sits should not leave play previewing a part that was just cut away.
+        if (voicePosMs < start) { voicePosMs = start; onVoiceSeek(start) }
+        if (voicePosMs > end) { voicePosMs = end; onVoiceSeek(end) }
         if (opts.lipSync) previewOptionsChanged(reloads = false)
     }
 
@@ -1882,8 +2513,20 @@ class MainActivity : ComponentActivity() {
      * kept is a different file and this does not touch it.
      */
     private fun discardOutput() {
-        outputFile?.delete()
+        val gone = outputFile
+        gone?.delete()
         outputFile = null; outputPartial = false; savedUri = null; savedPathLabel = null
+        // ⚠ A QUEUE ROW MAY BE POINTING AT WHAT WAS JUST DELETED. The row is the only way
+        // back to a batch clip, so leaving it Done with a dead File means a thumbnail that
+        // opens a black pane and a Save that writes nothing. The clip goes back to being
+        // queued, which is what it now is.
+        if (gone != null && batchQueue.any { it.output == gone })
+            batchQueue = batchQueue.map {
+                if (it.output == gone)
+                    it.copy(state = BatchState.Waiting, output = null, thumb = null,
+                            detail = null)
+                else it
+            }
     }
 
     /**
@@ -1949,6 +2592,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun clearTarget() {
+        dropReferenceFace()
+        // The queue is a list of TARGETS and item 0 was this one. Keeping the rest after
+        // the visible clip goes away would leave a run that starts on a clip nothing on
+        // screen mentions.
+        batchQueue = emptyList()
         previews.closeTarget()
         targetFile = null
         targetImage = null
@@ -2001,8 +2649,261 @@ class MainActivity : ComponentActivity() {
         startLive()
     }
 
+    /**
+     * Take one clip out of the batch queue, whatever state it is in.
+     *
+     * ⚠ EVERY ROW, INCLUDING THE FIRST. Row 0 is the visible target, and the first version
+     * refused to touch it on the reasoning that the target is cleared from the target pane
+     * instead -- which left the one row on screen that the user could not delete, in a list
+     * where the other eleven had a bin next to them. Deleting it now does what deleting the
+     * single target does, then promotes the next clip into the pane so the rest of the queue
+     * survives. Only when nothing is left does it become a plain clearTarget().
+     *
+     * ⚠ The output file goes WITH the row. The row was the only way to reach it, so leaving
+     * the file behind would strand a full-size video in the app's storage that nothing lists
+     * and nothing can play.
+     */
+    private fun removeFromBatch(i: Int) {
+        if (busy) return
+        val item = batchQueue.getOrNull(i) ?: return
+        confirmBatchDelete = null
+
+        item.output?.let { f ->
+            // Step the pane off it first: the player holds the file, and a pane pointing at
+            // a deleted path shows a black rectangle with no way back.
+            if (outputFile == f) { outputFile = null; savedUri = null; savedPathLabel = null }
+            runCatching { f.delete() }
+        }
+
+        if (i == 0) {
+            val rest = batchQueue.drop(1)
+            if (rest.isEmpty()) { clearTarget(); return }
+            // ⚠ Order matters: loadTarget does NOT touch batchQueue (only clearTarget does),
+            // so the shortened queue set here survives the load that follows it.
+            batchQueue = rest
+            loadTarget(rest.first().uri)
+            return
+        }
+        // ⚠ DELETE ONE ROW, LOSE ONE ROW. This used to collapse the queue to empty
+        // whenever a single item was left, on the reasoning that one clip is not a queue --
+        // which meant that deleting either row of a TWO-clip list made both disappear, and
+        // from outside that is indistinguishable from a delete button that wipes the list.
+        // Reported as exactly that.
+        //
+        // The list now shows whatever is left, down to one. Swap still routes a queue of
+        // one to the single-run path, so it keeps its trim; that decision belongs at the
+        // button, not in a rule that quietly deletes rows the user did not ask to delete.
+        batchQueue = batchQueue.filterIndexed { j, _ -> j != i }
+    }
+
+    /**
+     * Flip the lens, restarting the pump if it was running.
+     *
+     * stop-then-start, not a rebind: see [LiveEngine.frontCamera]. It also means the
+     * pipeline is released and re-acquired around the switch, so PipeGuard's ownership and
+     * the tracker's state are exactly as they are for any other start -- a switch invents
+     * no new lifecycle, which is the point while roadmap 11 is still open.
+     */
+    /**
+     * Tap a face to swap only that one; tap it again to go back to all of them.
+     *
+     * Runs on the ORIGINAL frame -- the same image the boxes were drawn from, so the
+     * coordinates the pane hands back mean what the detector meant by them. The identity is
+     * stored natively and outlives every options change; only the box is state here.
+     *
+     * ⚠ The reference is cleared whenever the TARGET changes, in clearTarget/loadTarget:
+     * an identity picked out of a different video is not a selection, it is a filter the
+     * user cannot see and would have to guess at.
+     */
+    private fun pickReferenceFace(x: Float, y: Float) {
+        val frame = originalFrame ?: return
+        if (busy) return
+        // ⚠ THIS USED TO RETURN SILENTLY, and that is the whole of the bug reported as
+        // "after output is made i cant choose different face box unless i load the target
+        // again". A finished run RELEASES the pipeline and only re-warms through
+        // refreshSwapped(force = true); a tap landing in that window found previewWarm
+        // false, did nothing and said nothing -- so the feature looked dead, and reloading
+        // the target was the only thing that visibly fixed it, because reloading is what
+        // warms the pipeline again.
+        //
+        // A tap needs a live pipeline: the embedding under the finger cannot be resolved
+        // without one. So instead of failing quietly it says what is happening and starts
+        // the warm, and the next tap lands.
+        if (!previewWarm) {
+            status = getString(R.string.status_reference_warming)
+            refreshSwapped(force = true)
+            return
+        }
+        val current = referenceBox
+        // A second tap on the CHOSEN face is how it is cleared. No new control, and it is
+        // the same gesture that set it -- which is what makes it discoverable at all.
+        if (current != null && current.size >= 4 &&
+            x >= current[0] && x <= current[2] && y >= current[1] && y <= current[3]) {
+            NativePipe.clearReferenceFace()
+            referenceBox = null
+            status = getString(R.string.status_reference_cleared)
+            previewOptionsChanged()
+            return
+        }
+        lifecycleScope.launch {
+            val box = withContext(Dispatchers.Default) {
+                runCatching {
+                    val soft = frame.asArgb8888()
+                        ?: return@runCatching FloatArray(0)
+                    val px = IntArray(soft.width * soft.height)
+                    soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
+                    NativePipe.setReferenceFaceAt(
+                        NativePipe.argbToBgr(px, soft.width, soft.height),
+                        soft.width, soft.height, x, y)
+                }.getOrDefault(FloatArray(0))
+            }
+            if (box.size < 4) {
+                status = getString(R.string.status_reference_missed)
+                return@launch
+            }
+            referenceBox = box
+            status = getString(R.string.status_reference_set)
+            // REDRAW, so the swapped pane immediately shows the selection taking effect.
+            // Not a reload: the reference is not a model and not even a Config field.
+            previewOptionsChanged()
+        }
+    }
+
+    /**
+     * Start or finish recording what Live is showing -- roadmap 13b.
+     *
+     * Only while the pump is running: there is nothing to record otherwise, and a recorder
+     * armed before the camera would produce a zero-frame file.
+     */
+    private val askLiveMic = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()) { granted ->
+        liveMicrophone = granted
+        if (!granted) status = getString(R.string.status_mic_denied)
+    }
+
+    private fun changeLiveMicrophone(enabled: Boolean) {
+        if (liveRecording || liveFinalizing) return
+        if (enabled && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            askLiveMic.launch(android.Manifest.permission.RECORD_AUDIO)
+        } else liveMicrophone = enabled
+    }
+
+    private fun toggleLiveRecording() {
+        if (liveRecording) { finishLiveRecording(discard = false); return }
+        if (!liveRunning || liveFinalizing) return
+        if (liveMicrophone) {
+            if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                liveMicrophone = false
+                status = getString(R.string.status_mic_denied)
+                return
+            }
+            if (recordingVoice) {
+                status = getString(R.string.live_mic_busy)
+                return
+            }
+        }
+        val f = File(outputDir(), "live_" + System.currentTimeMillis() + ".mp4")
+        val rec = LiveRecorder(f, if (liveMicrophone) LiveMicrophone(this) else null) { appendLog(it) }
+        liveRecorder = rec
+        live.recorder = rec
+        liveRecording = true
+        status = getString(R.string.status_live_recording)
+    }
+
+    private fun toggleSwapEnabled() {
+        liveSwapEnabled = !liveSwapEnabled
+        NativePipe.setSwapEnabled(liveSwapEnabled)
+    }
+
+    private fun toggleLiveAssign() {
+        liveAssignMode = !liveAssignMode
+        // Assign per person and "Target faces" (largest only) are mutually exclusive:
+        // both decide WHICH face gets WHICH source, and largest-only would silently
+        // ignore every pin but the biggest face. Turning assign on forces the selector
+        // back to "all faces" -- the UI also locks the switch while assign is on.
+        if (liveAssignMode && liveLargestOnly) {
+            liveLargestOnly = false
+            NativePipe.setSwapLargestOnly(false)
+        }
+        NativePipe.setFaceAssignEnabled(liveAssignMode)
+        liveAssignBox = null
+        liveNote = if (liveAssignMode) getString(R.string.live_assign_hint)
+                   else null
+    }
+
+    private fun clearLiveAssignments() {
+        NativePipe.clearFaceSourceAssignments()
+        liveAssignBox = null
+        liveAssignCount = 0
+        liveNote = getString(R.string.live_assign_cleared)
+    }
+
+    /**
+     * A tap on the live feed, in DISPLAY bitmap coordinates (LiveScreen already undid the
+     * mirror and the crop, so the point matches what the pipeline sees). The tap is
+     * queued natively and resolved against the NEXT frame's pre-swap detections; the
+     * result is polled in the shot callback below.
+     */
+    private fun assignLiveFace(dispX: Float, dispY: Float) {
+        if (!liveRunning || !liveAssignMode) return
+        if (assignTapPending) return   // one tap in flight at a time
+        NativePipe.requestFaceAssignment(dispX, dispY, liveSourceIndex)
+        assignTapPending = true
+    }
+
+    /**
+     * Close the recording and say where it went.
+     *
+     * ⚠ `discard` is TRUE on a gate refusal, and the file is deleted. A refused run
+     * produces no output anywhere else in this app -- runSwap throws before it writes one
+     * -- and a recording is not an exception just because some of its frames were checked
+     * before the refusal happened. Live samples once a second, so the seconds either side
+     * of the frame that was refused were never checked at all.
+     */
+    private fun finishLiveRecording(discard: Boolean) {
+        val rec = liveRecorder ?: return
+        live.recorder = null
+        liveRecorder = null
+        liveRecording = false
+        liveFinalizing = true
+        lifecycleScope.launch(kotlinx.coroutines.NonCancellable) {
+            // Finish even when the activity is destroyed, so codecs and the microphone close.
+            val out = withContext(Dispatchers.IO) { rec.stop() }
+            liveFinalizing = false
+            if (discard) {
+                out?.delete()
+                return@launch
+            }
+            val err = rec.error
+            when {
+                err != null -> status = getString(R.string.status_failed, err)
+                out == null -> status = getString(R.string.status_live_rec_empty)
+                else -> {
+                    outputFile = out
+                    outputPartial = false
+                    status = getString(R.string.status_live_rec_saved, rec.frameCount)
+                    saveToGallery(out)
+                }
+            }
+        }
+    }
+
+    private fun switchLiveCamera() {
+        val wasRunning = liveRunning
+        if (wasRunning) stopLive()
+        liveFrontCamera = !liveFrontCamera
+        liveNote = null
+        if (wasRunning) startLive()
+    }
+
     private fun startLive() {
-        val src = sourceUri ?: return
+        // Nothing to run with -- the guard the caller's button already relies on, kept so
+        // this method cannot be entered with an empty list by any other path.
+        if (liveSources.getOrNull(liveSourceIndex) == null) return
+        // Read at bind time by the engine, so it must be set before start() and not after.
+        live.frontCamera = liveFrontCamera
         lifecycleScope.launch {
             if (!PipeGuard.acquire("live", 5000)) {
                 liveNote = pipeBusyMessage(); return@launch
@@ -2017,23 +2918,51 @@ class MainActivity : ComponentActivity() {
             // The forced preset. Tracking ON is the whole reason this is watchable; the
             // enhancer and pixel boost are the two settings that most easily turn 25 fps
             // into single digits, so they are pinned unless the override says otherwise.
-            val opts = if (liveUseMySettings) base else base.copy(
+            val opts = (if (liveUseMySettings) base else base.copy(
                 faceEnhance = false, pixelBoost = 1, lipSync = false, trackPeriod = 4,
-            )
-            val ok = withContext(Dispatchers.Default) {
+            )).copy(largestOnly = liveLargestOnly)
+            val startError = withContext(Dispatchers.Default) {
                 val models = modelDir()
                 val libDir = applicationInfo.nativeLibraryDir
-                if (!NativePipe.init(libDir, libDir, models.absolutePath, opts)) return@withContext false
+                if (!NativePipe.init(libDir, libDir, models.absolutePath, opts))
+                    return@withContext "init: ${NativePipe.lastError()}"
                 NativePipe.setTrackPeriod(opts.trackPeriod)
-                val bmp = decodeOriented(src) ?: return@withContext false
-                val soft = bmp.copy(Bitmap.Config.ARGB_8888, false)
-                val px = IntArray(soft.width * soft.height)
-                soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
-                NativePipe.setSource(NativePipe.argbToBgr(px, soft.width, soft.height),
-                                     soft.width, soft.height)
+                // EVERY source is registered, in list order, so the native slots stay
+                // aligned with the chips. The first version registered only the ACTIVE
+                // one, which made `setActiveSource(i)` point at the wrong slot -- or at
+                // nowhere at all -- as soon as the list held more than one face.
+                // Each one is gated too: a face the user can switch to mid-run must not
+                // be the one input the gate never saw.
+                for ((i, ls) in liveSources.withIndex()) {
+                    val bmp = decodeOriented(ls.uri)
+                        ?: return@withContext "cannot read source ${i + 1}"
+                    val verdict = ContentGate.checkImage(bmp)
+                    if (!verdict.ok)
+                        return@withContext ContentGate.message(
+                            this@MainActivity, R.string.gate_subject_source_image, verdict)
+                    val soft = bmp.asArgb8888()
+                    val px = IntArray(soft.width * soft.height)
+                    soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
+                    val bgr = NativePipe.argbToBgr(px, soft.width, soft.height)
+                    val okOne = if (i == 0)
+                                    NativePipe.setSource(bgr, soft.width, soft.height)
+                                else NativePipe.addSource(bgr, soft.width, soft.height) >= 0
+                    if (!okOne) return@withContext "no face in source ${i + 1}"
+                }
+                // A fresh pipeline defaults swapEnabled to true; the switch can be OFF
+                // before the pump ever ran, so the UI's value is pushed onto it here.
+                // setActiveSource restores the chip the user had selected; the assignment
+                // switch rides in the same way (OFF by default natively), and the
+                // largest-only selector with it (already in the init config, pushed again
+                // so the invariant is "the UI's value is what the pipeline has").
+                NativePipe.setSwapEnabled(liveSwapEnabled)
+                NativePipe.setActiveSource(liveSourceIndex)
+                NativePipe.setFaceAssignEnabled(liveAssignMode)
+                NativePipe.setSwapLargestOnly(liveLargestOnly)
+                null
             }
-            if (!ok) {
-                liveNote = "cannot start: ${NativePipe.lastError()}"
+            if (startError != null) {
+                liveNote = startError
                 NativePipe.release(); PipeGuard.release(); return@launch
             }
             liveRunning = true
@@ -2057,13 +2986,39 @@ class MainActivity : ComponentActivity() {
                         if (shot.gate == LiveEngine.Gate.Blocked) R.string.gate_blocked
                         else R.string.gate_error,
                         getString(R.string.gate_subject_this_frame))
-                    runOnUiThread { stopLive() }
+                    // The recording goes with it. See finishLiveRecording: a refused
+                    // run leaves no output anywhere else in this app.
+                    runOnUiThread { finishLiveRecording(discard = true); stopLive() }
                 }
                 if (shot.bitmap != null) {
                     liveFrame = shot.bitmap
                     liveFaces = shot.faces
                     liveFps = shot.fps
                 }
+                // A pending assignment tap resolves on the frame after it was queued;
+                // this callback runs on the analyzer thread that liveFrame just ran on,
+                // so the result is taken here. Empty means the request is still in
+                // flight (a slow frame -- ncnn at full size is 240-540 ms); [-1] means
+                // it was consumed and the tap was on no face.
+                if (assignTapPending) {
+                    val box = NativePipe.takeAssignmentResult()
+                    if (box.size >= 5) {
+                        assignTapPending = false
+                        liveAssignBox = box
+                        liveAssignNonce++
+                        liveAssignCount++
+                        liveNote = getString(R.string.live_assign_set, (box[4].toInt() + 1))
+                    } else if (box.size == 1) {
+                        assignTapPending = false
+                        // The miss also DESELECTED the person (empty tap = deselect).
+                        liveNote = getString(R.string.live_assign_missed)
+                    }
+                }
+                // The selected person's highlight, polled every shot so it follows them.
+                // Empty means no selection -- clear the stale box (person left, or a
+                // session reset), never draw yesterday's person.
+                val sel = NativePipe.takeSelectionBox()
+                liveSelectionBox = if (sel.size >= 5) sel else null
             }
         }
     }
@@ -2073,12 +3028,31 @@ class MainActivity : ComponentActivity() {
         // two of those can fire for one user action. Releasing the pipeline twice is a
         // crash of exactly the kind this method was written to fix.
         if (!liveRunning) return
-        live.stop()
+        // ⚠ This runs while the analyzer thread is STILL LIVE -- live.stop() below is what
+        // drains it. A frame already inside the pump therefore reaches the recorder after
+        // it has been finished, and LiveRecorder.stopped is what makes that harmless. An
+        // earlier comment here claimed the ordering was the protection; it is not, and a
+        // late frame would have built a second encoder over the same file.
+        finishLiveRecording(discard = false)
         liveRunning = false
         NativePipe.setTrackPeriod(0)
-        NativePipe.release()
-        PipeGuard.release()
+        // Assignments die with the pipeline the engine is about to release; the UI state
+        // around them goes with them so a stale box or count cannot outlive the session.
+        assignTapPending = false
+        liveAssignBox = null; liveAssignCount = 0; liveSelectionBox = null
         liveFrame = null; liveFps = 0.0; liveFaces = 0
+        // ⚠ The pipeline is freed by the ENGINE's callback, not here. stop() runs it inline
+        // when the pump drains (the normal case, ~60 ms) and from a watchdog thread when it
+        // does not -- and it is exactly the "does not" case that used to free the pipeline
+        // out from under a frame still inside processFrame. See LiveEngine.stop.
+        //
+        // Order matters: the native release first, PipeGuard second, because startLive
+        // acquires the guard before it inits. Releasing the guard first would let a restart
+        // begin against a pipeline this teardown is about to destroy.
+        live.stop {
+            NativePipe.release()
+            PipeGuard.release()
+        }
     }
 
     private fun runSwap() {
@@ -2159,7 +3133,7 @@ class MainActivity : ComponentActivity() {
                                                     R.string.gate_subject_target_video, it))
                     }
 
-                    val soft = bmp.copy(Bitmap.Config.ARGB_8888, false)
+                    val soft = bmp.asArgb8888()
                     val px = IntArray(soft.width * soft.height)
                     soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
                     if (!NativePipe.setSource(NativePipe.argbToBgr(px, soft.width, soft.height),
@@ -2176,9 +3150,13 @@ class MainActivity : ComponentActivity() {
 
                     VideoSwapper(
                         outputFps = opts.outputFps,
+                        outputMaxShortEdge = opts.outputMaxShortEdge,
                         trackPeriod = opts.trackPeriod,
                         lipSync = opts.lipSync,
                         voicePath = voiceFile?.absolutePath,
+                        voiceTrimStartUs = (voiceTrimStartMs * 1000).toLong(),
+                        voiceTrimEndUs = if (voiceTrimEndMs >= voiceDurationMs) Long.MAX_VALUE
+                                         else (voiceTrimEndMs * 1000).toLong(),
                         trimStartUs = (trimStartMs * 1000).toLong(),
                         trimEndUs = if (trimEndMs >= durationMs) Long.MAX_VALUE
                                     else (trimEndMs * 1000).toLong(),
@@ -2246,6 +3224,280 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Every queued target, one after another, on one loaded pipeline -- roadmap 14.
+     *
+     * ⚠ THIS IS A SIXTH GATED PROCESSING PATH. `docs/gate.md` enumerates them and this is
+     * now on that list. Every item is checked with the SAME `ContentGate.checkVideo` a
+     * single run makes, and a refused clip is marked refused while the queue CONTINUES --
+     * one refusal is not a reason to abandon eleven other clips.
+     *
+     * The source is gated ONCE, at the top: it is the same image for every item, so
+     * checking it twelve times would be twelve identical answers. It was already checked
+     * when it was picked, too (setSourceFrom).
+     *
+     * What is hoisted out of the loop is what does not vary: the model check, init, and
+     * setSource. That is the entire performance argument for one-source-many-targets -- a
+     * twelve-clip batch loads ~266 MB of context binaries once rather than twelve times.
+     *
+     * ⚠ Trim and frame rate are NOT applied per item. A trim range means nothing across
+     * clips of different lengths, so the queue takes each clip whole; the visible target
+     * keeps its own trim only when it is run alone.
+     *
+     * ⚠ Lifetime: this runs in the Activity's scope, exactly as a single run does, so
+     * leaving the app is survivable but destroying the Activity is not. The foreground
+     * service that fixes that is the second half of roadmap 14 and is not written yet.
+     */
+    private fun runBatch() {
+        val src = sourceUri ?: return
+        val first = targetFile ?: return
+        if (opts.lipSync && voiceFile == null) return
+        invalidatePreview()
+        cancelRequested = false
+        busy = true; progress = 0f; log = ""
+        discardOutput()
+        preview = null; framesDone = 0; framesTotal = 0; elapsedS = 0.0
+
+        // Item 0 IS the visible target; the queue has held it since the pick.
+        //
+        // ⚠ The PREVIOUS run's files are deleted here, not merely forgotten. Pressing Swap
+        // twice used to null out every `output` and leave twelve full-size videos on disk
+        // that nothing listed and nothing could play -- they survived until the next cold
+        // start, when onCreate's sweep found them. Anything auto-saved is already a
+        // separate copy in the gallery and is unaffected.
+        batchQueue = batchQueue.map {
+            it.output?.let { f -> runCatching { f.delete() } }
+            it.copy(state = BatchState.Waiting, output = null, detail = null, thumb = null)
+        }
+
+        // The foreground service, for the process rather than for the work. See
+        // BatchService: it stops Android reclaiming the app mid-batch and puts a progress
+        // line and a Cancel button in the shade. It does NOT make the batch outlive the
+        // Activity -- the loop below still runs in lifecycleScope.
+        BatchStatus.begin(batchQueue.size)
+        if (android.os.Build.VERSION.SDK_INT >= 33)
+            askNotify.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        BatchService.start(this)
+
+        lifecycleScope.launch {
+            if (!PipeGuard.acquire("batch", 5000)) {
+                status = pipeBusyMessage(); busy = false
+                BatchStatus.end(); BatchService.stop(this@MainActivity)
+                return@launch
+            }
+            // ⚠ try/finally around EVERYTHING after the acquire, for the same reason
+            // DownloadService wraps its whole run. This coroutine lives in lifecycleScope,
+            // so the Activity going away CANCELS it mid-clip -- and without this the
+            // pipeline is never released and PipeGuard is never handed back, so the preview
+            // and the API are locked out for the life of the process. BatchStatus.running
+            // would also stay true for ever, leaving BatchService's notify thread spinning
+            // behind an ongoing notification that cannot be swiped away.
+            try {
+            val t0 = System.currentTimeMillis()
+            val setup = withContext(Dispatchers.Default) {
+                runCatching {
+                    val models = modelDir()
+                    val missing = ModelPaths.missing(this@MainActivity, tier, opts.swapper)
+                    if (missing.isNotEmpty())
+                        error("cannot read " + missing.joinToString() + " for tier " + tier)
+                    status = getString(R.string.status_loading_models)
+                    val libDir = applicationInfo.nativeLibraryDir
+                    val ok = NativePipe.init(libDir, libDir, models.absolutePath, opts)
+                    noteTierRejection()
+                    if (!ok) error("init: " + NativePipe.lastError())
+
+                    status = getString(R.string.status_reading_source)
+                    val bmp = decodeOriented(src) ?: error("cannot decode source image")
+                    status = getString(R.string.status_content_check)
+                    ContentGate.checkImage(bmp).let {
+                        appendLog("source content score %+.3f".format(it.score))
+                        if (!it.ok) throw ContentGate.Refused(
+                            ContentGate.message(this@MainActivity,
+                                                R.string.gate_subject_source_image, it))
+                    }
+                    val soft = bmp.asArgb8888()
+                    val px = IntArray(soft.width * soft.height)
+                    soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
+                    if (!NativePipe.setSource(
+                            NativePipe.argbToBgr(px, soft.width, soft.height),
+                            soft.width, soft.height))
+                        error("source: " + NativePipe.lastError())
+                    appendLog("source ready for " + batchQueue.size + " clips")
+                }
+            }
+            if (setup.isFailure) {
+                val e = setup.exceptionOrNull()
+                status = if (e is ContentGate.Refused)
+                             e.message ?: getString(R.string.gate_blocked_generic)
+                         else getString(R.string.status_failed, e?.message ?: "")
+                return@launch
+            }
+
+            var done = 0
+            var refused = 0
+            var failed = 0
+            for ((i, item) in batchQueue.withIndex()) {
+                // ⚠ BOTH cancel sources. The button in the app and the one in the
+                // notification are two ways to ask for the same thing, and watching only
+                // the first would ignore whichever the user actually reached for.
+                if (BatchStatus.cancelled) cancelRequested = true
+                if (cancelRequested) {
+                    batchQueue = batchQueue.mapIndexed { j, it ->
+                        if (j >= i && it.state == BatchState.Waiting)
+                            it.copy(state = BatchState.Skipped) else it
+                    }
+                    break
+                }
+                batchQueue = batchQueue.mapIndexed { j, it ->
+                    if (j == i) it.copy(state = BatchState.Running) else it
+                }
+                status = getString(R.string.status_batch_item, i + 1, batchQueue.size, item.name)
+                BatchStatus.item(i + 1, item.name)
+                framesDone = 0; framesTotal = 0; progress = 0f
+
+                // Captured so the failure path can clean up after itself: the file is
+                // created inside the block below, and a cancel mid-encode leaves it there
+                // half-written with nothing referencing it.
+                var partial: File? = null
+                val r = withContext(Dispatchers.Default) {
+                    runCatching {
+                        // Only the visible target is already a file; the queued ones are
+                        // URIs the picker handed back, and MediaExtractor wants a path.
+                        // Item 0 is already decoded at cacheDir/target.mp4 by loadTarget,
+                        // so it is used as it stands rather than copied a second time.
+                        val f = if (i == 0) first
+                                else if (item.uri.scheme == "file") File(item.uri.path!!)
+                                else copyToCache(item.uri, "batch_" + (i + 1) + ".mp4")
+                                    ?: error("cannot read " + item.name)
+
+                        // ⚠ THE GATE, PER ITEM. The same call a single run makes.
+                        ContentGate.checkVideo(f).let {
+                            appendLog(item.name + ": " + it.detail +
+                                      ", worst %+.3f".format(it.score))
+                            if (!it.ok) throw ContentGate.Refused(
+                                ContentGate.message(this@MainActivity,
+                                                    R.string.gate_subject_target_video, it))
+                        }
+
+                        val out = File(outputDir(),
+                                       "swapped_" + System.currentTimeMillis() +
+                                       "_" + (i + 1) + ".mp4")
+                        partial = out
+                        var lastPreview = 0L
+                        VideoSwapper(
+                            outputFps = opts.outputFps,
+                            outputMaxShortEdge = opts.outputMaxShortEdge,
+                            trackPeriod = opts.trackPeriod,
+                            lipSync = opts.lipSync,
+                            voicePath = voiceFile?.absolutePath,
+                            // The voice is ONE file shared by every clip in the batch, so
+                            // ITS trim always applies -- unlike the target trim, which the
+                            // batch runner deliberately ignores (one range cannot mean
+                            // anything across clips of different lengths).
+                            voiceTrimStartUs = (voiceTrimStartMs * 1000).toLong(),
+                            voiceTrimEndUs =
+                                if (voiceTrimEndMs >= voiceDurationMs) Long.MAX_VALUE
+                                else (voiceTrimEndMs * 1000).toLong(),
+                            trimStartUs = 0L,
+                            trimEndUs = Long.MAX_VALUE,
+                            onProgress = { d, total ->
+                                framesDone = d; framesTotal = total
+                                progress = if (total > 0) d.toFloat() / total else 0f
+                                elapsedS = (System.currentTimeMillis() - t0) / 1000.0
+                            },
+                            onFrame = { bgr, w, h ->
+                                val now = System.currentTimeMillis()
+                                if (now - lastPreview > 250) {
+                                    lastPreview = now
+                                    val pw = 480
+                                    val ph = (h.toLong() * pw / w).toInt().coerceAtLeast(1)
+                                    preview = Bitmap.createBitmap(
+                                        NativePipe.bgrToArgb(bgr, w, h, pw, ph),
+                                        pw, ph, Bitmap.Config.ARGB_8888)
+                                }
+                            },
+                            onLog = { appendLog(it) },
+                            isCancelled = { cancelRequested || BatchStatus.cancelled },
+                        ).swap(f.absolutePath, out.absolutePath).getOrThrow()
+                        // On THIS thread, while it is already off the main one: a retriever
+                        // call in the state update below would stutter the list exactly as
+                        // the next clip starts encoding.
+                        out to batchThumb(out)
+                    }
+                }
+                // Whatever it got to is not a result. Deleting it here keeps a cancelled
+                // twelve-clip batch from leaving a trail of unplayable fragments.
+                if (r.isFailure) partial?.let { f -> runCatching { f.delete() } }
+                batchQueue = batchQueue.mapIndexed { j, it ->
+                    if (j != i) it else r.fold(
+                        { (f, th) ->
+                            done++
+                            it.copy(state = BatchState.Done, output = f, thumb = th)
+                        },
+                        { e ->
+                            when {
+                                e.message == "cancelled" -> it.copy(state = BatchState.Skipped)
+                                e is ContentGate.Refused -> {
+                                    refused++
+                                    it.copy(state = BatchState.Refused, detail = e.message)
+                                }
+                                else -> {
+                                    failed++
+                                    it.copy(state = BatchState.Failed, detail = e.message)
+                                }
+                            }
+                        })
+                }
+                // The last finished clip is what the panes show, so the screen is not left
+                // on a frame from four clips ago.
+                r.getOrNull()?.let { (f, _) ->
+                    outputFile = f
+                    // AS IT FINISHES, not at the end. A batch is unattended by nature, and
+                    // saving twelve clips only once the last one lands means a cancel or a
+                    // crash at clip eleven loses ten that were already finished.
+                    if (opts.batchAutoSave) saveToGallery(f)
+                }
+                // The COPY, not the output. A twelve-clip batch would otherwise leave
+                // twelve full-size videos in the cache behind the twelve it produced.
+                if (i > 0 && item.uri.scheme != "file")
+                    runCatching { File(cacheDir, "batch_" + (i + 1) + ".mp4").delete() }
+            }
+
+            status = getString(R.string.status_batch_done, done, refused + failed)
+            appendLog("batch: %d done, %d refused, %d failed, %.1f s total"
+                .format(done, refused, failed, (System.currentTimeMillis() - t0) / 1000.0))
+            outputPartial = cancelRequested
+            } finally {
+                NativePipe.release()
+                PipeGuard.release()
+                busy = false
+                // Ends the notify thread, which stops the service itself.
+                BatchStatus.end()
+                BatchService.stop(this@MainActivity)
+            }
+        }
+    }
+
+    /**
+     * A small first frame of [f], for a batch queue row.
+     *
+     * MediaMetadataRetriever rather than FrameSeeker: this wants one thumbnail from a file
+     * this app just wrote, not an exact seek into an arbitrary container, and the retriever
+     * is a fraction of the cost. Failure is null -- a missing thumbnail is a cosmetic loss
+     * and must never take a finished clip down with it.
+     */
+    private fun batchThumb(f: File): Bitmap? = runCatching {
+        android.media.MediaMetadataRetriever().use { r ->
+            r.setDataSource(f.absolutePath)
+            val full = r.getFrameAtTime(0) ?: return@use null
+            val w = 160
+            val h = (full.height.toLong() * w / full.width).toInt().coerceAtLeast(1)
+            Bitmap.createScaledBitmap(full, w, h, true).also {
+                if (it !== full) full.recycle()
+            }
+        }
+    }.getOrNull()
+
     /** The finished video, into the shared Movies collection. */
     private fun saveToGallery(file: File) {
         lifecycleScope.launch {
@@ -2253,6 +3505,12 @@ class MainActivity : ComponentActivity() {
             r.onSuccess {
                 savedUri = it
                 savedPathLabel = "Movies/FaceFusion/" + file.name
+                // Remember it against the CLIP as well as the screen, so swiping away and
+                // back does not offer to save it a second time.
+                if (batchQueue.any { q -> q.output == file })
+                    batchQueue = batchQueue.map { q ->
+                        if (q.output == file) q.copy(savedUri = it) else q
+                    }
                 status = getString(R.string.status_saved_movies)
                 toast(getString(R.string.toast_saved_to, savedPathLabel!!))
             }.onFailure {
@@ -2455,7 +3713,7 @@ class MainActivity : ComponentActivity() {
                     say("SELFTEST PARTIAL: DSP reachable, no test assets"); return@launch
                 }
                 val bmp = decodeOriented(srcFile) ?: return@launch
-                val soft = bmp.copy(Bitmap.Config.ARGB_8888, false)
+                val soft = bmp.asArgb8888()
                 val px = IntArray(soft.width * soft.height)
                 soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
                 if (!NativePipe.setSource(NativePipe.argbToBgr(px, soft.width, soft.height),

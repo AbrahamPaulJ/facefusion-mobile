@@ -47,6 +47,54 @@ data class SwapOptions(
     val largestOnly: Boolean = false,
 
     /**
+     * `--reference-face-distance`, 0.0-1.0, upstream default 0.3.
+     *
+     * Only meaningful once a reference face has been picked by tapping one
+     * (`NativePipe.setReferenceFaceAt`), which is why there is no mode field beside it:
+     * the pipeline holds the reference, and holding one IS the mode. Upstream's own
+     * comparison, from face_selector.py:
+     *
+     *     d = (1 - dot(embedding_norm, reference.embedding_norm)) / 2  ->  match if d < this
+     *
+     * so 0.3 accepts anything above 0.4 cosine similarity. Raise it and other people start
+     * being swapped too; lower it and a face that turns away stops matching itself.
+     */
+    val referenceDistance: Float = 0.3f,
+
+    /**
+     * Copy every finished BATCH clip straight into the gallery.
+     *
+     * ⚠ Not a pipeline field -- it never reaches native, like `outputFps`. It lives here
+     * only because it is a preference worth remembering: a batch is unattended by nature,
+     * and being asked to re-tick it on every run defeats the point of leaving one running.
+     */
+    val batchAutoSave: Boolean = false,
+
+    /**
+     * Cap the output's SHORT EDGE, in pixels. 0 keeps the source's own size.
+     *
+     * Upstream 3.8.2 has no resolution argument at all: it takes `--output-video-scale`, a
+     * 0.25-8.0 multiplier defaulting to 1.0. The upward half of that range is a trap here --
+     * the swapper runs at 256 whatever the frame is, so 2x output is the same swap enlarged
+     * at four times the bitrate. This is the useful half, named the way people say it.
+     *
+     * ⚠ THE SHORT EDGE, so the aspect ratio never changes and "480p" means what it means
+     * everywhere else: a 16:9 clip becomes 854x480 and a portrait one 480x854. And it only
+     * ever shrinks -- picking 1080p on a 720p clip leaves it alone, which is what upstream's
+     * own `restrict_video_resolution` does.
+     *
+     * Applied at DECODE, not at encode. Detector prep and paste-back both scale with frame
+     * AREA, so capping a 4K clip to 1080p makes the run itself faster rather than merely
+     * making the file smaller.
+     *
+     * ⚠ It is a real trade, not a free win: swap quality follows how many pixels THE FACE
+     * has, not the frame. A face filling a quarter of the frame has plenty either way; a
+     * face far away in a 4K shot has half as many pixels at 1080p and will look worse.
+     * Hence 0 by default.
+     */
+    val outputMaxShortEdge: Int = 0,
+
+    /**
      * Frames between real face detections during a VIDEO run. 0 = detect every frame,
      * which is upstream's behaviour and the default.
      *
@@ -122,6 +170,18 @@ data class SwapOptions(
     /** How many swapper invocations one face costs at this setting. */
     val invocationsPerFace get() = pixelBoost * pixelBoost
 
+    /**
+     * ⚠ THE TARGET-DEPENDENT SETTINGS ARE NOT SAVED, deliberately.
+     *
+     * `outputFps` and `outputMaxShortEdge` are answers about ONE clip: "24 of this clip's
+     * 30" and "720p of this clip's 2160p". Restoring them onto the next clip applies a
+     * decision that was never made about it -- a 720p cap silently inherited by a 720p clip
+     * does nothing visible, and by a 4K one quietly halves what the user gets. Everything
+     * else here is a preference about how the app should WORK and does survive.
+     *
+     * They still persist for the length of a session; `loadTarget` resets them when the
+     * clip they were chosen for goes away.
+     */
     fun save(context: Context) {
         prefs(context).edit()
             .putString(K_SWAPPER, swapper)
@@ -132,12 +192,13 @@ data class SwapOptions(
             .putFloat(K_LMK, landmarkerScore)
             .putInt(K_BOOST, pixelBoost)
             .putBoolean(K_LARGEST, largestOnly)
+            .putFloat(K_REF_DISTANCE, referenceDistance)
+            .putBoolean(K_BATCH_AUTOSAVE, batchAutoSave)
             .putInt(K_TRACK, trackPeriod)
             .putBoolean(K_ENHANCE, faceEnhance)
             .putFloat(K_ENHANCE_BLEND, enhanceBlend)
             .putBoolean(K_LIP_SYNC, lipSync)
             .putFloat(K_LIP_SYNC_WEIGHT, lipSyncWeight)
-            .putInt(K_FPS, outputFps)
             .apply()
     }
 
@@ -151,12 +212,13 @@ data class SwapOptions(
         private const val K_LMK = "landmarker_score"
         private const val K_BOOST = "pixel_boost"
         private const val K_LARGEST = "largest_only"
+        private const val K_REF_DISTANCE = "reference_distance"
+        private const val K_BATCH_AUTOSAVE = "batch_autosave"
         private const val K_TRACK = "track_period"
         private const val K_ENHANCE = "face_enhance"
         private const val K_ENHANCE_BLEND = "face_enhance_blend"
         private const val K_LIP_SYNC = "lip_sync"
         private const val K_LIP_SYNC_WEIGHT = "lip_sync_weight"
-        private const val K_FPS = "output_fps"
 
         private fun prefs(context: Context) =
             context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -179,12 +241,13 @@ data class SwapOptions(
                 landmarkerScore = p.getFloat(K_LMK, d.landmarkerScore),
                 pixelBoost = p.getInt(K_BOOST, d.pixelBoost),
                 largestOnly = p.getBoolean(K_LARGEST, d.largestOnly),
+                referenceDistance = p.getFloat(K_REF_DISTANCE, d.referenceDistance),
+                batchAutoSave = p.getBoolean(K_BATCH_AUTOSAVE, d.batchAutoSave),
                 trackPeriod = p.getInt(K_TRACK, d.trackPeriod),
                 faceEnhance = p.getBoolean(K_ENHANCE, d.faceEnhance),
                 enhanceBlend = p.getFloat(K_ENHANCE_BLEND, d.enhanceBlend),
                 lipSync = p.getBoolean(K_LIP_SYNC, d.lipSync),
                 lipSyncWeight = p.getFloat(K_LIP_SYNC_WEIGHT, d.lipSyncWeight),
-                outputFps = p.getInt(K_FPS, d.outputFps),
             )
         }
     }
