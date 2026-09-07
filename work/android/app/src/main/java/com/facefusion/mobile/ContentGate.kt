@@ -27,8 +27,14 @@ import java.io.File
  */
 object ContentGate {
 
-    /** content_analyser.py:detect_with_nsfw_2 -- flagged above this. */
-    const val THRESHOLD = 0.25f
+    /** content_analyser.py:detect_with_nsfw_2 -- flagged above this.
+     *
+     * ⚠ Deliberately LESS strict than upstream's 0.25: at upstream's line the model flags
+     * shirtless torsos and babies in diapers, which are not the content this gate exists
+     * to stop. 0.6 still trips on clearly explicit content (those scores sit well above
+     * 1.0) while letting borderline-but-benign frames through. Tune here if needed.
+     */
+    const val THRESHOLD = 0.6f
 
     /** content_analyser.py:analyse_video -- refuse the video above this percentage. */
     const val VIDEO_RATE_PERCENT = 10.0

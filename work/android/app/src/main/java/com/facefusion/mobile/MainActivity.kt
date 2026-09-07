@@ -42,8 +42,13 @@ import androidx.compose.ui.res.stringResource
  */
 class MainActivity : ComponentActivity() {
 
+    private data class LiveSource(val uri: Uri, val thumb: Bitmap)
+
     private var sourceUri by mutableStateOf<Uri?>(null)
     private var sourceThumb by mutableStateOf<Bitmap?>(null)
+    private var liveSources by mutableStateOf<List<LiveSource>>(emptyList())
+    private var liveSourceIndex by mutableIntStateOf(0)
+    private var liveLargestOnly by mutableStateOf(false)
     private var targetFile by mutableStateOf<File?>(null)
     private var targetName by mutableStateOf<String?>(null)
 
@@ -55,6 +60,20 @@ class MainActivity : ComponentActivity() {
      */
     private var voiceFile by mutableStateOf<File?>(null)
     private var voiceName by mutableStateOf<String?>(null)
+    /** The loaded voice's full length, ms. 0 until a file is loaded. */
+    private var voiceDurationMs by mutableStateOf(0L)
+    /**
+     * The part of the voice that DRIVES the lips, ms -- the audio equivalent of
+     * [trimStartMs]/[trimEndMs]. Only this range is decoded for the mouth and copied into
+     * the output's audio track. Reset to the whole file when a voice is loaded.
+     */
+    private var voiceTrimStartMs by mutableStateOf(0f)
+    private var voiceTrimEndMs by mutableStateOf(0f)
+    /** Playback of the loaded voice: where the playhead is, and whether it is running. */
+    private var voicePosMs by mutableStateOf(0f)
+    private var voicePlaying by mutableStateOf(false)
+    private var voicePlayer: android.media.MediaPlayer? = null
+    private var voicePollJob: kotlinx.coroutines.Job? = null
     /** True while the microphone is capturing a driving voice. */
     private var recordingVoice by mutableStateOf(false)
 
@@ -220,12 +239,43 @@ class MainActivity : ComponentActivity() {
     /** The Live recording in flight, and whether the UI should say so -- roadmap 13b. */
     private var liveRecorder: LiveRecorder? = null
     private var liveRecording by mutableStateOf(false)
+    private var liveMicrophone by mutableStateOf(false)
+    private var liveFinalizing by mutableStateOf(false)
 
     // ⚠ Compose state, NOT live.isRunning. A plain field on the engine is invisible to
     // recomposition, so the first build showed a running feed under a button still saying
     // "Start" -- the pixels updated because the bitmap reference changed and nothing else
     // did.
     private var liveRunning by mutableStateOf(false)
+    private var liveSwapEnabled by mutableStateOf(true)
+    /**
+     * Assign-per-person mode (Live): when ON, a tap on the feed gives the selected source
+     * chip to that face, and the face keeps it for the rest of the session. OFF is the
+     * default behaviour -- every face takes the active slot. In memory only, like the
+     * other Live switches: it is a property of this screen, not of a swap.
+     */
+    private var liveAssignMode by mutableStateOf(false)
+    /**
+     * The last face assigned, as the box+source liveFrame returned (x0,y0,x1,y1,source,
+     * DISPLAY bitmap coordinates), for the overlay to confirm the tap. [liveAssignNonce]
+     * changes with it so LiveScreen can retime its fade.
+     */
+    private var liveAssignBox by mutableStateOf<FloatArray?>(null)
+    private var liveAssignNonce by mutableIntStateOf(0)
+    private var liveAssignCount by mutableIntStateOf(0)
+    /**
+     * The SELECTED person (assign mode): x0, y0, x1, y1, source -- DISPLAY bitmap
+     * coordinates -- polled every shot, so the highlight follows the person. Null when
+     * nobody is selected (or assign mode is off). The native side owns the selection:
+     * tapping a face selects it, tapping empty space deselects it, and a selected
+     * person follows the source chip.
+     */
+    private var liveSelectionBox by mutableStateOf<FloatArray?>(null)
+    /**
+     * A tap is in flight: the next liveFrame consumes it and the shot callback takes the
+     * result. Pending until taken; a consumed-but-empty result is a miss, never guessed.
+     */
+    private var assignTapPending = false
     // Off = the forced fast preset. Kept out of SwapOptions on purpose: it is a property of
     // this screen, not of a swap, and persisting it would let a Live choice change what a
     // file run does.
@@ -382,12 +432,53 @@ class MainActivity : ComponentActivity() {
     private fun setSourceFrom(uri: Uri) {
         sourceUri = uri
         sourceThumb = decodeOriented(uri)
+        sourceThumb?.let { thumb ->
+            if (liveSources.none { it.uri == uri }) liveSources = liveSources + LiveSource(uri, thumb)
+            liveSourceIndex = liveSources.indexOfFirst { it.uri == uri }.coerceAtLeast(0)
+        }
         // A different face means the loaded pipeline is holding the wrong embedding.
         previewOptionsChanged()
     }
 
     private val pickSource = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) setSourceFrom(uri)
+    }
+
+    private val pickLiveSources = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) addLiveSource(uri)
+    }
+
+    private fun pickLiveSource() = pickLiveSources.launch("image/*")
+
+    private fun addLiveSource(uri: Uri) {
+        // ONE decode, two uses: the thumbnail stored for the pane and the pixels handed
+        // to the pipeline are the same image -- a second decode is a full-size allocation
+        // that produces nothing new.
+        val bmp = decodeOriented(uri) ?: return
+        val soft = bmp.asArgb8888()
+        val px = IntArray(soft.width * soft.height)
+        soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
+        val bgr = NativePipe.argbToBgr(px, soft.width, soft.height)
+
+        // While the pump is running, the native slots must stay aligned with this list,
+        // so the new face is registered at the same index the chip will show. Not running,
+        // there is no live pipeline to add to -- startLive registers the whole list.
+        if (liveRunning) NativePipe.addSource(bgr, soft.width, soft.height)
+
+        liveSources = liveSources + LiveSource(uri, bmp)
+        liveSourceIndex = liveSources.lastIndex
+    }
+
+    private fun selectLiveSource(index: Int) {
+        if (index !in liveSources.indices || index == liveSourceIndex) return
+        liveSourceIndex = index
+        if (liveRunning) NativePipe.setActiveSource(index)
+    }
+
+    private fun clearLiveSource() {
+        if (liveRunning || liveSources.isEmpty()) return
+        liveSources = liveSources.filterIndexed { i, _ -> i != liveSourceIndex }
+        liveSourceIndex = liveSourceIndex.coerceAtMost(liveSources.lastIndex.coerceAtLeast(0))
     }
 
     private val takeSourcePhoto = registerForActivityResult(
@@ -1027,6 +1118,14 @@ class MainActivity : ComponentActivity() {
                                 onDeleteOutput = ::discardOutput,
                                 hasVoice = voiceFile != null,
                                 voiceName = voiceName,
+                                voiceDurationMs = voiceDurationMs,
+                                voiceTrimStartMs = voiceTrimStartMs,
+                                voiceTrimEndMs = voiceTrimEndMs,
+                                onVoiceTrimChange = ::onVoiceTrimChanged,
+                                voicePosMs = voicePosMs,
+                                voicePlaying = voicePlaying,
+                                onVoicePlayPause = ::toggleVoicePlayback,
+                                onVoiceSeek = ::onVoiceSeek,
                                 onPickVoice = { pickVoice.launch(arrayOf("audio/*", "video/*")) },
                                 onClearVoice = ::clearVoice,
                                 recordingVoice = recordingVoice,
@@ -1101,9 +1200,12 @@ class MainActivity : ComponentActivity() {
                             )
 
                             Screen.Live -> LiveScreen(
-                                sourceThumb = sourceThumb,
-                                onPickSource = { pickSource.launch("image/*") },
-                                onClearSource = ::clearSource,
+                                sourceThumb = liveSources.getOrNull(liveSourceIndex)?.thumb,
+                                sourceCount = liveSources.size,
+                                activeSource = liveSourceIndex,
+                                onSelectSource = ::selectLiveSource,
+                                onPickSource = ::pickLiveSource,
+                                onClearSource = ::clearLiveSource,
                                 onCaptureSource = { capture(video = false, forSource = true) },
                                 frame = liveFrame,
                                 running = liveRunning,
@@ -1118,8 +1220,27 @@ class MainActivity : ComponentActivity() {
                                 frontCamera = liveFrontCamera,
                                 onSwitchCamera = ::switchLiveCamera,
                                 recording = liveRecording,
+                                microphone = liveMicrophone,
+                                finalizing = liveFinalizing,
+                                onMicrophoneChange = ::changeLiveMicrophone,
+                                largestOnly = liveLargestOnly,
+                                // Runtime setter, no pipeline restart: swapLargestOnly is
+                                // read per frame natively, and a restart would tear down
+                                // the pipeline and wipe every face assignment made so far.
+                                onLargestOnlyChange = { liveLargestOnly = it; if (liveRunning) NativePipe.setSwapLargestOnly(it) },
+                                swapEnabled = liveSwapEnabled,
+                                onToggleSwapEnabled = { toggleSwapEnabled() },
+                                assignMode = liveAssignMode,
+                                onToggleAssignMode = ::toggleLiveAssign,
+                                onAssignFace = ::assignLiveFace,
+                                assignBox = liveAssignBox,
+                                assignNonce = liveAssignNonce,
+                                assignCount = liveAssignCount,
+                                selectionBox = liveSelectionBox,
+                                onClearAssignments = ::clearLiveAssignments,
                                 onToggleRecord = ::toggleLiveRecording,
                             )
+
                             Screen.Settings -> SettingsScreen(
                                 sections = modelSections(),
                                 modelDirPath = modelDir().absolutePath,
@@ -1240,6 +1361,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         scrubJob?.cancel()
+        stopVoicePlayback()
         previews.release()
     }
 
@@ -1833,7 +1955,14 @@ class MainActivity : ComponentActivity() {
             // belongs to which timestamp.
             if (opts.lipSync) {
                 val previewFps = if (opts.outputFps in 1..inputFps) opts.outputFps else inputFps
-                previews.applyVoice(voiceFile?.absolutePath, previewFps.toDouble())
+                // The SAME trim the run will use: the preview's mel windows must index the
+                // same part of the voice the output does, or the scrubbed mouth and the
+                // rendered mouth would disagree on every frame.
+                previews.applyVoice(voiceFile?.absolutePath,
+                                    (voiceTrimStartMs * 1000).toLong(),
+                                    if (voiceTrimEndMs >= voiceDurationMs) Long.MAX_VALUE
+                                    else (voiceTrimEndMs * 1000).toLong(),
+                                    previewFps.toDouble())
             }
             try {
                 val frame = originalFrame ?: previews.frameAt(previewAtMs)?.also {
@@ -2148,6 +2277,13 @@ class MainActivity : ComponentActivity() {
             }
             result.onSuccess { (f, durMs) ->
                 voiceFile = f
+                // The trim is a property of THIS file: a newly picked or recorded voice
+                // always starts whole, never inheriting the previous file's range.
+                voiceDurationMs = durMs
+                voiceTrimStartMs = 0f
+                voiceTrimEndMs = durMs.toFloat()
+                voicePosMs = 0f
+                stopVoicePlayback()
                 status = getString(R.string.status_voice_ready, fmt(durMs.toFloat()))
             }.onFailure {
                 voiceFile = null
@@ -2179,6 +2315,7 @@ class MainActivity : ComponentActivity() {
 
     private fun toggleVoiceRecording() {
         if (recordingVoice) { stopVoiceRecording(); return }
+        if (liveRecording || liveFinalizing) return
         if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) !=
             android.content.pm.PackageManager.PERMISSION_GRANTED) {
             askMic.launch(android.Manifest.permission.RECORD_AUDIO)
@@ -2232,6 +2369,107 @@ class MainActivity : ComponentActivity() {
     private fun clearVoice() {
         voiceFile = null
         voiceName = null
+        voiceDurationMs = 0
+        voiceTrimStartMs = 0f
+        voiceTrimEndMs = 0f
+        voicePosMs = 0f
+        stopVoicePlayback()
+        if (opts.lipSync) previewOptionsChanged(reloads = false)
+    }
+
+    /**
+     * Play or pause the loaded voice, so the user can hear what they picked before it
+     * drives anything.
+     *
+     * Playback is confined to the trimmed range: it starts at the trim start (or the
+     * playhead if that is already inside it) and stops at the trim end -- "play" always
+     * previews exactly the segment that will drive the lips. Dragging the seekbar can
+     * scrub anywhere in the file; the next play snaps back inside the selection.
+     */
+    private fun toggleVoicePlayback() {
+        val f = voiceFile ?: return
+        if (voicePlaying) {
+            voicePollJob?.cancel()
+            voicePlayer?.pause()
+            voicePlaying = false
+            return
+        }
+        val p = voicePlayer ?: run {
+            val np = android.media.MediaPlayer()
+            runCatching {
+                np.setDataSource(f.absolutePath)
+                np.prepare()
+            }.getOrElse {
+                np.release()
+                status = getString(R.string.status_cannot_read_audio, it.message ?: "")
+                return
+            }
+            np.setOnCompletionListener { voicePlaybackEnded() }
+            voicePlayer = np
+            np
+        }
+        val dur = p.duration.toLong().coerceAtLeast(1)
+        if (voiceDurationMs <= 0) voiceDurationMs = dur
+        var at = voicePosMs.coerceIn(0f, voiceDurationMs.toFloat())
+        // Outside the selection (before its start, or after its end from a previous run)
+        // snaps to the start of the selection.
+        if (at >= voiceTrimEndMs) at = voiceTrimStartMs
+        if (at < voiceTrimStartMs) at = voiceTrimStartMs
+        runCatching { p.seekTo(at.toInt()) }
+        p.start()
+        voicePosMs = at
+        voicePlaying = true
+        voicePollJob?.cancel()
+        voicePollJob = lifecycleScope.launch {
+            while (voicePlaying) {
+                delay(200)
+                val pos = voicePlayer?.currentPosition?.toLong() ?: continue
+                if (pos >= voiceTrimEndMs.toLong()) { voicePlaybackEnded(); break }
+                voicePosMs = pos.toFloat()
+            }
+        }
+    }
+
+    /** Playback reached the end of the trimmed selection (or the file ended early). */
+    private fun voicePlaybackEnded() {
+        runCatching { voicePlayer?.pause() }
+        voicePlaying = false
+        // Back to the start of the selection, so the next press of play replays it.
+        voicePosMs = voiceTrimStartMs
+    }
+
+    /** Release the player entirely -- a new voice is loaded, or the screen is going away. */
+    private fun stopVoicePlayback() {
+        voicePollJob?.cancel()
+        voicePollJob = null
+        runCatching { voicePlayer?.release() }
+        voicePlayer = null
+        voicePlaying = false
+    }
+
+    /** The seekbar was dragged: move the playhead, without leaving play mode. */
+    private fun onVoiceSeek(ms: Float) {
+        val p = voicePlayer
+        if (p != null) runCatching { p.seekTo(ms.toInt()) }
+        voicePosMs = ms
+        if (voicePlaying && ms >= voiceTrimEndMs) voicePlaybackEnded()
+    }
+
+    /**
+     * The voice's trim handles moved.
+     *
+     * Keeps at least a third of a second, like the video trim (the encoder needs a frame;
+     * the mouth needs a window). The driving audio is re-decoded with the new range on the
+     * next preview refresh, so the scrubbed preview and the eventual run agree on which
+     * part of the voice drives which frame.
+     */
+    private fun onVoiceTrimChanged(start: Float, end: Float) {
+        voiceTrimStartMs = start
+        voiceTrimEndMs = end
+        // Keep the playhead inside the selection: scrubbing the handles past where the
+        // playhead sits should not leave play previewing a part that was just cut away.
+        if (voicePosMs < start) { voicePosMs = start; onVoiceSeek(start) }
+        if (voicePosMs > end) { voicePosMs = end; onVoiceSeek(end) }
         if (opts.lipSync) previewOptionsChanged(reloads = false)
     }
 
@@ -2519,15 +2757,82 @@ class MainActivity : ComponentActivity() {
      * Only while the pump is running: there is nothing to record otherwise, and a recorder
      * armed before the camera would produce a zero-frame file.
      */
+    private val askLiveMic = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()) { granted ->
+        liveMicrophone = granted
+        if (!granted) status = getString(R.string.status_mic_denied)
+    }
+
+    private fun changeLiveMicrophone(enabled: Boolean) {
+        if (liveRecording || liveFinalizing) return
+        if (enabled && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            askLiveMic.launch(android.Manifest.permission.RECORD_AUDIO)
+        } else liveMicrophone = enabled
+    }
+
     private fun toggleLiveRecording() {
         if (liveRecording) { finishLiveRecording(discard = false); return }
-        if (!liveRunning) return
+        if (!liveRunning || liveFinalizing) return
+        if (liveMicrophone) {
+            if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                liveMicrophone = false
+                status = getString(R.string.status_mic_denied)
+                return
+            }
+            if (recordingVoice) {
+                status = getString(R.string.live_mic_busy)
+                return
+            }
+        }
         val f = File(outputDir(), "live_" + System.currentTimeMillis() + ".mp4")
-        val rec = LiveRecorder(f) { appendLog(it) }
+        val rec = LiveRecorder(f, if (liveMicrophone) LiveMicrophone(this) else null) { appendLog(it) }
         liveRecorder = rec
         live.recorder = rec
         liveRecording = true
         status = getString(R.string.status_live_recording)
+    }
+
+    private fun toggleSwapEnabled() {
+        liveSwapEnabled = !liveSwapEnabled
+        NativePipe.setSwapEnabled(liveSwapEnabled)
+    }
+
+    private fun toggleLiveAssign() {
+        liveAssignMode = !liveAssignMode
+        // Assign per person and "Target faces" (largest only) are mutually exclusive:
+        // both decide WHICH face gets WHICH source, and largest-only would silently
+        // ignore every pin but the biggest face. Turning assign on forces the selector
+        // back to "all faces" -- the UI also locks the switch while assign is on.
+        if (liveAssignMode && liveLargestOnly) {
+            liveLargestOnly = false
+            NativePipe.setSwapLargestOnly(false)
+        }
+        NativePipe.setFaceAssignEnabled(liveAssignMode)
+        liveAssignBox = null
+        liveNote = if (liveAssignMode) getString(R.string.live_assign_hint)
+                   else null
+    }
+
+    private fun clearLiveAssignments() {
+        NativePipe.clearFaceSourceAssignments()
+        liveAssignBox = null
+        liveAssignCount = 0
+        liveNote = getString(R.string.live_assign_cleared)
+    }
+
+    /**
+     * A tap on the live feed, in DISPLAY bitmap coordinates (LiveScreen already undid the
+     * mirror and the crop, so the point matches what the pipeline sees). The tap is
+     * queued natively and resolved against the NEXT frame's pre-swap detections; the
+     * result is polled in the shot callback below.
+     */
+    private fun assignLiveFace(dispX: Float, dispY: Float) {
+        if (!liveRunning || !liveAssignMode) return
+        if (assignTapPending) return   // one tap in flight at a time
+        NativePipe.requestFaceAssignment(dispX, dispY, liveSourceIndex)
+        assignTapPending = true
     }
 
     /**
@@ -2544,20 +2849,25 @@ class MainActivity : ComponentActivity() {
         live.recorder = null
         liveRecorder = null
         liveRecording = false
-        val out = rec.stop()
-        if (discard) {
-            out?.delete()
-            return
-        }
-        val err = rec.error
-        when {
-            err != null -> status = getString(R.string.status_failed, err)
-            out == null -> status = getString(R.string.status_live_rec_empty)
-            else -> {
-                outputFile = out
-                outputPartial = false
-                status = getString(R.string.status_live_rec_saved, rec.frameCount)
-                saveToGallery(out)
+        liveFinalizing = true
+        lifecycleScope.launch(kotlinx.coroutines.NonCancellable) {
+            // Finish even when the activity is destroyed, so codecs and the microphone close.
+            val out = withContext(Dispatchers.IO) { rec.stop() }
+            liveFinalizing = false
+            if (discard) {
+                out?.delete()
+                return@launch
+            }
+            val err = rec.error
+            when {
+                err != null -> status = getString(R.string.status_failed, err)
+                out == null -> status = getString(R.string.status_live_rec_empty)
+                else -> {
+                    outputFile = out
+                    outputPartial = false
+                    status = getString(R.string.status_live_rec_saved, rec.frameCount)
+                    saveToGallery(out)
+                }
             }
         }
     }
@@ -2571,7 +2881,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startLive() {
-        val src = sourceUri ?: return
+        // Nothing to run with -- the guard the caller's button already relies on, kept so
+        // this method cannot be entered with an empty list by any other path.
+        if (liveSources.getOrNull(liveSourceIndex) == null) return
         // Read at bind time by the engine, so it must be set before start() and not after.
         live.frontCamera = liveFrontCamera
         lifecycleScope.launch {
@@ -2588,23 +2900,51 @@ class MainActivity : ComponentActivity() {
             // The forced preset. Tracking ON is the whole reason this is watchable; the
             // enhancer and pixel boost are the two settings that most easily turn 25 fps
             // into single digits, so they are pinned unless the override says otherwise.
-            val opts = if (liveUseMySettings) base else base.copy(
+            val opts = (if (liveUseMySettings) base else base.copy(
                 faceEnhance = false, pixelBoost = 1, lipSync = false, trackPeriod = 4,
-            )
-            val ok = withContext(Dispatchers.Default) {
+            )).copy(largestOnly = liveLargestOnly)
+            val startError = withContext(Dispatchers.Default) {
                 val models = modelDir()
                 val libDir = applicationInfo.nativeLibraryDir
-                if (!NativePipe.init(libDir, libDir, models.absolutePath, opts)) return@withContext false
+                if (!NativePipe.init(libDir, libDir, models.absolutePath, opts))
+                    return@withContext "init: ${NativePipe.lastError()}"
                 NativePipe.setTrackPeriod(opts.trackPeriod)
-                val bmp = decodeOriented(src) ?: return@withContext false
-                val soft = bmp.asArgb8888()
-                val px = IntArray(soft.width * soft.height)
-                soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
-                NativePipe.setSource(NativePipe.argbToBgr(px, soft.width, soft.height),
-                                     soft.width, soft.height)
+                // EVERY source is registered, in list order, so the native slots stay
+                // aligned with the chips. The first version registered only the ACTIVE
+                // one, which made `setActiveSource(i)` point at the wrong slot -- or at
+                // nowhere at all -- as soon as the list held more than one face.
+                // Each one is gated too: a face the user can switch to mid-run must not
+                // be the one input the gate never saw.
+                for ((i, ls) in liveSources.withIndex()) {
+                    val bmp = decodeOriented(ls.uri)
+                        ?: return@withContext "cannot read source ${i + 1}"
+                    val verdict = ContentGate.checkImage(bmp)
+                    if (!verdict.ok)
+                        return@withContext ContentGate.message(
+                            this@MainActivity, R.string.gate_subject_source_image, verdict)
+                    val soft = bmp.asArgb8888()
+                    val px = IntArray(soft.width * soft.height)
+                    soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
+                    val bgr = NativePipe.argbToBgr(px, soft.width, soft.height)
+                    val okOne = if (i == 0)
+                                    NativePipe.setSource(bgr, soft.width, soft.height)
+                                else NativePipe.addSource(bgr, soft.width, soft.height) >= 0
+                    if (!okOne) return@withContext "no face in source ${i + 1}"
+                }
+                // A fresh pipeline defaults swapEnabled to true; the switch can be OFF
+                // before the pump ever ran, so the UI's value is pushed onto it here.
+                // setActiveSource restores the chip the user had selected; the assignment
+                // switch rides in the same way (OFF by default natively), and the
+                // largest-only selector with it (already in the init config, pushed again
+                // so the invariant is "the UI's value is what the pipeline has").
+                NativePipe.setSwapEnabled(liveSwapEnabled)
+                NativePipe.setActiveSource(liveSourceIndex)
+                NativePipe.setFaceAssignEnabled(liveAssignMode)
+                NativePipe.setSwapLargestOnly(liveLargestOnly)
+                null
             }
-            if (!ok) {
-                liveNote = "cannot start: ${NativePipe.lastError()}"
+            if (startError != null) {
+                liveNote = startError
                 NativePipe.release(); PipeGuard.release(); return@launch
             }
             liveRunning = true
@@ -2637,6 +2977,30 @@ class MainActivity : ComponentActivity() {
                     liveFaces = shot.faces
                     liveFps = shot.fps
                 }
+                // A pending assignment tap resolves on the frame after it was queued;
+                // this callback runs on the analyzer thread that liveFrame just ran on,
+                // so the result is taken here. Empty means the request is still in
+                // flight (a slow frame -- ncnn at full size is 240-540 ms); [-1] means
+                // it was consumed and the tap was on no face.
+                if (assignTapPending) {
+                    val box = NativePipe.takeAssignmentResult()
+                    if (box.size >= 5) {
+                        assignTapPending = false
+                        liveAssignBox = box
+                        liveAssignNonce++
+                        liveAssignCount++
+                        liveNote = getString(R.string.live_assign_set, (box[4].toInt() + 1))
+                    } else if (box.size == 1) {
+                        assignTapPending = false
+                        // The miss also DESELECTED the person (empty tap = deselect).
+                        liveNote = getString(R.string.live_assign_missed)
+                    }
+                }
+                // The selected person's highlight, polled every shot so it follows them.
+                // Empty means no selection -- clear the stale box (person left, or a
+                // session reset), never draw yesterday's person.
+                val sel = NativePipe.takeSelectionBox()
+                liveSelectionBox = if (sel.size >= 5) sel else null
             }
         }
     }
@@ -2654,6 +3018,10 @@ class MainActivity : ComponentActivity() {
         finishLiveRecording(discard = false)
         liveRunning = false
         NativePipe.setTrackPeriod(0)
+        // Assignments die with the pipeline the engine is about to release; the UI state
+        // around them goes with them so a stale box or count cannot outlive the session.
+        assignTapPending = false
+        liveAssignBox = null; liveAssignCount = 0; liveSelectionBox = null
         liveFrame = null; liveFps = 0.0; liveFaces = 0
         // ⚠ The pipeline is freed by the ENGINE's callback, not here. stop() runs it inline
         // when the pump drains (the normal case, ~60 ms) and from a watchdog thread when it
@@ -2768,6 +3136,9 @@ class MainActivity : ComponentActivity() {
                         trackPeriod = opts.trackPeriod,
                         lipSync = opts.lipSync,
                         voicePath = voiceFile?.absolutePath,
+                        voiceTrimStartUs = (voiceTrimStartMs * 1000).toLong(),
+                        voiceTrimEndUs = if (voiceTrimEndMs >= voiceDurationMs) Long.MAX_VALUE
+                                         else (voiceTrimEndMs * 1000).toLong(),
                         trimStartUs = (trimStartMs * 1000).toLong(),
                         trimEndUs = if (trimEndMs >= durationMs) Long.MAX_VALUE
                                     else (trimEndMs * 1000).toLong(),
@@ -3001,6 +3372,14 @@ class MainActivity : ComponentActivity() {
                             trackPeriod = opts.trackPeriod,
                             lipSync = opts.lipSync,
                             voicePath = voiceFile?.absolutePath,
+                            // The voice is ONE file shared by every clip in the batch, so
+                            // ITS trim always applies -- unlike the target trim, which the
+                            // batch runner deliberately ignores (one range cannot mean
+                            // anything across clips of different lengths).
+                            voiceTrimStartUs = (voiceTrimStartMs * 1000).toLong(),
+                            voiceTrimEndUs =
+                                if (voiceTrimEndMs >= voiceDurationMs) Long.MAX_VALUE
+                                else (voiceTrimEndMs * 1000).toLong(),
                             trimStartUs = 0L,
                             trimEndUs = Long.MAX_VALUE,
                             onProgress = { d, total ->

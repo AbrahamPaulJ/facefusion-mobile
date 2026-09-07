@@ -2,6 +2,7 @@ package com.facefusion.mobile.ui
 
 import android.graphics.Bitmap
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
@@ -15,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -26,6 +28,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
@@ -195,6 +200,21 @@ fun SwapScreen(
     /** The lip syncer's driving audio -- see [onPickVoice]'s doc, and `VideoSwapper.voicePath`. */
     hasVoice: Boolean,
     voiceName: String?,
+    /** The loaded voice's full length, ms. 0 until a file is loaded. */
+    voiceDurationMs: Long,
+    /**
+     * The part of the voice that drives the lips, ms -- the audio equivalent of
+     * [trimStartMs]/[trimEndMs] on the target. Only this range is decoded for the mouth
+     * and copied into the output's audio track.
+     */
+    voiceTrimStartMs: Float,
+    voiceTrimEndMs: Float,
+    onVoiceTrimChange: (Float, Float) -> Unit,
+    /** Playback of the loaded voice: the playhead position and whether it is running. */
+    voicePosMs: Float,
+    voicePlaying: Boolean,
+    onVoicePlayPause: () -> Unit,
+    onVoiceSeek: (Float) -> Unit,
     /**
      * Pick the file that DRIVES the mouth -- deliberately not the target. Only shown once
      * Lip Sync is on, because syncing a clip to the audio it already has has nothing to
@@ -494,6 +514,80 @@ fun SwapScreen(
                          Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
+        }
+
+        // ---------------------------------------------------------------- voice: listen, trim
+        //
+        // A voice is invisible, so the only way to check what was picked is to hear it.
+        // Play previews exactly the trimmed selection -- it starts at the trim start and
+        // stops at the trim end -- while the seekbar can scrub anywhere in the file. The
+        // range slider below chooses the part that actually DRIVES the lips, and it is the
+        // same two-handle control the video gets, because it is the same decision: keep
+        // only the part that matters.
+        if (opts.lipSync && hasVoice && voiceDurationMs > 0) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onVoicePlayPause, enabled = idle, modifier = Modifier.size(36.dp)) {
+                    if (voicePlaying) {
+                        // Two bars, drawn rather than an icon: the icons artifact this app
+                        // carries (material3's transitive icons-core) has PlayArrow but no
+                        // Pause, and extended-icons is a heavy addition for one glyph.
+                        val pauseTint = MaterialTheme.colorScheme.onSurfaceVariant
+                        Canvas(Modifier.size(16.dp)) {
+                            val bar = 4.dp.toPx()
+                            val gap = 3.dp.toPx()
+                            val top = 0.dp.toPx()
+                            val bottom = size.height
+                            drawRoundRect(
+                                color = pauseTint,
+                                topLeft = Offset(0f, top),
+                                size = Size(bar, bottom - top),
+                                cornerRadius = CornerRadius(1.dp.toPx()),
+                            )
+                            drawRoundRect(
+                                color = pauseTint,
+                                topLeft = Offset(bar + gap, top),
+                                size = Size(bar, bottom - top),
+                                cornerRadius = CornerRadius(1.dp.toPx()),
+                            )
+                        }
+                    } else {
+                        Icon(Icons.Default.PlayArrow,
+                             stringResource(R.string.swap_voice_play),
+                             Modifier.size(20.dp),
+                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                Slider(
+                    value = voicePosMs.coerceIn(0f, voiceDurationMs.toFloat()),
+                    onValueChange = onVoiceSeek,
+                    valueRange = 0f..voiceDurationMs.toFloat(),
+                    enabled = idle,
+                    modifier = Modifier.weight(1f),
+                )
+                Text("${fmt(voicePosMs)} / ${fmt(voiceDurationMs.toFloat())}",
+                     style = MaterialTheme.typography.bodySmall,
+                     fontFamily = FontFamily.Monospace,
+                     modifier = Modifier.padding(start = 8.dp))
+            }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Caption(stringResource(R.string.swap_voice_trim), Modifier.weight(1f))
+                Text("${fmt(voiceTrimStartMs)} – ${fmt(voiceTrimEndMs)}",
+                     style = MaterialTheme.typography.bodySmall,
+                     fontFamily = FontFamily.Monospace)
+            }
+            RangeSlider(
+                value = voiceTrimStartMs..voiceTrimEndMs,
+                onValueChange = { r ->
+                    // The same minimum span as the video trim, for the same reason: the
+                    // mouth needs a mel window, the encoder needs a frame.
+                    onVoiceTrimChange(r.start, maxOf(r.endInclusive, r.start + 333f))
+                },
+                valueRange = 0f..voiceDurationMs.toFloat(),
+                enabled = idle,
+            )
+            Text(stringResource(R.string.swap_voice_trim_hint),
+                 style = MaterialTheme.typography.bodySmall,
+                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
         // ---------------------------------------------------------------- inputs

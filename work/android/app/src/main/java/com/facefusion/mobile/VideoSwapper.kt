@@ -84,11 +84,21 @@ class VideoSwapper(
      * own reason for this feature is dubbing onto a DIFFERENT voice, not re-deriving the
      * one already there.
      *
-     * Decoded on ITS OWN timeline from sample 0, never the target's [trimStartUs] --
-     * the two clips are unrelated recordings and the target's trim has no meaning against
-     * a file that was never trimmed alongside it.
+     * Decoded on ITS OWN timeline, never the target's [trimStartUs] -- the two clips are
+     * unrelated recordings and the target's trim has no meaning against a file that was
+     * never trimmed alongside it. The voice's own trim (below) is the only range applied
+     * to it.
      */
     private val voicePath: String? = null,
+    /**
+     * The part of the VOICE the user kept, in its own timeline -- the audio equivalent of
+     * [trimStartUs]/[trimEndUs] on the target. Applied to both uses of the voice: the PCM
+     * that drives the mouth and the track copied into the output, so the viewer hears
+     * exactly the segment that was chosen, starting at 0 (see the copy loop's rebase).
+     * Defaults keep the whole file.
+     */
+    private val voiceTrimStartUs: Long = 0L,
+    private val voiceTrimEndUs: Long = Long.MAX_VALUE,
 ) {
 
     private var encTrack = -1
@@ -206,7 +216,8 @@ class VideoSwapper(
         // so up front instead of half way through.
         var syncing = false
         if (lipSync && NativePipe.hasLipSyncer()) {
-            val pcm = if (voicePath != null) AudioDecoder.decode(voicePath)
+            val pcm = if (voicePath != null)
+                          AudioDecoder.decode(voicePath, voiceTrimStartUs, voiceTrimEndUs)
                       else AudioDecoder.decode(inputPath, trimStartUs, trimEndUs)
             when {
                 pcm == null || pcm.frames == 0 ->
@@ -285,12 +296,14 @@ class VideoSwapper(
         var muxAudio = -1
         var muxing = false
         // A separate voice file has its OWN timeline, unrelated to the target's trim -- take
-        // it from its own start, capped at the video's post-trim LENGTH so a longer voice
-        // file does not produce an audio track past where the video ends.  Hoisted out of
-        // the copy-through below because the transcode fallback has to agree with it: the
-        // two must not disagree about which span of audio the output carries.
-        val copyStartUs = if (voicePath != null) 0L else trimStartUs
-        val copyEndUs = if (voicePath != null) spanUs else trimEndUs
+        // the user's chosen [voiceTrimStartUs, voiceTrimEndUs] segment, capped at the
+        // video's post-trim LENGTH so a voice longer than the clip does not produce an
+        // audio track past where the video ends.  Hoisted out of the copy-through below
+        // because the transcode fallback has to agree with it: the two must not disagree
+        // about which span of audio the output carries.
+        val copyStartUs = if (voicePath != null) voiceTrimStartUs else trimStartUs
+        val copyEndUs = if (voicePath != null)
+            minOf(voiceTrimEndUs, voiceTrimStartUs + spanUs) else trimEndUs
         // Non-null only when the pass-through was refused and a transcode replaced it.
         var aacPackets: List<AacPacket>? = null
         // Audio is PASS-THROUGH, and the MP4 muxer accepts a strictly narrower set of codecs

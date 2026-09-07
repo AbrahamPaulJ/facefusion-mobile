@@ -29,11 +29,13 @@ import java.io.File
  * speed — faster where the phone was working hardest — and it looks like a performance
  * problem rather than the timestamp bug it is.
  *
- * **Video only.** Audio is a separate decision: the microphone is already used by the Voice
- * picker, and muxing a second track means deciding what happens when the two disagree about
- * length. Saying so in one line beats shipping a silent track that looks broken.
+ * Optional microphone audio starts with the video clock and is muxed after encoding.
  */
-class LiveRecorder(private val out: File, private val onLog: (String) -> Unit = {}) {
+class LiveRecorder(
+    private val out: File,
+    private val microphone: LiveMicrophone? = null,
+    private val onLog: (String) -> Unit = {},
+) {
 
     private var encoder: MediaCodec? = null
     private var muxer: MediaMuxer? = null
@@ -107,15 +109,18 @@ class LiveRecorder(private val out: File, private val onLog: (String) -> Unit = 
             fmt.setInteger(MediaFormat.KEY_FRAME_RATE, 30)
             fmt.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
             val enc = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+            encoder = enc
             enc.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             enc.start()
             encoder = enc
             encW = w; encH = h
             muxer = MediaMuxer(out.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             startNs = System.nanoTime()
+            microphone?.start(startNs)
             onLog("recording ${ew}x${eh} -> ${out.name}")
             true
         }.getOrElse {
+            microphone?.close()
             failed = it.message ?: "encoder failed"
             onLog("recorder: $failed")
             false
@@ -167,6 +172,7 @@ class LiveRecorder(private val out: File, private val onLog: (String) -> Unit = 
             }
             frames++
         }.onFailure {
+            microphone?.close()
             failed = it.message ?: "encode failed"
             onLog("recorder: $failed")
         }
@@ -182,25 +188,38 @@ class LiveRecorder(private val out: File, private val onLog: (String) -> Unit = 
      */
     fun stop(): File? = synchronized(lock) {
         stopped = true
-        val enc = encoder ?: run { cleanupFailed(); return null }
+        runCatching { microphone?.stop() }.onFailure { failed = it.message ?: "microphone failed" }
+        val enc = encoder ?: run { microphone?.close(); cleanupFailed(); return null }
         runCatching {
             // EOS through the input queue, then drain until the encoder says it is done.
             val ix = enc.dequeueInputBuffer(100_000)
             if (ix >= 0)
                 enc.queueInputBuffer(ix, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
             drain(true)
-        }
+        }.onFailure { failed = it.message ?: "encoder finalization failed" }
         runCatching { enc.stop() }
         runCatching { enc.release() }
         encoder = null
         // ⚠ stop() on a muxer that was never started throws. It is only started once the
         // encoder has produced a format, which never happens if the first frame failed.
         if (muxing) runCatching { muxer?.stop() }
+            .onFailure { failed = it.message ?: "muxer finalization failed" }
         runCatching { muxer?.release() }
         muxer = null
         muxing = false
-        if (frames == 0 || !muxingEverStarted) { cleanupFailed(); return null }
-        return out
+        try {
+            if (failed != null || frames == 0 || !muxingEverStarted) {
+                cleanupFailed(); return null
+            }
+            microphone?.mergeInto(out)
+            return out
+        } catch (e: Exception) {
+            failed = e.message ?: "audio mux failed"
+            cleanupFailed()
+            return null
+        } finally {
+            microphone?.close()
+        }
     }
 
     private var muxingEverStarted = false

@@ -65,6 +65,7 @@ struct Config {
   // --face-selector-mode, reduced to the two that need no reference-face UI.
   // false = `many`, every detected face; true = `one`, the largest by box area.
   bool swapLargestOnly = false;
+  bool swapEnabled = true;
 
   // --reference-face-distance, upstream's default. The comparison is upstream's too, in
   // face_selector.py:compare_faces:
@@ -98,8 +99,11 @@ struct Config {
   // model sees it. See syncLip in ffpipe.cpp for where each is applied.
   float lipSyncWeight = 0.5f;
 
-  // content_analyser.py:detect_with_nsfw_2 -- `logit[0] - logit[1] > 0.25` flags a frame.
-  float nsfwThreshold = 0.25f;
+  // content_analyser.py:detect_with_nsfw_2 -- `logit[0] - logit[1] > T` flags a frame.
+  // Deliberately above upstream's 0.25, matching ContentGate.THRESHOLD: at 0.25 the
+  // model flags shirtless torsos and babies in diapers; 0.6 still trips on clearly
+  // explicit content while letting borderline-but-benign frames through.
+  float nsfwThreshold = 0.6f;
 
   // Tiers this DEVICE has already proved it cannot run, so init does not spend a load on
   // them again. Set by the caller from what a previous init reported through
@@ -201,7 +205,14 @@ class Pipeline {
   // landmark68 / landmark5_68 / embedding are NOT. It is the UI's question -- "which faces
   // are in this frame" -- and it costs one yoloface pass instead of yoloface plus 3.55 ms
   // per face. It also touches no tracker state, so it is safe to call while a run is warm.
-  std::vector<Face> analyse(const ffcv::Image& frame, bool boxesOnly = false);
+  //
+  // `noTrack` forbids BOTH uses of the tracker: the box is never reconstructed from a
+  // previous frame, and the tracker is never updated from this one. Source images are the
+  // one caller that needs it -- a photo of a different face at a different scale must not
+  // inherit (or reseed) the live tracker's geometry -- and it is what makes setSource /
+  // addSource safe to call while a live pump is configured for tracking.
+  std::vector<Face> analyse(const ffcv::Image& frame, bool boxesOnly = false,
+                            bool noTrack = false);
 
   // The source identity: the largest face of the source image, embedding only.
   // Detector tracking, in FRAMES between real detections. 0 disables it.
@@ -213,6 +224,61 @@ class Pipeline {
   void setTrackPeriod(int frames);
 
   bool setSource(const ffcv::Image& sourceImage);
+  int addSource(const ffcv::Image& sourceImage);
+  void clearSourceSlots();
+  void setActiveSource(int index);
+  bool setFaceSourceAt(const ffcv::Image& frame, float x, float y, int sourceIndex,
+                       bool disabled, float* outBox);
+  void clearFaceSourceAssignments();
+
+  /**
+   * Live's per-person assignment mode. When ON, a face the user tapped KEEPS its
+   * source for as long as it is in frame -- the decision is made once, at the tap, and
+   * never re-scored against per-frame embedding noise (that re-scoring is what made
+   * the old per-frame distance match flicker between sources). Untapped faces keep
+   * the source that was active when the mode was switched on -- the chip is a BRUSH
+   * while the mode is on, and changing it changes nothing on the feed until a face is
+   * tapped.
+   *
+   * Disabled is the default behaviour -- every face uses the active slot -- and it is
+   * the switch the user asked for: off means nothing about a session changes.
+   */
+  void setFaceAssignEnabled(bool enabled);
+
+  /**
+   * Record that [f] -- a face of a LIVE frame, embedding included -- belongs to
+   * [sourceIndex]. Called from liveFrame against the PRE-SWAP detections, so the
+   * identity stored is the real person's, not the swapped result the display shows.
+   */
+  bool addFaceAssignment(const Face& f, int sourceIndex);
+
+  /**
+   * Live assign mode's per-frame bookkeeping. Call ONCE per frame, right after
+   * analyse() and before swapAll() -- it is what makes an assignment sticky.
+   *
+   * Associates this frame's faces with the people it is tracking (box overlap, with an
+   * embedding fallback for fast moves -- never a re-scoring of the assignments), pins
+   * the face the user just tapped to [tapSource] so the swap on THIS frame already
+   * applies it, and fills the per-face source table swapAll() reads. A face with no
+   * pin keeps following the active slot.
+   *
+   * [tapX]/[tapY] are in RAW frame coordinates; pass tapSource = -1 when there is no
+   * tap. When a tap is given and hits a face, returns true and fills [outTapBox] with
+   * that face's raw box so the caller can draw the confirmation. A tap that misses a
+   * face still runs the tracking -- the per-face table must stay valid -- and returns
+   * false.
+   */
+  bool updateLiveTracking(const std::vector<Face>& faces,
+                          float tapX, float tapY, int tapSource, float* outTapBox);
+
+  /**
+   * The SELECTED person (assign mode): the last one tapped, who follows the source
+   * chip until an empty tap deselects them. Copies their current box (RAW frame
+   * coordinates) into [out] and their source into [outSource]; false when nobody is
+   * selected or the person is no longer tracked. The box moves with the person, so the
+   * UI can draw a persistent highlight over them.
+   */
+  bool selectedFaceBox(float* out, int* outSource) const;
 
   /**
    * Remember the face at (x, y) in [frame] as the one to swap -- upstream's
@@ -300,6 +366,15 @@ class Pipeline {
   // Swap every face in `frame`, in place. Never enhances -- see `enhance()`, always
   // called separately now, after `syncLip` when the caller has one.
   bool swapAll(ffcv::Image& frame, const std::vector<Face>& faces);
+  void setSwapEnabled(bool enabled);
+
+  /**
+   * The `one`-face selector (largest detected face) at runtime, WITHOUT a pipeline
+   * restart. swapAll and enhance both read cfg.swapLargestOnly per frame, so a live
+   * switch can flip it directly -- restarting instead would tear down the pipeline and
+   * with it every face assignment of the session.
+   */
+  void setSwapLargestOnly(bool enabled);
 
   /**
    * The enhancer, as its OWN pass -- ALWAYS called separately, never fused into
