@@ -99,11 +99,8 @@ struct Config {
   // model sees it. See syncLip in ffpipe.cpp for where each is applied.
   float lipSyncWeight = 0.5f;
 
-  // content_analyser.py:detect_with_nsfw_2 -- `logit[0] - logit[1] > T` flags a frame.
-  // Deliberately above upstream's 0.25, matching ContentGate.THRESHOLD: at 0.25 the
-  // model flags shirtless torsos and babies in diapers; 0.6 still trips on clearly
-  // explicit content while letting borderline-but-benign frames through.
-  float nsfwThreshold = 0.6f;
+  // content_analyser.py:detect_with_nsfw_2 -- `logit[0] - logit[1] > 0.25` flags a frame.
+  float nsfwThreshold = 0.25f;
 
   // Tiers this DEVICE has already proved it cannot run, so init does not spend a load on
   // them again. Set by the caller from what a previous init reported through
