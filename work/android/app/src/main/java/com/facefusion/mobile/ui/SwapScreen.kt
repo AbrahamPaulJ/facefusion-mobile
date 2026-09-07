@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.foundation.clickable
@@ -895,6 +896,37 @@ fun SwapScreen(
                 collapsible = true,
                 expanded = batchMenuExpanded,
                 onToggle = { batchMenuExpanded = !batchMenuExpanded },
+                trailing = {
+                    if (batch.isNotEmpty() || hasTarget) {
+                        Row(
+                            Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable(enabled = idle) { onBatchAutoSave(!batchAutoSave) }
+                                .padding(horizontal = 4.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                Modifier
+                                    .size(16.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (batchAutoSave) MaterialTheme.colorScheme.primary.copy(alpha = 0.69f)
+                                        else MaterialTheme.colorScheme.outlineVariant
+                                    ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (batchAutoSave) {
+                                    Icon(Icons.Default.Check, null, Modifier.size(11.dp),
+                                         tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.69f))
+                                }
+                            }
+                            Spacer(Modifier.width(4.dp))
+                            Text(stringResource(R.string.batch_autosave),
+                                 style = MaterialTheme.typography.bodySmall,
+                                 fontSize = 11.sp)
+                        }
+                    }
+                },
             ) {
                 Box(
                     Modifier
@@ -904,90 +936,94 @@ fun SwapScreen(
                         .border(1.dp, MaterialTheme.colorScheme.outlineVariant,
                                 RoundedCornerShape(16.dp)),
                 ) {
-                    Column(Modifier.padding(vertical = 4.dp)) {
-                        // 添加更多片段按钮（仅视频目标已加载时显示）
+                    // 添加片段按钮（+） + 缩略图列表，横向排列
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 6.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        // "+" 添加按钮，64dp，始终最左侧
                         if (hasTarget && !imageTarget && idle) {
-                            TextButton(onAddToBatch, modifier = Modifier.fillMaxWidth()) {
-                                Text(stringResource(if (batch.size > 1) R.string.swap_batch_add_more
-                                                    else R.string.swap_batch_add))
+                            IconButton(onAddToBatch,
+                                       modifier = Modifier
+                                           .size(64.dp)
+                                           .clip(RoundedCornerShape(8.dp))
+                                           .background(MaterialTheme.colorScheme.surfaceVariant),
+                                       ) {
+                                Icon(Icons.Default.Add, stringResource(R.string.swap_batch_add),
+                                     Modifier.size(28.dp),
+                                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
-                        // 自动保存 + 队列列表
-                        if (batch.isNotEmpty()) {
-                            Row(
+                        // 已添加的片段缩略图，64dp，横向排列
+                        batch.forEachIndexed { i, item ->
+                            Box(
                                 Modifier
-                                    .fillMaxWidth()
-                                    .clickable(enabled = idle) { onBatchAutoSave(!batchAutoSave) }
-                                    .padding(start = 6.dp, end = 14.dp, top = 2.dp, bottom = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically,
+                                    .size(64.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .clickable(enabled = idle && item.output != null) {
+                                        onOpenBatchOutput(i)
+                                    },
+                                contentAlignment = Alignment.Center,
                             ) {
-                                Checkbox(batchAutoSave, { onBatchAutoSave(it) }, enabled = idle)
-                                Text(stringResource(R.string.batch_autosave),
-                                     style = MaterialTheme.typography.bodySmall)
-                            }
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                            batch.forEachIndexed { i, item ->
-                                if (i > 0) HorizontalDivider(
-                                    color = MaterialTheme.colorScheme.outlineVariant)
-                                Row(
-                                    Modifier.fillMaxWidth()
-                                        // A finished row IS the way back to its clip.
-                                        .clickable(enabled = idle && item.output != null) {
-                                            onOpenBatchOutput(i)
-                                        }
-                                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    if (item.thumb != null) {
-                                        Image(
-                                            item.thumb!!.asImageBitmap(), null,
-                                            Modifier
-                                                .size(44.dp, 30.dp)
-                                                .clip(RoundedCornerShape(4.dp)),
-                                            contentScale = ContentScale.Crop,
-                                        )
-                                        Spacer(Modifier.width(10.dp))
-                                    }
-                                    Column(Modifier.weight(1f)) {
-                                        Text(item.name, style = MaterialTheme.typography.bodySmall,
-                                             maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        if (item.detail != null) Text(
-                                            item.detail!!,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            fontSize = 10.sp,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis,
-                                            color = if (item.state == BatchState.Refused)
-                                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                                    else MaterialTheme.colorScheme.error,
-                                        )
-                                    }
+                                if (item.thumb != null) {
+                                    Image(
+                                        item.thumb!!.asImageBitmap(), null,
+                                        Modifier
+                                            .fillMaxSize()
+                                            .clip(RoundedCornerShape(6.dp)),
+                                        contentScale = ContentScale.Crop,
+                                    )
+                                } else {
+                                    Icon(Icons.Default.PlayArrow, null,
+                                         Modifier.size(24.dp),
+                                         tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                // 状态角标
+                                if (item.state != BatchState.Waiting) {
                                     Text(
                                         stringResource(when (item.state) {
-                                            BatchState.Waiting -> R.string.batch_waiting
                                             BatchState.Running -> R.string.batch_running
                                             BatchState.Done -> R.string.batch_done
                                             BatchState.Refused -> R.string.batch_refused
                                             BatchState.Failed -> R.string.batch_failed
                                             BatchState.Skipped -> R.string.batch_skipped
+                                            else -> R.string.batch_waiting
                                         }),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontSize = 10.sp,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontSize = 7.sp,
                                         fontFamily = FontFamily.Monospace,
                                         color = when (item.state) {
                                             BatchState.Done -> FfRed
                                             BatchState.Failed -> MaterialTheme.colorScheme.error
                                             else -> MaterialTheme.colorScheme.onSurfaceVariant
                                         },
+                                        modifier = Modifier
+                                            .align(Alignment.BottomCenter)
+                                            .background(
+                                                MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                                                RoundedCornerShape(3.dp),
+                                            )
+                                            .padding(horizontal = 3.dp, vertical = 1.dp),
                                     )
-                                    if (idle) {
-                                        IconButton({ onRemoveFromBatch(i) },
-                                                   modifier = Modifier.size(32.dp)) {
-                                            Icon(Icons.Default.Delete,
-                                                 stringResource(R.string.batch_remove),
-                                                 Modifier.size(16.dp),
-                                                 tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
+                                }
+                                // 删除按钮
+                                if (idle) {
+                                    IconButton(
+                                        { onRemoveFromBatch(i) },
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .size(18.dp)
+                                            .offset(x = 2.dp, y = (-2).dp),
+                                    ) {
+                                        Icon(Icons.Default.Delete,
+                                             stringResource(R.string.batch_remove),
+                                             Modifier.size(12.dp),
+                                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                 }
                             }
@@ -1294,7 +1330,7 @@ fun SwapScreen(
                 ) {
                     OutputPane(
                         file = outputFile,
-                        height = paneHeight,
+                        height = resultH,
                         onSaveFrame = onSaveFrame,
                         partial = outputPartial,
                         enabled = idle,

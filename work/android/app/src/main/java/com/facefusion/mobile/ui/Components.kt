@@ -613,7 +613,10 @@ fun FaceTile(
         if (bitmap != null) {
             Image(
                 bitmap.asImageBitmap(), label,
-                Modifier.fillMaxSize().padding(3.dp),
+                Modifier
+                    .fillMaxSize()
+                    .padding(3.dp)
+                    .clip(RoundedCornerShape(12.dp)),
                 contentScale = ContentScale.Fit,
             )
         } else {
@@ -725,8 +728,10 @@ fun OutputPane(
             Modifier
                 .fillMaxWidth()
                 .height(height)
-                .clip(RoundedCornerShape(14.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant,
+                        RoundedCornerShape(12.dp)),
             contentAlignment = Alignment.Center,
         ) {
             // ⚠ KEYED ON THE PATH, and this is not decoration. AndroidView's `factory`
