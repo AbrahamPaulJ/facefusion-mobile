@@ -60,6 +60,20 @@ class MainActivity : ComponentActivity() {
      */
     private var voiceFile by mutableStateOf<File?>(null)
     private var voiceName by mutableStateOf<String?>(null)
+    /** The loaded voice's full length, ms. 0 until a file is loaded. */
+    private var voiceDurationMs by mutableStateOf(0L)
+    /**
+     * The part of the voice that DRIVES the lips, ms -- the audio equivalent of
+     * [trimStartMs]/[trimEndMs]. Only this range is decoded for the mouth and copied into
+     * the output's audio track. Reset to the whole file when a voice is loaded.
+     */
+    private var voiceTrimStartMs by mutableStateOf(0f)
+    private var voiceTrimEndMs by mutableStateOf(0f)
+    /** Playback of the loaded voice: where the playhead is, and whether it is running. */
+    private var voicePosMs by mutableStateOf(0f)
+    private var voicePlaying by mutableStateOf(false)
+    private var voicePlayer: android.media.MediaPlayer? = null
+    private var voicePollJob: kotlinx.coroutines.Job? = null
     /** True while the microphone is capturing a driving voice. */
     private var recordingVoice by mutableStateOf(false)
 
@@ -1104,6 +1118,14 @@ class MainActivity : ComponentActivity() {
                                 onDeleteOutput = ::discardOutput,
                                 hasVoice = voiceFile != null,
                                 voiceName = voiceName,
+                                voiceDurationMs = voiceDurationMs,
+                                voiceTrimStartMs = voiceTrimStartMs,
+                                voiceTrimEndMs = voiceTrimEndMs,
+                                onVoiceTrimChange = ::onVoiceTrimChanged,
+                                voicePosMs = voicePosMs,
+                                voicePlaying = voicePlaying,
+                                onVoicePlayPause = ::toggleVoicePlayback,
+                                onVoiceSeek = ::onVoiceSeek,
                                 onPickVoice = { pickVoice.launch(arrayOf("audio/*", "video/*")) },
                                 onClearVoice = ::clearVoice,
                                 recordingVoice = recordingVoice,
@@ -1339,6 +1361,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         scrubJob?.cancel()
+        stopVoicePlayback()
         previews.release()
     }
 
@@ -1932,7 +1955,14 @@ class MainActivity : ComponentActivity() {
             // belongs to which timestamp.
             if (opts.lipSync) {
                 val previewFps = if (opts.outputFps in 1..inputFps) opts.outputFps else inputFps
-                previews.applyVoice(voiceFile?.absolutePath, previewFps.toDouble())
+                // The SAME trim the run will use: the preview's mel windows must index the
+                // same part of the voice the output does, or the scrubbed mouth and the
+                // rendered mouth would disagree on every frame.
+                previews.applyVoice(voiceFile?.absolutePath,
+                                    (voiceTrimStartMs * 1000).toLong(),
+                                    if (voiceTrimEndMs >= voiceDurationMs) Long.MAX_VALUE
+                                    else (voiceTrimEndMs * 1000).toLong(),
+                                    previewFps.toDouble())
             }
             try {
                 val frame = originalFrame ?: previews.frameAt(previewAtMs)?.also {
@@ -2247,6 +2277,13 @@ class MainActivity : ComponentActivity() {
             }
             result.onSuccess { (f, durMs) ->
                 voiceFile = f
+                // The trim is a property of THIS file: a newly picked or recorded voice
+                // always starts whole, never inheriting the previous file's range.
+                voiceDurationMs = durMs
+                voiceTrimStartMs = 0f
+                voiceTrimEndMs = durMs.toFloat()
+                voicePosMs = 0f
+                stopVoicePlayback()
                 status = getString(R.string.status_voice_ready, fmt(durMs.toFloat()))
             }.onFailure {
                 voiceFile = null
@@ -2332,6 +2369,107 @@ class MainActivity : ComponentActivity() {
     private fun clearVoice() {
         voiceFile = null
         voiceName = null
+        voiceDurationMs = 0
+        voiceTrimStartMs = 0f
+        voiceTrimEndMs = 0f
+        voicePosMs = 0f
+        stopVoicePlayback()
+        if (opts.lipSync) previewOptionsChanged(reloads = false)
+    }
+
+    /**
+     * Play or pause the loaded voice, so the user can hear what they picked before it
+     * drives anything.
+     *
+     * Playback is confined to the trimmed range: it starts at the trim start (or the
+     * playhead if that is already inside it) and stops at the trim end -- "play" always
+     * previews exactly the segment that will drive the lips. Dragging the seekbar can
+     * scrub anywhere in the file; the next play snaps back inside the selection.
+     */
+    private fun toggleVoicePlayback() {
+        val f = voiceFile ?: return
+        if (voicePlaying) {
+            voicePollJob?.cancel()
+            voicePlayer?.pause()
+            voicePlaying = false
+            return
+        }
+        val p = voicePlayer ?: run {
+            val np = android.media.MediaPlayer()
+            runCatching {
+                np.setDataSource(f.absolutePath)
+                np.prepare()
+            }.getOrElse {
+                np.release()
+                status = getString(R.string.status_cannot_read_audio, it.message ?: "")
+                return
+            }
+            np.setOnCompletionListener { voicePlaybackEnded() }
+            voicePlayer = np
+            np
+        }
+        val dur = p.duration.toLong().coerceAtLeast(1)
+        if (voiceDurationMs <= 0) voiceDurationMs = dur
+        var at = voicePosMs.coerceIn(0f, voiceDurationMs.toFloat())
+        // Outside the selection (before its start, or after its end from a previous run)
+        // snaps to the start of the selection.
+        if (at >= voiceTrimEndMs) at = voiceTrimStartMs
+        if (at < voiceTrimStartMs) at = voiceTrimStartMs
+        runCatching { p.seekTo(at.toInt()) }
+        p.start()
+        voicePosMs = at
+        voicePlaying = true
+        voicePollJob?.cancel()
+        voicePollJob = lifecycleScope.launch {
+            while (voicePlaying) {
+                delay(200)
+                val pos = voicePlayer?.currentPosition?.toLong() ?: continue
+                if (pos >= voiceTrimEndMs.toLong()) { voicePlaybackEnded(); break }
+                voicePosMs = pos.toFloat()
+            }
+        }
+    }
+
+    /** Playback reached the end of the trimmed selection (or the file ended early). */
+    private fun voicePlaybackEnded() {
+        runCatching { voicePlayer?.pause() }
+        voicePlaying = false
+        // Back to the start of the selection, so the next press of play replays it.
+        voicePosMs = voiceTrimStartMs
+    }
+
+    /** Release the player entirely -- a new voice is loaded, or the screen is going away. */
+    private fun stopVoicePlayback() {
+        voicePollJob?.cancel()
+        voicePollJob = null
+        runCatching { voicePlayer?.release() }
+        voicePlayer = null
+        voicePlaying = false
+    }
+
+    /** The seekbar was dragged: move the playhead, without leaving play mode. */
+    private fun onVoiceSeek(ms: Float) {
+        val p = voicePlayer
+        if (p != null) runCatching { p.seekTo(ms.toInt()) }
+        voicePosMs = ms
+        if (voicePlaying && ms >= voiceTrimEndMs) voicePlaybackEnded()
+    }
+
+    /**
+     * The voice's trim handles moved.
+     *
+     * Keeps at least a third of a second, like the video trim (the encoder needs a frame;
+     * the mouth needs a window). The driving audio is re-decoded with the new range on the
+     * next preview refresh, so the scrubbed preview and the eventual run agree on which
+     * part of the voice drives which frame.
+     */
+    private fun onVoiceTrimChanged(start: Float, end: Float) {
+        voiceTrimStartMs = start
+        voiceTrimEndMs = end
+        // Keep the playhead inside the selection: scrubbing the handles past where the
+        // playhead sits should not leave play previewing a part that was just cut away.
+        if (voicePosMs < start) { voicePosMs = start; onVoiceSeek(start) }
+        if (voicePosMs > end) { voicePosMs = end; onVoiceSeek(end) }
         if (opts.lipSync) previewOptionsChanged(reloads = false)
     }
 
@@ -2998,6 +3136,9 @@ class MainActivity : ComponentActivity() {
                         trackPeriod = opts.trackPeriod,
                         lipSync = opts.lipSync,
                         voicePath = voiceFile?.absolutePath,
+                        voiceTrimStartUs = (voiceTrimStartMs * 1000).toLong(),
+                        voiceTrimEndUs = if (voiceTrimEndMs >= voiceDurationMs) Long.MAX_VALUE
+                                         else (voiceTrimEndMs * 1000).toLong(),
                         trimStartUs = (trimStartMs * 1000).toLong(),
                         trimEndUs = if (trimEndMs >= durationMs) Long.MAX_VALUE
                                     else (trimEndMs * 1000).toLong(),
@@ -3231,6 +3372,14 @@ class MainActivity : ComponentActivity() {
                             trackPeriod = opts.trackPeriod,
                             lipSync = opts.lipSync,
                             voicePath = voiceFile?.absolutePath,
+                            // The voice is ONE file shared by every clip in the batch, so
+                            // ITS trim always applies -- unlike the target trim, which the
+                            // batch runner deliberately ignores (one range cannot mean
+                            // anything across clips of different lengths).
+                            voiceTrimStartUs = (voiceTrimStartMs * 1000).toLong(),
+                            voiceTrimEndUs =
+                                if (voiceTrimEndMs >= voiceDurationMs) Long.MAX_VALUE
+                                else (voiceTrimEndMs * 1000).toLong(),
                             trimStartUs = 0L,
                             trimEndUs = Long.MAX_VALUE,
                             onProgress = { d, total ->

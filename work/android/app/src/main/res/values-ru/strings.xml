@@ -39,6 +39,10 @@
     <string name="swap_voice_picked">Аудио готово</string>
     <string name="swap_choose_another_voice">Выбрать другой голос</string>
     <string name="swap_remove_voice">Удалить голос</string>
+    <string name="swap_voice_play">Воспроизвести голос</string>
+    <string name="swap_voice_pause">Пауза</string>
+    <string name="swap_voice_trim">Фрагмент голоса</string>
+    <string name="swap_voice_trim_hint">Только эта часть управляет губами</string>
     <string name="swap_loading_models">Загрузка моделей, это займёт несколько секунд…</string>
     <string name="swap_swapping_frame">Замена на этом кадре…</string>
     <string name="swap_pick_a_source">Выберите исходное лицо</string>

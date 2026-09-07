@@ -63,6 +63,11 @@
     <string name="swap_voice_picked">Audio ready</string>
     <string name="swap_choose_another_voice">Choose another voice</string>
     <string name="swap_remove_voice">Remove voice</string>
+    <string name="swap_voice_play">Play the voice</string>
+    <string name="swap_voice_pause">Pause the voice</string>
+    <string name="swap_voice_trim">Voice clip</string>
+    <!-- The voice's trim handles: only this segment drives the lips / is heard in the output. -->
+    <string name="swap_voice_trim_hint">Only this part drives the lips</string>
     <string name="swap_loading_models">Loading models, this takes a few seconds…</string>
     <string name="swap_swapping_frame">Swapping this frame…</string>
     <string name="swap_pick_a_source">Pick a source face</string>

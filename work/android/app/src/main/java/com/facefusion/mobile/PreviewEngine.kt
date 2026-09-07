@@ -238,6 +238,12 @@ class PreviewEngine {
      *  position back into the same frame index a real run would compute. */
     private var audioFps: Double = 0.0
 
+    /** The voice range [appliedVoice] was decoded at. Part of the cache key, exactly like
+     *  the path: a voice file that is still the same file but trimmed differently must be
+     *  re-decoded, or a scrubbed preview would mouth the OLD range while the eventual run
+     *  mouths the new one. */
+    private var appliedVoiceTrim: Pair<Long, Long>? = null
+
     /** True when a pipeline is loaded AND a source face has been applied to it. */
     val isWarm: Boolean get() = loadedSwapper != null && appliedSource != null
 
@@ -247,6 +253,7 @@ class PreviewEngine {
         loadedOpts = null
         appliedSource = null
         appliedVoice = null
+        appliedVoiceTrim = null
         audioFps = 0.0
     }
 
@@ -271,20 +278,23 @@ class PreviewEngine {
      * warm-up (`if (!previewWarm)` in the caller), so a voice picked or changed AFTER the
      * preview is already warm would never be decoded. This is cheap enough to call on
      * every refresh instead, like [applyOptions] -- a no-op when nothing is loaded, when
-     * [voicePath] is null, or when this exact file at this exact [fps] is already applied
-     * (see [appliedVoice]). [fps] has to match what a real run would index frames at, or a
-     * scrubbed preview and the eventual output would show different mouths at the same
-     * timestamp.
+     * [voicePath] is null, or when this exact file at this exact trim and [fps] is already
+     * applied (see [appliedVoice] and [appliedVoiceTrim]). [fps] has to match what a real
+     * run would index frames at, or a scrubbed preview and the eventual output would show
+     * different mouths at the same timestamp.
      */
-    suspend fun applyVoice(voicePath: String?, fps: Double) {
+    suspend fun applyVoice(voicePath: String?, trimStartUs: Long, trimEndUs: Long,
+                           fps: Double) {
         if (loadedSwapper == null || voicePath == null) return
-        if (appliedVoice == voicePath && audioFps == fps) return
+        if (appliedVoice == voicePath && appliedVoiceTrim == (trimStartUs to trimEndUs) &&
+            audioFps == fps) return
         val pcm = withContext(Dispatchers.IO) {
-            runCatching { AudioDecoder.decode(voicePath) }.getOrNull()
+            runCatching { AudioDecoder.decode(voicePath, trimStartUs, trimEndUs) }.getOrNull()
         }
         appliedVoice = if (pcm != null && pcm.frames > 0 &&
                            NativePipe.setAudio(pcm.samples, pcm.channels, pcm.sampleRate, fps))
             voicePath else null
+        appliedVoiceTrim = if (appliedVoice != null) (trimStartUs to trimEndUs) else null
         audioFps = fps
     }
 
