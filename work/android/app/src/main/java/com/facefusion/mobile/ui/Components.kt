@@ -595,6 +595,11 @@ fun PreviewPane(
  * inputs permanently on screen: 72 dp tall whatever the state, width wrapping to whatever
  * the row gives it, the label as a translucent plate ON the picture so the whole height is
  * image, and the pick/remove actions tucked into the top corner.
+ *
+ * [fill] switches to the voice tile's layout: the tile stretches to whatever width the
+ * caller gives it (a `weight`), its content centres in the whole surface, and the actions
+ * float on the surface's own corners -- inside the element, the way every tile looked
+ * before the compact form existed.
  */
 @Composable
 fun FaceTile(
@@ -610,23 +615,133 @@ fun FaceTile(
     actions: @Composable () -> Unit = {},
     /** Actions that keep the original bottom-right corner (the video camera). */
     bottomActions: @Composable () -> Unit = {},
+    /** Stretch to the caller's width; actions float on the surface (the voice tile). */
+    fill: Boolean = false,
+) {
+    if (fill) {
+        // The voice tile keeps its pre-compact layout: one surface, content centred,
+        // actions riding ON the surface's own corners -- inside the element.
+        FaceTileFilled(label, bitmap, placeholder, modifier, onClick, actionIcon,
+                       actions, bottomActions)
+        return
+    }
+    // ONE element wraps everything: the 72 x 72 dp content square and, right beside it
+    // with only 3 dp of air, the small action icons. The icons live INSIDE the tile's
+    // rounded surface -- they never add to the content square's 72 dp.
+    Box(
+        modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        // BOTTOM-aligned, not centred: with a single action icon (the source's camera,
+        // the filled tiles' delete) a mid-height icon reads as a floating stray; pinned
+        // to the bottom edge it reads as a corner button, which is where tile actions
+        // have always lived. Two icons keep their stack -- top one higher, bottom one
+        // still landing on the corner.
+        Row(verticalAlignment = Alignment.Bottom) {
+            Box(
+                Modifier
+                    .size(72.dp)
+                    .clip(RoundedCornerShape(16.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (bitmap != null) {
+                    // FULL-BLEED, no inset: the bitmap covers the whole 72 dp square. The
+                    // square's own clip rounds the image, so there is no frame, no border
+                    // and no margin left around it -- the picture IS the content square.
+                    Image(
+                        bitmap.asImageBitmap(), label,
+                        Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
+                } else {
+                    // The add-state content fills the same 72 x 72 dp square, so empty and
+                    // filled tiles measure identically.
+                    Column(
+                        modifier = Modifier.size(72.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        if (actionIcon != null) {
+                            Icon(
+                                actionIcon, null,
+                                Modifier.size(26.dp),
+                                // Same brand-tinted call-to-action as the full panes use, scaled
+                                // down to fit the tile's smaller plate.
+                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
+                            )
+                        }
+                        Text(
+                            placeholder,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 6.dp),
+                        )
+                    }
+                }
+                // The name rides ON the picture so the square's whole height is image.
+                Text(
+                    label.uppercase(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    letterSpacing = 1.2.sp,
+                    fontSize = 9.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(5.dp)
+                        // The label sits directly on the image with no plate behind it.
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
+            // Small actions (camera, change, delete…), stacked in a column just 3 dp
+            // to the right of the content square, inside the same tile surface and
+            // pinned to its bottom edge with the Row above.
+            Column(
+                Modifier.padding(start = 3.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                actions()
+                bottomActions()
+            }
+        }
+    }
+}
+
+/**
+ * The voice tile's original layout, restored verbatim as a private helper: ONE surface
+ * that stretches to the width the caller hands it (a `weight`), content centred in the
+ * whole element, and the small actions floating on the surface's own top/bottom corners.
+ *
+ * `label` rides ON the content near the top like every tile; with the voice tile's
+ * stretch width the label and actions never collide. The square/compact tiles do NOT
+ * use this form -- they keep the 72 dp content square with the icon column beside it.
+ */
+@Composable
+private fun FaceTileFilled(
+    label: String,
+    bitmap: Bitmap?,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    actionIcon: ImageVector? = null,
+    actions: @Composable () -> Unit = {},
+    bottomActions: @Composable () -> Unit = {},
 ) {
     Box(
         modifier
             .height(72.dp)
-            // A floor, not a fixed width: the empty tile never narrows past its own
-            // 72 dp square, and a filled tile still wraps to exactly what the row
-            // hands it.
-            .widthIn(min = 72.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(MaterialTheme.colorScheme.surface)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         contentAlignment = Alignment.Center,
     ) {
         if (bitmap != null) {
-            // A 64 dp square thumbnail pinned to the tile's LEADING edge, not a full-bleed
-            // image: the tile keeps its own frame and the thumbnail reads as a compact
-            // preview -- content first, then the arrow pointing at what it becomes.
             Image(
                 bitmap.asImageBitmap(), label,
                 Modifier
@@ -636,20 +751,14 @@ fun FaceTile(
                 contentScale = ContentScale.Crop,
             )
         } else {
-            // The add-state content is a 72 x 72 dp square -- exactly the tile's own
-            // height -- so the tile measures just wide enough to hold it plus the
-            // corner icons, instead of stretching after the row's widest sibling.
             Column(
-                modifier = Modifier.size(72.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 if (actionIcon != null) {
                     Icon(
                         actionIcon, null,
                         Modifier.size(26.dp),
-                        // Same brand-tinted call-to-action as the full panes use, scaled
-                        // down to fit the tile's smaller plate.
                         tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
                     )
                 }
@@ -663,8 +772,6 @@ fun FaceTile(
                 )
             }
         }
-        // The name rides ON the picture so the tile's whole height is image; a caption row
-        // of its own would push the pair past the 72 dp the workbench row is budgeted for.
         Text(
             label.uppercase(),
             style = MaterialTheme.typography.labelSmall,
@@ -676,7 +783,6 @@ fun FaceTile(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(5.dp)
-                // The label sits directly on the image with no plate behind it.
                 .padding(horizontal = 6.dp, vertical = 2.dp),
         )
         Row(

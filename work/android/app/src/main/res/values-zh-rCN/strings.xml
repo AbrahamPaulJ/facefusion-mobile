@@ -30,7 +30,7 @@
     <string name="swap_choose_another_target">更换目标</string>
     <string name="swap_remove_target">移除目标</string>
     <string name="swap_pane_voice">语音</string>
-    <string name="swap_voice_add">添加音频以驱动口型</string>
+    <string name="swap_voice_add">音频（口型）</string>
     <string name="swap_voice_picked">音频已就绪</string>
     <string name="swap_choose_another_voice">更换语音</string>
     <string name="swap_remove_voice">移除语音</string>
