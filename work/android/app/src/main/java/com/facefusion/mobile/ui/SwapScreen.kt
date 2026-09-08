@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,7 +64,15 @@ import com.facefusion.mobile.R
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Face
 
-/** Everything the two preview panes need to draw themselves. */
+/**
+ * Everything the two preview panes need to draw themselves.
+ *
+ * @Immutable: the fields are all `val` and are treated as never-mutated in place --
+ * new facts always arrive as a new instance. Without it the FloatArray/Bitmap fields
+ * make the class unstable, and every recomposition of the Activity's scope (a log line,
+ * a progress tick) re-ran the whole 1600-line screen instead of skipping it.
+ */
+@Immutable
 data class PreviewUi(
     val original: Bitmap? = null,
     val swapped: Bitmap? = null,
@@ -91,7 +100,15 @@ data class PreviewUi(
  */
 enum class TrimEdge { Start, End }
 
-/** Progress of an actual swap run. */
+/**
+ * Progress of an actual swap run.
+ *
+ * @Immutable lets Compose skip [SwapScreen] when nothing in the run actually changed:
+ * the Activity rebuilds this on every recomposition of its own scope, and without the
+ * annotation every one of those rebuilds was a full re-composition of the whole 1600-line
+ * screen -- the scroll stutter while a run is in flight.
+ */
+@Immutable
 data class RunUi(
     val busy: Boolean = false,
     val preparing: Boolean = false,

@@ -3149,6 +3149,11 @@ class MainActivity : ComponentActivity() {
                         "swapped_${System.currentTimeMillis()}.mp4")
                     status = getString(R.string.status_swapping)
                     var lastPreview = 0L
+                    // The native loop calls onProgress for EVERY processed frame; writing
+                    // three top-level states at that rate re-composed the whole 1600-line
+                    // screen 25+ times a second and stalled the scroll. 10 Hz is past what
+                    // the progress readout can show, and the final tick always lands.
+                    var lastProgress = 0L
 
                     VideoSwapper(
                         outputFps = opts.outputFps,
@@ -3163,9 +3168,13 @@ class MainActivity : ComponentActivity() {
                         trimEndUs = if (trimEndMs >= durationMs) Long.MAX_VALUE
                                     else (trimEndMs * 1000).toLong(),
                         onProgress = { done, total ->
-                            framesDone = done; framesTotal = total
-                            progress = if (total > 0) done.toFloat() / total else 0f
-                            elapsedS = (System.currentTimeMillis() - t0) / 1000.0
+                            val now = System.currentTimeMillis()
+                            if (now - lastProgress >= 100 || done >= total) {
+                                lastProgress = now
+                                framesDone = done; framesTotal = total
+                                progress = if (total > 0) done.toFloat() / total else 0f
+                                elapsedS = (now - t0) / 1000.0
+                            }
                         },
                         onFrame = { bgr, w, h ->
                             // throttle: a Bitmap per frame is pure allocation churn and the
@@ -3386,6 +3395,10 @@ class MainActivity : ComponentActivity() {
                                        "_" + (i + 1) + ".mp4")
                         partial = out
                         var lastPreview = 0L
+                        // Same 10 Hz cap as the single-run path above: the native loop's
+                        // per-frame onProgress was a 25 Hz recomposition storm over the
+                        // whole screen, scroll included.
+                        var lastProgress = 0L
                         VideoSwapper(
                             outputFps = opts.outputFps,
                             outputMaxShortEdge = opts.outputMaxShortEdge,
@@ -3403,9 +3416,13 @@ class MainActivity : ComponentActivity() {
                             trimStartUs = 0L,
                             trimEndUs = Long.MAX_VALUE,
                             onProgress = { d, total ->
-                                framesDone = d; framesTotal = total
-                                progress = if (total > 0) d.toFloat() / total else 0f
-                                elapsedS = (System.currentTimeMillis() - t0) / 1000.0
+                                val now = System.currentTimeMillis()
+                                if (now - lastProgress >= 100 || d >= total) {
+                                    lastProgress = now
+                                    framesDone = d; framesTotal = total
+                                    progress = if (total > 0) d.toFloat() / total else 0f
+                                    elapsedS = (now - t0) / 1000.0
+                                }
                             },
                             onFrame = { bgr, w, h ->
                                 val now = System.currentTimeMillis()
