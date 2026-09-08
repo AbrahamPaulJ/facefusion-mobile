@@ -121,7 +121,7 @@ class LiveRecorder(
             true
         }.getOrElse {
             microphone?.close()
-            failed = it.message ?: "encoder failed"
+            failed = codecWhy(it, "encoder failed")
             onLog("recorder: $failed")
             false
         }
@@ -173,7 +173,7 @@ class LiveRecorder(
             frames++
         }.onFailure {
             microphone?.close()
-            failed = it.message ?: "encode failed"
+            failed = codecWhy(it, "encode failed")
             onLog("recorder: $failed")
         }
       }
@@ -196,14 +196,14 @@ class LiveRecorder(
             if (ix >= 0)
                 enc.queueInputBuffer(ix, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
             drain(true)
-        }.onFailure { failed = it.message ?: "encoder finalization failed" }
+        }.onFailure { failed = codecWhy(it, "encoder finalization failed") }
         runCatching { enc.stop() }
         runCatching { enc.release() }
         encoder = null
         // ⚠ stop() on a muxer that was never started throws. It is only started once the
         // encoder has produced a format, which never happens if the first frame failed.
         if (muxing) runCatching { muxer?.stop() }
-            .onFailure { failed = it.message ?: "muxer finalization failed" }
+            .onFailure { failed = codecWhy(it, "muxer finalization failed") }
         runCatching { muxer?.release() }
         muxer = null
         muxing = false
@@ -264,3 +264,20 @@ class LiveRecorder(
         }
     }
 }
+
+/**
+ * What actually went wrong, for a message the user can quote in a bug report.
+ *
+ * MediaCodec.CodecException's `message` is routinely EMPTY -- not null, EMPTY -- so
+ * `t.message ?: fallback` keeps the empty string and the line reads "recorder: " with
+ * nothing after it. That is how a 1440x2560 clip was reported with a status of "Failed: ".
+ * `diagnosticInfo` is the vendor string naming the constraint the component rejected, and
+ * it is the only part of a codec refusal worth reading.
+ *
+ * [what] is always kept, never used as a fallback: an exception's own message says what the
+ * component thought, not what this app asked it for, and the report needs both.
+ */
+internal fun codecWhy(t: Throwable, what: String): String =
+    what + ": " + ((t as? android.media.MediaCodec.CodecException)?.let {
+        "error " + it.errorCode + ", " + it.diagnosticInfo
+    } ?: t.message?.ifBlank { null } ?: t.javaClass.simpleName)
