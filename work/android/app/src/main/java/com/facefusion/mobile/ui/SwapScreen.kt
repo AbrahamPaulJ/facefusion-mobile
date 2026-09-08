@@ -664,7 +664,6 @@ fun SwapScreen(
                     label = stringResource(R.string.swap_source_face),
                     bitmap = sourceThumb,
                     placeholder = stringResource(R.string.swap_source_pick),
-                    modifier = Modifier.weight(1f),
                     onClick = if (idle) onPickSource else null,
                     actionIcon = if (hasSource) null else Icons.Default.Add,
                     actions = {
@@ -710,7 +709,9 @@ fun SwapScreen(
                         hasTarget -> R.string.swap_seeking
                         else -> R.string.swap_add_target
                     }),
-                    modifier = Modifier.weight(1f),
+                    // No weight: the tile wraps to its content (the 72 dp square while
+                    // empty, the 64 dp frame once filled) instead of stretching across
+                    // the row -- the voice tile takes the leftover width.
                     // The tile IS the picker. A separate full-width button said the same thing
                     // twice and cost a row of height the wordmark needed.
                     onClick = if (idle) onPickTarget else null,

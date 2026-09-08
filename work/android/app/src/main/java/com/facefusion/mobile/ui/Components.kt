@@ -614,6 +614,10 @@ fun FaceTile(
     Box(
         modifier
             .height(72.dp)
+            // A floor, not a fixed width: the empty tile never narrows past its own
+            // 72 dp square, and a filled tile still wraps to exactly what the row
+            // hands it.
+            .widthIn(min = 72.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(MaterialTheme.colorScheme.surface)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
@@ -632,9 +636,13 @@ fun FaceTile(
                 contentScale = ContentScale.Crop,
             )
         } else {
+            // The add-state content is a 72 x 72 dp square -- exactly the tile's own
+            // height -- so the tile measures just wide enough to hold it plus the
+            // corner icons, instead of stretching after the row's widest sibling.
             Column(
+                modifier = Modifier.size(72.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.Center,
             ) {
                 if (actionIcon != null) {
                     Icon(
