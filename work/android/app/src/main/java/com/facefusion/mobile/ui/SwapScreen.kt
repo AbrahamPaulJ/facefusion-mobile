@@ -809,7 +809,7 @@ fun SwapScreen(
         // The result of the swap gets a full-width pane of its own, sized from the TARGET.
         // The pane fills the available width; its height follows the target's aspect ratio
         // capped so a tall target never eats the screen.
-        val maxPaneW = (screenW - 36).dp
+        val maxPaneW = (screenW - 64).dp
         // ⚠ The result pane's height has a CEILING, or a tall target eats the screen:
         // a tall portrait frame scaled to full width would be taller than a phone.
         // The pane used to size itself freely, and the Swap button -- everything below
@@ -1030,7 +1030,7 @@ fun SwapScreen(
                                         Icon(Icons.Default.Delete,
                                              stringResource(R.string.batch_remove),
                                              Modifier.size(12.dp),
-                                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                             tint = Color.White)
                                     }
                                 }
                             }
@@ -1261,6 +1261,19 @@ fun SwapScreen(
             }
         }
 
+        // Only when there is something to report. It used to carry a standing
+        // instruction, which the two empty preview panes above already give.
+        // Rendered directly under the Swap button: the batch-queued count is the
+        // reply to pressing "Add more clips", so it belongs right beneath the action.
+        if (status.isNotEmpty()) {
+            Text(status, style = MaterialTheme.typography.bodyMedium)
+            // Only on a failure. A crash leaves no in-app log at all, which is why
+            // BugReport also persists uncaught exceptions for the next launch.
+            if (statusIsError) {
+                TextButton(onShareLog) { Text(stringResource(R.string.swap_share_bug_report)) }
+            }
+        }
+
         if (run.busy || run.progress > 0f) {
             LinearProgressIndicator(
                 progress = { run.progress.coerceIn(0f, 1f) },
@@ -1275,17 +1288,6 @@ fun SwapScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            }
-        }
-
-        // Only when there is something to report. It used to carry a standing
-        // instruction, which the two empty preview panes above already give.
-        if (status.isNotEmpty()) {
-            Text(status, style = MaterialTheme.typography.bodyMedium)
-            // Only on a failure. A crash leaves no in-app log at all, which is why
-            // BugReport also persists uncaught exceptions for the next launch.
-            if (statusIsError) {
-                TextButton(onShareLog) { Text(stringResource(R.string.swap_share_bug_report)) }
             }
         }
 
