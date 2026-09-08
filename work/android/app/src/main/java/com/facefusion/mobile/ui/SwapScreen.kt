@@ -756,10 +756,10 @@ fun SwapScreen(
                     placeholder = if (hasVoice) (voiceName ?: stringResource(R.string.swap_voice_picked))
                                   else stringResource(R.string.swap_voice_add),
                     modifier = Modifier.weight(1f),
-                    // The voice tile keeps its ORIGINAL stretched layout: one surface
-                    // that fills the row's leftover width, content centred, the mic and
-                    // record buttons riding on the surface's own corners -- inside the
-                    // element, the way it looked before the compact square form.
+                    // Same stretch as before: one surface that fills the row's leftover
+                    // width, content centred -- but the mic and delete now sit in the
+                    // SAME bottom-pinned icon column (3 dp beside the content) as the
+                    // source and target tiles.
                     fill = true,
                     // The tile IS the picker, except while a clip is loaded or the mic is
                     // live -- the record button owns the interaction then, and the whole-tile

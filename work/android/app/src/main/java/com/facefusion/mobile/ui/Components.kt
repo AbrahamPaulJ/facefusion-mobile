@@ -619,8 +619,8 @@ fun FaceTile(
     fill: Boolean = false,
 ) {
     if (fill) {
-        // The voice tile keeps its pre-compact layout: one surface, content centred,
-        // actions riding ON the surface's own corners -- inside the element.
+        // The voice tile: same bottom-pinned icon column as the compact tiles, but
+        // the content stretches to the row's leftover width instead of a fixed square.
         FaceTileFilled(label, bitmap, placeholder, modifier, onClick, actionIcon,
                        actions, bottomActions)
         return
@@ -699,9 +699,10 @@ fun FaceTile(
 }
 
 /**
- * The voice tile's original layout, restored verbatim as a private helper: ONE surface
- * that stretches to the width the caller hands it (a `weight`), content centred in the
- * whole element, and the small actions floating on the surface's own top/bottom corners.
+ * The voice tile's stretched form as a private helper: ONE surface that stretches to
+ * the width the caller hands it (a `weight`), content centred in the whole element,
+ * and the small actions in the same bottom-pinned icon column the compact tiles use --
+ * 3 dp to the right of the content, inside the same surface.
  *
  * `label` is kept for the content description only; it is no longer drawn on the
  * tile. The square/compact tiles do NOT use this form -- they keep the 72 dp content
@@ -726,48 +727,54 @@ private fun FaceTileFilled(
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         contentAlignment = Alignment.Center,
     ) {
-        if (bitmap != null) {
-            Image(
-                bitmap.asImageBitmap(), label,
-                Modifier
-                    .align(Alignment.CenterStart)
-                    .size(64.dp)
-                    .clip(RoundedCornerShape(12.dp)),
-                contentScale = ContentScale.Crop,
-            )
-        } else {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                if (actionIcon != null) {
-                    Icon(
-                        actionIcon, null,
-                        Modifier.size(26.dp),
-                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
+        // The voice tile lays its icons out exactly like the compact tiles: a
+        // bottom-pinned column 3 dp to the right of the content, inside the same
+        // surface. Only the content itself stretches to the row's leftover width.
+        Row(verticalAlignment = Alignment.Bottom) {
+            if (bitmap != null) {
+                Image(
+                    bitmap.asImageBitmap(), label,
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(16.dp)),
+                    contentScale = ContentScale.Crop,
+                )
+            } else {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    if (actionIcon != null) {
+                        Icon(
+                            actionIcon, null,
+                            Modifier.size(26.dp),
+                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
+                        )
+                    }
+                    Text(
+                        placeholder,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 6.dp),
                     )
                 }
-                Text(
-                    placeholder,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = 6.dp),
-                )
             }
-        }
-        Row(
-            Modifier.align(Alignment.TopEnd).padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            actions()
-        }
-        Row(
-            Modifier.align(Alignment.BottomEnd).padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            bottomActions()
+            // Small actions (record, delete…), stacked in a column just 3 dp to the
+            // right of the content and pinned to the tile's bottom edge -- the same
+            // icon column the source and target tiles use.
+            Column(
+                Modifier.padding(start = 3.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                actions()
+                bottomActions()
+            }
         }
     }
 }
