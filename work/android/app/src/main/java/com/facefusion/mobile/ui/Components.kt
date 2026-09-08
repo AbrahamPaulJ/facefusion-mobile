@@ -683,21 +683,6 @@ fun FaceTile(
                         )
                     }
                 }
-                // The name rides ON the picture so the square's whole height is image.
-                Text(
-                    label.uppercase(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    letterSpacing = 1.2.sp,
-                    fontSize = 9.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(5.dp)
-                        // The label sits directly on the image with no plate behind it.
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                )
             }
             // Small actions (camera, change, delete…), stacked in a column just 3 dp
             // to the right of the content square, inside the same tile surface and
@@ -718,9 +703,9 @@ fun FaceTile(
  * that stretches to the width the caller hands it (a `weight`), content centred in the
  * whole element, and the small actions floating on the surface's own top/bottom corners.
  *
- * `label` rides ON the content near the top like every tile; with the voice tile's
- * stretch width the label and actions never collide. The square/compact tiles do NOT
- * use this form -- they keep the 72 dp content square with the icon column beside it.
+ * `label` is kept for the content description only; it is no longer drawn on the
+ * tile. The square/compact tiles do NOT use this form -- they keep the 72 dp content
+ * square with the icon column beside it.
  */
 @Composable
 private fun FaceTileFilled(
@@ -772,19 +757,6 @@ private fun FaceTileFilled(
                 )
             }
         }
-        Text(
-            label.uppercase(),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            letterSpacing = 1.2.sp,
-            fontSize = 9.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(5.dp)
-                .padding(horizontal = 6.dp, vertical = 2.dp),
-        )
         Row(
             Modifier.align(Alignment.TopEnd).padding(4.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
