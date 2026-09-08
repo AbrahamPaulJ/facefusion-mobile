@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.composed
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -617,6 +619,20 @@ fun FaceTile(
     bottomActions: @Composable () -> Unit = {},
     /** Stretch to the caller's width; actions float on the surface (the voice tile). */
     fill: Boolean = false,
+    /**
+     * Face boxes over the tile's image, in the BITMAP's own pixel coordinates: five
+     * floats per face -- x0, y0, x1, y1, score -- exactly as `NativePipe.detectFaces`
+     * returns them. Drawn in FfRed, the chosen face thicker.
+     */
+    faceBoxes: FloatArray? = null,
+    /** The chosen reference face's box, drawn differently from the rest. Four floats. */
+    referenceBox: FloatArray? = null,
+    /**
+     * A tap landed inside one of [faceBoxes]; the arguments are the tap in the BITMAP's
+     * own pixel coordinates. A tap that misses every box still runs [onClick] -- the
+     * tile is the target picker first, a face picker second.
+     */
+    onPickFace: ((Float, Float) -> Unit)? = null,
 ) {
     if (fill) {
         // The voice tile: same bottom-pinned icon column as the compact tiles, but
@@ -644,7 +660,45 @@ fun FaceTile(
             Box(
                 Modifier
                     .size(72.dp)
-                    .clip(RoundedCornerShape(16.dp)),
+                    .clip(RoundedCornerShape(16.dp))
+                    .then(
+                        // Face picking takes the tap FIRST, and only over the image
+                        // itself: the icon column beside the square keeps its own
+                        // buttons, and a tap that misses every box runs the tile's own
+                        // onClick -- the tile stays the target picker first.
+                        if (bitmap != null && onPickFace != null) {
+                            Modifier.pointerInput(onPickFace, faceBoxes, bitmap) {
+                                detectTapGestures(
+                                    onTap = { tap ->
+                                        var picked = false
+                                        val boxes = faceBoxes
+                                        if (boxes != null && boxes.size >= 5) {
+                                            val bw = size.width.toFloat()
+                                            val bh = size.height.toFloat()
+                                            val iw = bitmap.width.toFloat()
+                                            val ih = bitmap.height.toFloat()
+                                            // ContentScale.Crop, the tile's own scale: the
+                                            // LARGER ratio fills the square and the
+                                            // overflow is clipped, centred on both axes.
+                                            val k = maxOf(bw / iw, bh / ih)
+                                            val ix = (tap.x - (bw - iw * k) / 2f) / k
+                                            val iy = (tap.y - (bh - ih * k) / 2f) / k
+                                            for (i in 0 until boxes.size / 5) {
+                                                val b = i * 5
+                                                if (ix >= boxes[b] && ix <= boxes[b + 2] &&
+                                                    iy >= boxes[b + 1] && iy <= boxes[b + 3]) {
+                                                    onPickFace(ix, iy)
+                                                    picked = true
+                                                    break
+                                                }
+                                            }
+                                        }
+                                        if (!picked) onClick?.invoke()
+                                    },
+                                )
+                            }
+                        } else Modifier
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 if (bitmap != null) {
@@ -656,6 +710,38 @@ fun FaceTile(
                         Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop,
                     )
+                    if (faceBoxes != null && faceBoxes.size >= 5) {
+                        // The outlines live on the image, in the image's own coordinates:
+                        // ContentScale.Crop (the LARGER ratio fills the square, overflow
+                        // clipped, centred on both axes) converts them to the square.
+                        Canvas(Modifier.fillMaxSize()) {
+                            val iw = bitmap.width.toFloat()
+                            val ih = bitmap.height.toFloat()
+                            if (iw > 0f && ih > 0f) {
+                                val k = maxOf(size.width / iw, size.height / ih)
+                                val ox = (size.width - iw * k) / 2f
+                                val oy = (size.height - ih * k) / 2f
+                                val w = 1.5.dp.toPx()
+                                for (i in 0 until faceBoxes.size / 5) {
+                                    val b = i * 5
+                                    val chosen = referenceBox != null &&
+                                        referenceBox.size >= 4 &&
+                                        kotlin.math.abs(referenceBox[0] - faceBoxes[b]) < 1f &&
+                                        kotlin.math.abs(referenceBox[1] - faceBoxes[b + 1]) < 1f
+                                    drawRect(
+                                        color = if (chosen) FfRed
+                                                else FfRed.copy(alpha =
+                                                    if (referenceBox != null) 0.35f else 1f),
+                                        topLeft = Offset(ox + faceBoxes[b] * k,
+                                                         oy + faceBoxes[b + 1] * k),
+                                        size = Size((faceBoxes[b + 2] - faceBoxes[b]) * k,
+                                                    (faceBoxes[b + 3] - faceBoxes[b + 1]) * k),
+                                        style = Stroke(width = if (chosen) w * 2f else w),
+                                    )
+                                }
+                            }
+                        }
+                    }
                 } else {
                     // The add-state content fills the same 72 x 72 dp square, so empty and
                     // filled tiles measure identically.

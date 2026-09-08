@@ -740,8 +740,19 @@ fun SwapScreen(
                                      tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
-                        // TRASH, on the same bottom edge as the other tiles' delete.
+                        // FACES, the upstream pane's own switch, moved into the tile's
+                        // icon column: the detector's boxes are drawn over THIS tile's
+                        // frame, so the switch lives beside them. Icon goes red while on.
                         if (hasTarget) {
+                            IconButton(onToggleFaceBoxes, enabled = idle,
+                                       modifier = Modifier.size(26.dp)) {
+                                Icon(Icons.Default.Face,
+                                     stringResource(R.string.swap_show_faces),
+                                     Modifier.size(14.dp),
+                                     tint = if (showFaceBoxes) FfRed
+                                            else MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            // TRASH, on the same bottom edge as the other tiles' delete.
                             IconButton(onClearTarget, enabled = idle, modifier = Modifier.size(26.dp)) {
                                 Icon(Icons.Default.Delete, stringResource(R.string.swap_remove_target),
                                      Modifier.size(14.dp),
@@ -749,6 +760,12 @@ fun SwapScreen(
                             }
                         }
                     },
+                    // The detector's boxes, already gated by MainActivity on the overlay
+                    // switch, drawn over the tile's own frame; a tap on a face picks it
+                    // as the reference (a miss still opens the target picker).
+                    faceBoxes = preview.faceBoxes,
+                    referenceBox = preview.referenceBox,
+                    onPickFace = if (idle) onPickFace else null,
                 )
                 if (opts.lipSync) FaceTile(
                     label = stringResource(R.string.swap_pane_voice),
