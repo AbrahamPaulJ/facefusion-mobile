@@ -1343,6 +1343,7 @@ fun SwapScreen(
                         onSaveFrame = onSaveFrame,
                         partial = outputPartial,
                         enabled = idle,
+                        contentWidth = resultW,
                     )
                 }
                 // Says the swipe exists. A gesture with nothing on screen to suggest it is a

@@ -702,6 +702,10 @@ fun OutputPane(
     modifier: Modifier = Modifier,
     partial: Boolean = false,
     enabled: Boolean = true,
+    /** When set, the video box is THIS wide instead of filling the column, and is
+     *  centred inside the (still full-width) pane -- so a portrait clip is not
+     *  letterboxed into side bars. Mirrors PreviewPane.contentWidth. */
+    contentWidth: Dp? = null,
 ) {
     // Keyed on the file: a second run replaces the video, and stale position/duration from
     // the previous one would put the scrub bar somewhere that no longer exists.
@@ -735,7 +739,9 @@ fun OutputPane(
         }
         Box(
             Modifier
-                .fillMaxWidth()
+                .then(if (contentWidth != null)
+                          Modifier.align(Alignment.CenterHorizontally).width(contentWidth)
+                      else Modifier.fillMaxWidth())
                 .height(height)
                 .clip(RoundedCornerShape(12.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)

@@ -116,3 +116,4 @@ work/android/keystore.properties
 # clips those were generated from (~6 MB of mp4), which nothing reads at build or run time
 # and which would sit in every clone of the history for ever.
 media/source/
+work/local.properties
