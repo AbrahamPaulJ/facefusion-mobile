@@ -30,7 +30,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -63,7 +62,6 @@ import androidx.compose.ui.res.stringResource
 import com.facefusion.mobile.R
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Face
-import androidx.compose.material.icons.filled.PlayArrow
 
 /** Everything the two preview panes need to draw themselves. */
 data class PreviewUi(
@@ -654,12 +652,9 @@ fun SwapScreen(
         // before/after -- its frame shows the source frame of the swap -- so there is no
         // separate full-width "original" pane below any more.
         //
-        // ONE card wraps the whole row so the tiles read as a single input group, with
-        // the same surface fill and hairline the section cards use. It is exactly as
-        // tall as the 72 dp tiles -- no breathing room top or bottom, the tiles now own
-        // the full card edge-to-edge (their own hairlines are gone too). The same 10 dp
-        // the row leaves between tiles is mirrored on the inside edges, so the group is
-        // framed.
+        // No wrapping card: the three tiles sit directly in one Row, 8 dp apart, each
+        // with FaceTile's own 16 dp rounded surface -- the group reads as one input row
+        // while every tile keeps its own frame.
         Row(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -1604,26 +1599,5 @@ fun DownloadOverlay(onDownload: () -> Unit) {
                 }
             }
         }
-    }
-}
-
-/**
- * A single hairline on one edge of a tile — the divider that separates a tile from its
- * neighbour without drawing a full box around it. Drawn over the tile's content so it
- * survives the tile's own surface fill.
- */
-private fun Modifier.edgeLine(
-    start: Boolean = false,
-    end: Boolean = false,
-    color: Color,
-    stroke: Dp = 1.dp,
-): Modifier = drawWithContent {
-    drawContent()
-    val w = stroke.toPx()
-    if (start) {
-        drawLine(color, Offset(w / 2f, 0f), Offset(w / 2f, size.height), w)
-    }
-    if (end) {
-        drawLine(color, Offset(size.width - w / 2f, 0f), Offset(size.width - w / 2f, size.height), w)
     }
 }
