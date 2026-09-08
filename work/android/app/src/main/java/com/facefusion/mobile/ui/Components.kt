@@ -620,11 +620,13 @@ fun FaceTile(
         contentAlignment = Alignment.Center,
     ) {
         if (bitmap != null) {
-            // A 64 dp square thumbnail centred in the tile, not a full-bleed image: the
-            // tile keeps its own frame and the thumbnail reads as a compact preview.
+            // A 64 dp square thumbnail pinned to the tile's LEADING edge, not a full-bleed
+            // image: the tile keeps its own frame and the thumbnail reads as a compact
+            // preview -- content first, then the arrow pointing at what it becomes.
             Image(
                 bitmap.asImageBitmap(), label,
                 Modifier
+                    .align(Alignment.CenterStart)
                     .size(64.dp)
                     .clip(RoundedCornerShape(12.dp)),
                 contentScale = ContentScale.Crop,

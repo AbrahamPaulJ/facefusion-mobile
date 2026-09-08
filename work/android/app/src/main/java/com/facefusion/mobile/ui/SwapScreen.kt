@@ -691,41 +691,12 @@ fun SwapScreen(
                         }
                     },
                 )
-                if (opts.lipSync) FaceTile(
-                    label = stringResource(R.string.swap_pane_voice),
-                    bitmap = null,
-                    placeholder = if (hasVoice) (voiceName ?: stringResource(R.string.swap_voice_picked))
-                                  else stringResource(R.string.swap_voice_add),
-                    modifier = Modifier.weight(1f),
-                    // The tile IS the picker, except while a clip is loaded or the mic is
-                    // live -- the record button owns the interaction then, and the whole-tile
-                    // tap must not fire mid-capture.
-                    onClick = if (idle && !recordingVoice) onPickVoice else null,
-                    actionIcon = if (hasVoice) null else Icons.Default.Add,
-                    actions = {
-                        // RECORD. The lip syncer needs a voice that is not the target's own
-                        // audio, and the microphone is the one source every user has -- no file
-                        // to go find first.
-                        if (idle) {
-                            IconButton(onToggleRecordVoice, modifier = Modifier.size(26.dp)) {
-                                Icon(painterResource(if (recordingVoice) R.drawable.ic_stop
-                                                     else R.drawable.ic_mic),
-                                     stringResource(if (recordingVoice) R.string.swap_voice_stop
-                                                    else R.string.swap_voice_record),
-                                     Modifier.size(14.dp),
-                                     tint = if (recordingVoice) MaterialTheme.colorScheme.error
-                                            else MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    },
-                    bottomActions = {
-                        if (hasVoice && idle) {
-                            IconButton(onClearVoice, modifier = Modifier.size(26.dp)) {
-                                Icon(Icons.Default.Delete, stringResource(R.string.swap_remove_voice),
-                                     Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    },
+                // ⇒ marks the direction of the swap: the source face BECOMES the
+                // target. The Row's verticalAlignment centres it between the two tiles.
+                Text(
+                    "⇒",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
                 FaceTile(
                     // The tile names what it holds: TARGET while asking for one, ORIGINAL once
@@ -774,6 +745,42 @@ fun SwapScreen(
                                 Icon(Icons.Default.Delete, stringResource(R.string.swap_remove_target),
                                      Modifier.size(14.dp),
                                      tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    },
+                )
+                if (opts.lipSync) FaceTile(
+                    label = stringResource(R.string.swap_pane_voice),
+                    bitmap = null,
+                    placeholder = if (hasVoice) (voiceName ?: stringResource(R.string.swap_voice_picked))
+                                  else stringResource(R.string.swap_voice_add),
+                    modifier = Modifier.weight(1f),
+                    // The tile IS the picker, except while a clip is loaded or the mic is
+                    // live -- the record button owns the interaction then, and the whole-tile
+                    // tap must not fire mid-capture.
+                    onClick = if (idle && !recordingVoice) onPickVoice else null,
+                    actionIcon = if (hasVoice) null else Icons.Default.Add,
+                    actions = {
+                        // RECORD. The lip syncer needs a voice that is not the target's own
+                        // audio, and the microphone is the one source every user has -- no file
+                        // to go find first.
+                        if (idle) {
+                            IconButton(onToggleRecordVoice, modifier = Modifier.size(26.dp)) {
+                                Icon(painterResource(if (recordingVoice) R.drawable.ic_stop
+                                                     else R.drawable.ic_mic),
+                                     stringResource(if (recordingVoice) R.string.swap_voice_stop
+                                                    else R.string.swap_voice_record),
+                                     Modifier.size(14.dp),
+                                     tint = if (recordingVoice) MaterialTheme.colorScheme.error
+                                            else MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    },
+                    bottomActions = {
+                        if (hasVoice && idle) {
+                            IconButton(onClearVoice, modifier = Modifier.size(26.dp)) {
+                                Icon(Icons.Default.Delete, stringResource(R.string.swap_remove_voice),
+                                     Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     },
