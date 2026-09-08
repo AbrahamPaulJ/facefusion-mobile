@@ -25,7 +25,6 @@
     <string name="swap_source_pick">選擇來源人臉</string>
     <string name="swap_pane_original">原圖</string>
     <string name="swap_pane_target">目標</string>
-    <string name="swap_pane_original_at">原圖  %1$s</string>
     <string name="swap_pane_swapped">換臉結果</string>
     <string name="swap_reading_video">正在讀取影片…</string>
     <string name="swap_seeking">正在定位…</string>

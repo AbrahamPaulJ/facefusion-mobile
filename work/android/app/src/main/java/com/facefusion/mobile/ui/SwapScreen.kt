@@ -826,13 +826,6 @@ fun SwapScreen(
                     },
                 )
             }
-        // ---------------------------------------------------------------- previews
-        //
-        // Read as a before/after of ONE frame, so the two are always the same size as each
-        // other. WHICH WAY they stack follows the footage: a portrait clip in two stacked
-        // full-width boxes is mostly empty grey, because ContentScale.Fit letterboxes a
-        // 9:16 image into a 16:9 box and throws away about two thirds of the width. Side by
-        // side, each pane is half as wide and the image fills it.
 // ---------------------------------------------------------------- result
         //
         // The result of the swap gets a full-width pane of its own, sized from the TARGET.

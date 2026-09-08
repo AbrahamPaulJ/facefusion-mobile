@@ -40,7 +40,6 @@
          that is not there yet. It is the counterpart of "Source face". -->
     <string name="swap_pane_target">Target</string>
     <!-- %1$s is a timestamp like "0.42s" -->
-    <string name="swap_pane_original_at">Original  %1$s</string>
     <string name="swap_pane_swapped">Swapped</string>
     <string name="swap_reading_video">Reading video…</string>
     <string name="swap_seeking">Seeking…</string>
