@@ -660,25 +660,16 @@ fun SwapScreen(
         // the full card edge-to-edge (their own hairlines are gone too). The same 10 dp
         // the row leaves between tiles is mirrored on the inside edges, so the group is
         // framed.
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(MaterialTheme.colorScheme.surface)
-                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp)),
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Row(
-                Modifier.fillMaxWidth().fillMaxHeight(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
                 FaceTile(
                     label = stringResource(R.string.swap_source_face),
                     bitmap = sourceThumb,
                     placeholder = stringResource(R.string.swap_source_pick),
-                    modifier = Modifier.weight(1f).edgeLine(
-                        end = true,
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.31f),
-                    ),
+                    modifier = Modifier.weight(1f),
                     onClick = if (idle) onPickSource else null,
                     actionIcon = if (hasSource) null else Icons.Default.Add,
                     actions = {
@@ -753,10 +744,7 @@ fun SwapScreen(
                         hasTarget -> R.string.swap_seeking
                         else -> R.string.swap_add_target
                     }),
-                    modifier = Modifier.weight(1f).edgeLine(
-                        start = true,
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.31f),
-                    ),
+                    modifier = Modifier.weight(1f),
                     // The tile IS the picker. A separate full-width button said the same thing
                     // twice and cost a row of height the wordmark needed.
                     onClick = if (idle) onPickTarget else null,
@@ -796,7 +784,6 @@ fun SwapScreen(
                     },
                 )
             }
-        }
         // ---------------------------------------------------------------- previews
         //
         // Read as a before/after of ONE frame, so the two are always the same size as each
