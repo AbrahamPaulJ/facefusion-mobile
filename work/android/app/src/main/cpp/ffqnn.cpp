@@ -77,6 +77,15 @@ bool fail(const std::string& m) {
   return false;
 }
 
+// Identical to [fail] except for the LOG PRIORITY. lastError() still receives the message
+// verbatim, so no caller can tell the difference and no failure becomes quieter than it
+// was -- this only stops a routine condition writing ERROR lines into every bug report.
+bool failQuiet(const std::string& m) {
+  g_err = m;
+  LOGI("%s", m.c_str());
+  return false;
+}
+
 // The entry points that can fail clear it first, so `lastError()` describes the call that
 // just returned false rather than the last one that ever did. This became load-bearing when
 // ffnn_qnn.cpp stopped shadowing this string: a stale message there hid an execution
@@ -504,7 +513,21 @@ Handle load(const std::string& binPath) {
   // present and unreadable, and those have opposite fixes -- download it, versus the mode
   // 660 that makes /sdcard/Download copies invisible to the app (HANDOFF, self-test).
   int fd = open(binPath.c_str(), O_RDONLY);
-  if (fd < 0) { fail("open " + binPath + ": " + strerror(errno)); return nullptr; }
+  if (fd < 0) {
+    // ⚠ ENOENT here is ROUTINE, not a fault. ffpipe opens fan685 and gpen unconditionally
+    // and treats a null handle as "feature not available" -- fan685 is not even hosted, so
+    // it is absent on EVERY install by design. Logging that at ERROR put a line in every
+    // bug report for a condition the code documents as normal, and it costs a reader the
+    // time to chase it before finding the comment that says it is fine.
+    //
+    // Only ENOENT. "present but unreadable" (EACCES -- the mode 660 that makes a
+    // /sdcard/Download copy invisible to the app) is never expected and stays at ERROR:
+    // the two have opposite fixes, which is why the errno is in the message at all.
+    const int e = errno;
+    const std::string m = "open " + binPath + ": " + strerror(e);
+    if (e == ENOENT) failQuiet(m); else fail(m);
+    return nullptr;
+  }
   struct stat st{};
   if (fstat(fd, &st) != 0 || st.st_size <= 0) {
     close(fd); fail("stat " + binPath + ": " + strerror(errno)); return nullptr;
