@@ -55,8 +55,12 @@ class MainActivity : ComponentActivity() {
     private var swapPersonAssignments by mutableStateOf<Map<Int, Int>>(emptyMap())
     private var swapAssignmentPoints by mutableStateOf<Map<Int, Pair<Float, Float>>>(emptyMap())
     private var swapAssignmentEmbeddings by mutableStateOf<Map<Int, FloatArray>>(emptyMap())
+    /** Person indices assigned to the no-face option; -1 is used as the source sentinel. */
+    private var swapNoFaceSelected by mutableStateOf(false)
     private var liveSources by mutableStateOf<List<LiveSource>>(emptyList())
     private var liveSourceIndex by mutableIntStateOf(0)
+    /** Live Assign per person source brush: -2 means keep the original face. */
+    private var liveNoFaceSelected by mutableStateOf(false)
     private var liveLargestOnly by mutableStateOf(false)
     private var targetFile by mutableStateOf<File?>(null)
     private var targetName by mutableStateOf<String?>(null)
@@ -244,6 +248,8 @@ class MainActivity : ComponentActivity() {
      * restart would be a surprise on an app that opens on the Swap tab.
      */
     private var liveFrontCamera by mutableStateOf(true)
+    /** Whether Live mirrors the displayed feed; independent from front/back lens selection. */
+    private var liveMirrorCamera by mutableStateOf(true)
 
     /** The Live recording in flight, and whether the UI should say so -- roadmap 13b. */
     private var liveRecorder: LiveRecorder? = null
@@ -460,7 +466,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun selectSwapSource(index: Int) {
+        if (index == -1) {
+            swapNoFaceSelected = true
+            if (swapAssignMode && swapSelectedPerson >= 0) assignSwapPerson(swapSelectedPerson, -1)
+            return
+        }
         if (index !in swapSources.indices) return
+        swapNoFaceSelected = false
         swapSourceIndex = index
         val selected = swapSources[index]
         sourceUri = selected.uri
@@ -479,6 +491,7 @@ class MainActivity : ComponentActivity() {
             clearSource()
             return
         }
+        swapNoFaceSelected = false
         swapSourceIndex = swapSourceIndex.coerceAtMost(remaining.lastIndex)
         sourceUri = remaining[swapSourceIndex].uri
         sourceThumb = remaining[swapSourceIndex].thumb
@@ -504,7 +517,8 @@ class MainActivity : ComponentActivity() {
     }.getOrNull()
 
     private fun assignSwapPerson(person: Int, source: Int) {
-        if (!swapAssignMode || person !in swapPersonThumbs.indices || source !in swapSources.indices) return
+        if (!swapAssignMode || person !in swapPersonThumbs.indices ||
+            (source != -1 && source !in swapSources.indices)) return
         val frame = originalFrame ?: return
         val boxes = faceBoxes ?: return
         val box = boxes.asList().chunked(5).getOrNull(person) ?: return
@@ -514,14 +528,17 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch(Dispatchers.Default) {
             val ok = NativePipe.assignFaceAt(
                 NativePipe.argbToBgr(px, soft.width, soft.height), soft.width, soft.height,
-                (box[0] + box[2]) / 2f, (box[1] + box[3]) / 2f, source)
+                (box[0] + box[2]) / 2f, (box[1] + box[3]) / 2f,
+                if (source >= 0) source else 0, source < 0)
             if (ok.size == 512) withContext(Dispatchers.Main) {
                 swapSelectedPerson = person
+                swapNoFaceSelected = source < 0
                 swapPersonAssignments = swapPersonAssignments + (person to source)
                 swapAssignmentPoints = swapAssignmentPoints +
                     (person to (((box[0] + box[2]) / 2f) to ((box[1] + box[3]) / 2f)))
                 swapAssignmentEmbeddings = swapAssignmentEmbeddings + (person to ok)
-                status = getString(R.string.swap_assign_set, person + 1, source + 1)
+                status = if (source < 0) getString(R.string.swap_assign_no_face_set, person + 1)
+                         else getString(R.string.swap_assign_set, person + 1, source + 1)
                 previewOptionsChanged(reloads = false)
             }
         }
@@ -530,7 +547,7 @@ class MainActivity : ComponentActivity() {
     private fun selectSwapPerson(person: Int) {
         if (person !in swapPersonThumbs.indices) return
         swapSelectedPerson = person
-        if (swapAssignMode) assignSwapPerson(person, swapSourceIndex)
+        if (swapAssignMode) assignSwapPerson(person, if (swapNoFaceSelected) -1 else swapSourceIndex)
     }
 
     private fun toggleSwapAssign() {
@@ -539,6 +556,8 @@ class MainActivity : ComponentActivity() {
         swapPersonAssignments = emptyMap()
         swapAssignmentPoints = emptyMap()
         swapAssignmentEmbeddings = emptyMap()
+        swapNoFaceSelected = false
+        if (swapAssignMode) NativePipe.clearFaceSourceAssignments()
         // Target-face selection and per-person assignment are mutually exclusive native
         // selectors. A reference face wins inside swapAll(), so leaving it set would make
         // Assign per person affect only that one face.
@@ -560,6 +579,7 @@ class MainActivity : ComponentActivity() {
         swapAssignmentPoints = emptyMap()
         swapAssignmentEmbeddings = emptyMap()
         swapSelectedPerson = -1
+        swapNoFaceSelected = false
         NativePipe.clearFaceSourceAssignments()
         status = getString(R.string.swap_assign_cleared)
         previewOptionsChanged(reloads = false)
@@ -595,9 +615,21 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun selectLiveSource(index: Int) {
+        if (index == -1) {
+            liveNoFaceSelected = true
+            // If a person was already selected, apply No face immediately. The next tap
+            // still uses the brush for a new person, but re-tapping the target is no longer
+            // required for the current selection.
+            if (liveAssignMode && liveRunning) NativePipe.setSelectedFaceDisabled(true)
+            return
+        }
         if (index !in liveSources.indices || index == liveSourceIndex) return
+        liveNoFaceSelected = false
         liveSourceIndex = index
-        if (liveRunning) NativePipe.setActiveSource(index)
+        if (liveRunning) {
+            NativePipe.setActiveSource(index)
+            if (liveAssignMode) NativePipe.setSelectedFaceDisabled(false)
+        }
     }
 
     private fun clearLiveSource() {
@@ -1239,6 +1271,7 @@ class MainActivity : ComponentActivity() {
                                 personThumbs = swapPersonThumbs,
                                 selectedPerson = swapSelectedPerson,
                                 personAssignments = swapPersonAssignments,
+                                noFaceSelected = swapNoFaceSelected,
                                 onToggleAssignMode = ::toggleSwapAssign,
                                 onSelectPerson = ::selectSwapPerson,
                                 onClearAssignments = ::clearSwapAssignments,
@@ -1368,6 +1401,8 @@ class MainActivity : ComponentActivity() {
                                 onDownload = { onDownloadTapped() },
                                 frontCamera = liveFrontCamera,
                                 onSwitchCamera = ::switchLiveCamera,
+                                mirrorCamera = liveMirrorCamera,
+                                onToggleMirror = { liveMirrorCamera = !liveMirrorCamera },
                                 recording = liveRecording,
                                 microphone = liveMicrophone,
                                 finalizing = liveFinalizing,
@@ -1380,6 +1415,7 @@ class MainActivity : ComponentActivity() {
                                 swapEnabled = liveSwapEnabled,
                                 onToggleSwapEnabled = { toggleSwapEnabled() },
                                 assignMode = liveAssignMode,
+                                noFaceSelected = liveNoFaceSelected,
                                 onToggleAssignMode = ::toggleLiveAssign,
                                 onAssignFace = ::assignLiveFace,
                                 assignBox = liveAssignBox,
@@ -3019,6 +3055,7 @@ class MainActivity : ComponentActivity() {
         }
         NativePipe.setFaceAssignEnabled(liveAssignMode)
         liveAssignBox = null
+        liveNoFaceSelected = false
         liveNote = if (liveAssignMode) getString(R.string.live_assign_hint)
                    else null
     }
@@ -3027,6 +3064,7 @@ class MainActivity : ComponentActivity() {
         NativePipe.clearFaceSourceAssignments()
         liveAssignBox = null
         liveAssignCount = 0
+        liveNoFaceSelected = false
         liveNote = getString(R.string.live_assign_cleared)
     }
 
@@ -3039,7 +3077,8 @@ class MainActivity : ComponentActivity() {
     private fun assignLiveFace(dispX: Float, dispY: Float) {
         if (!liveRunning || !liveAssignMode) return
         if (assignTapPending) return   // one tap in flight at a time
-        NativePipe.requestFaceAssignment(dispX, dispY, liveSourceIndex)
+        // -1 means no pending request to native; -2 is the explicit No face brush.
+        NativePipe.requestFaceAssignment(dispX, dispY, if (liveNoFaceSelected) -2 else liveSourceIndex)
         assignTapPending = true
     }
 
@@ -3197,7 +3236,8 @@ class MainActivity : ComponentActivity() {
                         liveAssignBox = box
                         liveAssignNonce++
                         liveAssignCount++
-                        liveNote = getString(R.string.live_assign_set, (box[4].toInt() + 1))
+                        liveNote = if (box[4] < 0) getString(R.string.live_assign_no_face_set)
+                                   else getString(R.string.live_assign_set, (box[4].toInt() + 1))
                     } else if (box.size == 1) {
                         assignTapPending = false
                         // The miss also DESELECTED the person (empty tap = deselect).

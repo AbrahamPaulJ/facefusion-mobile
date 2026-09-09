@@ -243,6 +243,9 @@ class Pipeline {
    */
   void setFaceAssignEnabled(bool enabled);
 
+  /** Immediately change the currently selected Live person to/from the original face. */
+  void setSelectedFaceDisabled(bool disabled);
+
   /**
    * Record that [f] -- a face of a LIVE frame, embedding included -- belongs to
    * [sourceIndex]. Called from liveFrame against the PRE-SWAP detections, so the

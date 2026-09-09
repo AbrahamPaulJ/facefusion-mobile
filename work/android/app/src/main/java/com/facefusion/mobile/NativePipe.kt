@@ -261,6 +261,9 @@ object NativePipe {
      */
     @JvmStatic external fun setFaceAssignEnabled(enabled: Boolean)
 
+    /** Change the currently selected Live person to keep or replace their face immediately. */
+    @JvmStatic external fun setSelectedFaceDisabled(disabled: Boolean)
+
     /**
      * Queue a tap (DISPLAY bitmap coordinates -- the frame [LiveScreen] draws) for the
      * next [liveFrame] to resolve against the PRE-SWAP detections: the embedding stored
@@ -280,7 +283,8 @@ object NativePipe {
 
     /** Assign one target face at (x, y) to a source slot and return its normalized embedding. */
     @JvmStatic external fun assignFaceAt(bgr: ByteArray, w: Int, h: Int,
-                                         x: Float, y: Float, source: Int): FloatArray
+                                         x: Float, y: Float, source: Int,
+                                         noFace: Boolean): FloatArray
 
     /** Add a previously captured normalized face embedding to the source assignment table. */
     @JvmStatic external fun addFaceAssignmentEmbedding(embedding: FloatArray, source: Int): Boolean
