@@ -63,6 +63,11 @@ fun OptionSlider(
             Text(format(value), style = MaterialTheme.typography.bodyMedium,
                  fontFamily = FontFamily.Monospace)
         }
+        val slimColors = SliderDefaults.colors(
+            thumbColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.69f),
+            activeTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.69f),
+            inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.69f),
+        )
         Slider(
             value = value,
             onValueChange = onChange,
@@ -70,6 +75,7 @@ fun OptionSlider(
             steps = if (steps > 0) steps else 0,
             enabled = enabled,
             modifier = Modifier.fillMaxWidth().height(28.dp),
+            colors = slimColors,
         )
         if (hint != null)
             Text(hint, style = MaterialTheme.typography.bodySmall, fontSize = 11.sp)
@@ -128,6 +134,16 @@ fun <T> OptionSteps(
     // Falls back to the first stop rather than -1: a saved value that is no longer offered
     // (a 24 fps preference carried onto a 20 fps clip) must still land somewhere real.
     val index = options.indexOfFirst { it.first == selected }.coerceAtLeast(0)
+    // Same 31%-lower opacity as the other track sliders (see OptionSlider) -- the frame
+    // rate strip is one of them, just with labelled stops.
+    val stepSliderColors = SliderDefaults.colors(
+        thumbColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.69f),
+        activeTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.69f),
+        inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.69f),
+        disabledThumbColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.69f),
+        disabledActiveTrackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.69f),
+        disabledInactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.69f),
+    )
     Column(Modifier.padding(top = 8.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(label, style = MaterialTheme.typography.bodyMedium,
@@ -143,6 +159,7 @@ fun <T> OptionSteps(
             steps = (options.size - 2).coerceAtLeast(0),
             enabled = enabled,
             modifier = Modifier.fillMaxWidth().height(28.dp),
+            colors = stepSliderColors,
         )
         // ⚠ Each label is CENTRED ON ITS OWN STOP, which needs a Layout rather than a Row.
         //

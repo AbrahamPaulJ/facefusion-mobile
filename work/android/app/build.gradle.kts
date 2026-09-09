@@ -53,6 +53,50 @@ val appLabel = if (hasContentGate) "FaceFusion" else "FaceFusion Dev"
 val ncnnDir = file("../ncnn")
 val hasNcnn = File(ncnnDir, "lib/libncnn.a").exists()
 
+// QNN headers and Android/Hexagon runtimes are generated locally from the Qualcomm SDK
+// and intentionally ignored by Git.  Make a fresh clone self-healing: every Android
+// build checks the required marker and representative files, and stages them when they
+// are absent.  The SDK location is supplied through QNN_SDK_ROOT/QAIRT_SDK_ROOT (or the
+// default understood by stage_qnn.sh).
+val qnnStageScript = rootProject.file("stage_qnn.sh")
+val qnnTiers = (System.getenv("QNN_HTP_TIERS") ?: "68 69 73 75 79 81")
+    .trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+val qnnStage by tasks.registering {
+    doLast {
+        val required = mutableListOf(
+            file("src/main/cpp/include/QNN/QnnBackend.h"),
+            file("src/main/jniLibs/QNN_STAGED.txt"),
+            file("src/main/jniLibs/arm64-v8a/libQnnHtp.so"),
+            file("src/main/jniLibs/arm64-v8a/libQnnSystem.so"),
+        )
+        qnnTiers.forEach { tier ->
+            required += file("src/main/jniLibs/arm64-v8a/libQnnHtpV${tier}Stub.so")
+            required += file("src/main/jniLibs/arm64-v8a/libQnnHtpV${tier}Skel.so")
+        }
+        val forbidden = fileTree("src/main/jniLibs/arm64-v8a") {
+            include("libQnnHtpV*.so", "libQnnHtpPrepare.so", "libQnnHtpNetRunExtensions.so")
+            exclude(qnnTiers.map { "libQnnHtpV${it}Stub.so" })
+            exclude(qnnTiers.map { "libQnnHtpV${it}Skel.so" })
+        }
+        if (required.all { it.isFile } && forbidden.isEmpty) {
+            logger.lifecycle("QNN staging already present; skipping ${qnnStageScript.name}")
+        } else {
+            if (!qnnStageScript.isFile) {
+                throw GradleException("Missing QNN staging script: ${qnnStageScript.absolutePath}")
+            }
+            logger.lifecycle("QNN staging is incomplete; running ${qnnStageScript.name}")
+            exec {
+                workingDir(rootProject.projectDir)
+                commandLine("bash", qnnStageScript.absolutePath)
+            }
+        }
+    }
+}
+
+tasks.named("preBuild") {
+    dependsOn(qnnStage)
+}
+
 // Optional matching native binaries for Kotlin/UI-only builds without the Qualcomm SDK.
 // Supply a directory containing arm64-v8a/libffnative.so and its runtime dependencies.
 val prebuiltNativeDir = providers.gradleProperty("prebuiltNativeDir").orNull?.let { file(it) }
@@ -64,7 +108,9 @@ if (prebuiltNativeDir != null) {
 
 android {
     namespace = "com.facefusion.mobile"
-    compileSdk = 35
+    // The sandbox SDK currently provides platform 34, which is sufficient for compilation.
+    compileSdk = 34
+    buildToolsVersion = "35.0.0"
 
     defaultConfig {
         applicationId = "com.facefusion.mobile$idSuffix"
@@ -387,10 +433,11 @@ android {
     if (prebuiltNativeDir == null) externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.22.1"
+            version = "3.28.3"
         }
     }
-    ndkVersion = "27.2.12479018"
+    // The build sandbox provides NDK r29; keep this aligned with the selected toolchain.
+    ndkVersion = "29.0.14206865"
     if (prebuiltNativeDir != null) {
         sourceSets.getByName("main").jniLibs.srcDir(prebuiltNativeDir)
     }

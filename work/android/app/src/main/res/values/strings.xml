@@ -40,7 +40,6 @@
          that is not there yet. It is the counterpart of "Source face". -->
     <string name="swap_pane_target">Target</string>
     <!-- %1$s is a timestamp like "0.42s" -->
-    <string name="swap_pane_original_at">Original  %1$s</string>
     <string name="swap_pane_swapped">Swapped</string>
     <string name="swap_reading_video">Reading video…</string>
     <string name="swap_seeking">Seeking…</string>
@@ -68,6 +67,8 @@
     <string name="swap_voice_trim">Voice clip</string>
     <!-- The voice's trim handles: only this segment drives the lips / is heard in the output. -->
     <string name="swap_voice_trim_hint">Only this part drives the lips</string>
+    <!-- The foldable card that holds the voice playback and clip/trim controls. -->
+    <string name="swap_voice_settings">Voice settings</string>
     <string name="swap_loading_models">Loading models, this takes a few seconds…</string>
     <string name="swap_swapping_frame">Swapping this frame…</string>
     <string name="swap_pick_a_source">Pick a source face</string>
@@ -84,6 +85,8 @@
     <string name="proc_get_cancel">Not now</string>
 
     <string name="swap_clip">Clip</string>
+    <!-- One foldable card holding BOTH the trim and the frame rate -->
+    <string name="swap_clip_rate">Clip</string>
     <!-- %1$d frames, %2$s duration, %3$d frames per second -->
     <string name="swap_clip_summary">%1$d frames of %2$s   %3$d fps</string>
     <string name="swap_frame_rate">Frame rate</string>
@@ -117,6 +120,7 @@
     <string name="out_play">Play</string>
     <string name="out_pause">Pause</string>
     <string name="out_log">Log</string>
+    <string name="swap_output_result">Output result</string>
     <string name="out_expand">Expand</string>
     <string name="out_collapse">Collapse</string>
 
@@ -426,6 +430,7 @@
     <string name="batch_autosave">Save each clip to the gallery as it finishes</string>
     <string name="batch_output_of">Clip %1$d of %2$d, swipe to change</string>
     <string name="swap_autosaved_to_gallery">Saved to Movies/FaceFusion automatically.</string>
+    <string name="swap_batch_menu">Batch add</string>
     <string name="swap_batch_add">Add more clips (batch)</string>
     <string name="swap_batch_add_more">Add more clips</string>
     <string name="status_faces_found">%1$d faces found. Tap one to swap only that face.</string>
@@ -467,6 +472,8 @@ Turning it off runs your own Swap settings instead. This is experimental: the en
     <string name="live_fast_confirm_ok">Turn it off</string>
     <string name="common_cancel">Cancel</string>
     <string name="common_delete">Delete</string>
+    <string name="common_expand">Expand</string>
+    <string name="common_collapse">Collapse</string>
     <string name="swap_capture_source">Take a source photo</string>
     <string name="swap_voice_record">Record a voice</string>
     <string name="swap_voice_stop">Stop recording</string>
@@ -478,10 +485,21 @@ Turning it off runs your own Swap settings instead. This is experimental: the en
     <string name="set_tab_device">Device</string>
     <string name="set_tab_api">API</string>
     <string name="set_tab_about">About</string>
+    <string name="set_theme_title">Theme</string>
+    <string name="set_theme_dark">Dark mode</string>
+    <string name="set_theme_follow_system">Following system</string>
+    <string name="set_theme_desc_dark">Dark</string>
+    <string name="set_theme_desc_light">Light</string>
     <string name="live_mic">Microphone</string>
     <string name="live_mic_on">Record microphone audio. Change before recording.</string>
     <string name="live_mic_off">Video only. Microphone is off.</string>
     <string name="live_mic_busy">Stop the voice recording before recording Live with the microphone.</string>
+    <string name="live_swap">Face swap</string>
+    <string name="live_swap_on">Swapping active</string>
+    <string name="live_swap_off">Swapping disabled</string>
+    <string name="live_target">Target faces</string>
+    <string name="live_source_label">Source %1$d</string>
+    <string name="nav_live">Live</string>
     <string name="live_assign_title">Assign per person</string>
     <string name="live_assign_off">Each face takes the selected source</string>
     <string name="live_assign_on">Nothing changes until you tap a face</string>

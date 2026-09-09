@@ -1,5 +1,6 @@
 package com.facefusion.mobile.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Face
@@ -11,14 +12,16 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import com.facefusion.mobile.R
 
 enum class Screen { Swap, Live, Settings }
 
 /**
- * The frame around both screens: wordmark above, two destinations below.
+ * The frame around both screens: brand band above, two destinations below.
  *
  * Two or three destinations is not enough to justify a navigation library -- and adding one
  * would mean resolving a dependency this build cannot be relied on to fetch. A plain enum
@@ -35,22 +38,46 @@ fun AppScaffold(
     content: @Composable (PaddingValues) -> Unit,
 ) {
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            Row(
+            // The brand band. It follows the theme background (day #F7F8FA / night
+            // #121212) instead of a fixed teal gradient, so switching the scheme recolors
+            // the whole window including the header and status bar. The wordmark inherits
+            // onBackground: dark text on the light band, light text on the dark one. A
+            // hairline at the bottom keeps the band's edge visible on the light scheme.
+            Box(
                 Modifier
                     .fillMaxWidth()
-                    // targetSdk 35 makes the window edge-to-edge on Android 15, and
-                    // Scaffold insets its CONTENT but not its topBar -- so without this the
-                    // wordmark sits under the status bar and behind the camera cutout.
-                    .statusBarsPadding()
-                    .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 18.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    .background(MaterialTheme.colorScheme.background),
             ) {
-                AppMark()
-                // The tier is not shown here any more; Settings reports it alongside
-                // the arch, VTCM and fp16 verdict, which is where it means something.
-                Wordmark(Modifier.weight(1f))
+                Column {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            // targetSdk 35 makes the window edge-to-edge on Android 15, and
+                            // Scaffold insets its CONTENT but not its topBar -- so without this
+                            // the wordmark sits under the status bar and behind the cutout.
+                            .statusBarsPadding()
+                            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        // In dark mode the brand band is 31% fainter -- the mark and the
+                        // wordmark read as chrome rather than content, and the header
+                        // should not out-shout the tiles under it on a dark theme.
+                        val brandAlpha =
+                            if (MaterialTheme.colorScheme.background.luminance() < 0.5f) 0.69f else 1f
+                        AppMark(modifier = Modifier.alpha(brandAlpha))
+                        Wordmark(
+                            Modifier.weight(1f),
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = brandAlpha),
+                        )
+                    }
+                    HorizontalDivider(
+                        thickness = 1.dp,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                    )
+                }
             }
         },
         bottomBar = {
@@ -64,8 +91,8 @@ fun AppScaffold(
                 if (showLive) NavigationBarItem(
                     selected = screen == Screen.Live,
                     onClick = { onScreen(Screen.Live) },
-                    icon = { Icon(Icons.Default.PlayArrow, "Live") },
-                    label = { Text("Live") },
+                    icon = { Icon(Icons.Default.PlayArrow, stringResource(R.string.nav_live)) },
+                    label = { Text(stringResource(R.string.nav_live)) },
                 )
                 NavigationBarItem(
                     selected = screen == Screen.Settings,

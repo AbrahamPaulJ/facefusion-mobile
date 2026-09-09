@@ -16,12 +16,12 @@
 
     <string name="nav_swap">换脸</string>
     <string name="nav_settings">设置</string>
+    <string name="nav_live">实况</string>
 
     <string name="swap_source_face">源人脸</string>
     <string name="swap_source_pick">选择源人脸</string>
     <string name="swap_pane_original">原图</string>
     <string name="swap_pane_target">目标</string>
-    <string name="swap_pane_original_at">原图  %1$s</string>
     <string name="swap_pane_swapped">换脸结果</string>
     <string name="swap_reading_video">正在读取视频…</string>
     <string name="swap_seeking">正在定位…</string>
@@ -29,7 +29,7 @@
     <string name="swap_choose_another_target">更换目标</string>
     <string name="swap_remove_target">移除目标</string>
     <string name="swap_pane_voice">语音</string>
-    <string name="swap_voice_add">添加音频以驱动口型</string>
+    <string name="swap_voice_add">音频（口型）</string>
     <string name="swap_voice_picked">音频已就绪</string>
     <string name="swap_choose_another_voice">更换语音</string>
     <string name="swap_remove_voice">移除语音</string>
@@ -37,6 +37,8 @@
     <string name="swap_voice_pause">暂停语音</string>
     <string name="swap_voice_trim">语音片段</string>
     <string name="swap_voice_trim_hint">只有这段会驱动口型</string>
+    <!-- 语音播放与片段裁剪的可折叠面板 -->
+    <string name="swap_voice_settings">语音设置</string>
     <string name="swap_loading_models">正在加载模型，需要几秒钟…</string>
     <string name="swap_swapping_frame">正在处理这一帧…</string>
     <string name="swap_pick_a_source">请选择源人脸</string>
@@ -53,6 +55,7 @@
     <string name="proc_get_cancel">暂不</string>
 
     <string name="swap_clip">片段</string>
+    <string name="swap_clip_rate">片段</string>
     <string name="swap_clip_summary">%1$d 帧，共 %2$s   %3$d fps</string>
     <string name="swap_frame_rate">帧率</string>
     <string name="swap_rate_same">与原片相同 (%1$d)</string>
@@ -78,6 +81,7 @@
     <string name="out_play">播放</string>
     <string name="out_pause">暂停</string>
     <string name="out_log">日志</string>
+    <string name="swap_output_result">输出结果</string>
     <string name="out_expand">展开</string>
     <string name="out_collapse">收起</string>
 
@@ -305,6 +309,11 @@
     <string name="live_stat">%1$s fps   %2$s</string>
     <string name="live_faces">%1$d 张人脸</string>
     <string name="live_no_face">无人脸</string>
+    <string name="live_source_label">源 %1$d</string>
+    <string name="live_swap">换脸</string>
+    <string name="live_swap_on">替换已启用</string>
+    <string name="live_swap_off">替换已禁用</string>
+    <string name="live_target">目标人脸</string>
     <string name="live_stop_to_change">停止后才能更换源人脸</string>
     <string name="live_source_hint">要叠加到实时画面上的人脸</string>
     <string name="live_fast_mode">快速模式</string>
@@ -339,6 +348,11 @@
     <string name="set_tab_device">设备</string>
     <string name="set_tab_api">API</string>
     <string name="set_tab_about">关于</string>
+    <string name="set_theme_title">主题</string>
+    <string name="set_theme_dark">深色模式</string>
+    <string name="set_theme_follow_system">跟随系统</string>
+    <string name="set_theme_desc_dark">深色</string>
+    <string name="set_theme_desc_light">浅色</string>
     <string name="live_lens_front">前置</string>
     <string name="live_lens_back">后置</string>
     <string name="swap_show_faces">显示检测到的人脸</string>
@@ -362,6 +376,26 @@
     <string name="live_rec_start">录制</string>
     <string name="live_rec_stop">停止录制</string>
     <string name="live_rec_badge">录制</string>
+    <string name="live_mic">麦克风</string>
+    <string name="live_mic_on">录制麦克风音频，需在开始录制前设置。</string>
+    <string name="live_mic_off">仅视频，麦克风已关闭。</string>
+    <string name="live_mic_busy">使用麦克风录制实时画面前，请先停止语音录制。</string>
+    <string name="live_target_all">替换所有检测到的人脸</string>
+    <string name="live_target_one">仅替换最大的人脸</string>
+    <string name="live_target_locked">按人分配开启时已锁定</string>
+    <string name="live_assign_title">按人分配</string>
+    <string name="live_assign_off">每张人脸使用所选源</string>
+    <string name="live_assign_on">点按人脸前不会改变</string>
+    <string name="live_assign_hint">按人分配：选择源，再点按人脸。未点按的人脸保持原源。</string>
+    <string name="live_assign_set">已为该人分配源 %1$d</string>
+    <string name="live_assign_missed">无人脸 — 已清除选择</string>
+    <string name="live_assign_cleared">已清除分配</string>
+    <string name="live_assign_clear">清除</string>
+    <string name="live_assign_count">已分配 %1$d 人</string>
+    <string name="live_assign_help">按人分配如何使用</string>
+    <string name="live_assign_help_title">按人分配</string>
+    <string name="live_assign_help_body">1. 打开开关，画面保持当前效果。\n2. 选择一个源（源 1、源 2…）。\n3. 点按应使用该源的人 — 该人会被选中（白色框）并立即使用该源。\n4. 选中状态下，切换源只会改变该人 — 你可以为同一人尝试不同源。\n5. 为下一个人，点按他（选中会移动），或点按空白处取消选中 — 该人保持其最后的源，不再改变。\n\n被点按的人在整个会话中保持其源。未点按的人保持开启该模式时的效果。\n\n「清除」会移除所有分配。关闭开关则回到默认行为（所有人脸跟随源）。</string>
+    <string name="live_assign_help_gotit">知道了</string>
     <string name="status_live_recording">正在录制实时画面。</string>
     <string name="status_live_rec_saved">录制已保存，共 %1$d 帧。</string>
     <string name="status_live_rec_empty">没有录制到任何内容。</string>
@@ -370,11 +404,12 @@
     <string name="notif_batch_channel">批量替换</string>
     <string name="status_batch_queued_some">已排入 %1$d 个片段。已忽略 %2$d 张照片，批量仅支持视频。</string>
     <string name="status_batch_images_only">照片逐张替换；结果已显示在面板上。</string>
+    <string name="swap_batch_menu">批量添加</string>
     <string name="swap_batch_add">添加更多片段（批量）</string>
     <string name="swap_batch_add_more">添加更多片段</string>
     <string name="status_faces_found">检测到 %1$d 张人脸，点按其中一张仅替换该人脸。</string>
     <string name="status_reference_warming">正在准备预览，请稍后再次点按该人脸。</string>
-    <string name="batch_autosave">每个片段完成后立即保存到相册</string>
+    <string name="batch_autosave">自动保存到相册</string>
     <string name="batch_output_of">第 %1$d / %2$d 个片段，滑动切换</string>
     <string name="swap_autosaved_to_gallery">已自动保存到 Movies/FaceFusion。</string>
     <string name="batch_delete_title">删除该片段？</string>

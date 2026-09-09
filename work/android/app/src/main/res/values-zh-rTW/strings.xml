@@ -19,12 +19,12 @@
 
     <string name="nav_swap">換臉</string>
     <string name="nav_settings">設定</string>
+    <string name="nav_live">實況</string>
 
     <string name="swap_source_face">來源人臉</string>
     <string name="swap_source_pick">選擇來源人臉</string>
     <string name="swap_pane_original">原圖</string>
     <string name="swap_pane_target">目標</string>
-    <string name="swap_pane_original_at">原圖  %1$s</string>
     <string name="swap_pane_swapped">換臉結果</string>
     <string name="swap_reading_video">正在讀取影片…</string>
     <string name="swap_seeking">正在定位…</string>
@@ -40,6 +40,8 @@
     <string name="swap_voice_pause">暫停語音</string>
     <string name="swap_voice_trim">語音片段</string>
     <string name="swap_voice_trim_hint">只有這段會驅動口型</string>
+    <!-- 語音播放與片段裁剪的可折疊面板 -->
+    <string name="swap_voice_settings">語音設定</string>
     <string name="swap_loading_models">正在載入模型，需要幾秒鐘…</string>
     <string name="swap_swapping_frame">正在處理這一格…</string>
     <string name="swap_pick_a_source">請選擇來源人臉</string>
@@ -56,6 +58,7 @@
     <string name="proc_get_cancel">暫不</string>
 
     <string name="swap_clip">片段</string>
+    <string name="swap_clip_rate">片段</string>
     <string name="swap_clip_summary">%1$d 影格，共 %2$s   %3$d fps</string>
     <string name="swap_frame_rate">影格率</string>
     <string name="swap_rate_same">與原片相同 (%1$d)</string>
@@ -81,6 +84,7 @@
     <string name="out_play">播放</string>
     <string name="out_pause">暫停</string>
     <string name="out_log">紀錄</string>
+    <string name="swap_output_result">輸出結果</string>
     <string name="out_expand">展開</string>
     <string name="out_collapse">收合</string>
 
@@ -308,6 +312,11 @@
     <string name="live_stat">%1$s fps   %2$s</string>
     <string name="live_faces">%1$d 張人臉</string>
     <string name="live_no_face">沒有人臉</string>
+    <string name="live_source_label">來源 %1$d</string>
+    <string name="live_swap">換臉</string>
+    <string name="live_swap_on">替換已啟用</string>
+    <string name="live_swap_off">替換已停用</string>
+    <string name="live_target">目標臉孔</string>
     <string name="live_stop_to_change">停止後才能更換來源人臉</string>
     <string name="live_source_hint">要疊加到即時畫面上的人臉</string>
     <string name="live_fast_mode">快速模式</string>
@@ -342,6 +351,11 @@
     <string name="set_tab_device">裝置</string>
     <string name="set_tab_api">API</string>
     <string name="set_tab_about">關於</string>
+    <string name="set_theme_title">主題</string>
+    <string name="set_theme_dark">深色模式</string>
+    <string name="set_theme_follow_system">跟隨系統</string>
+    <string name="set_theme_desc_dark">深色</string>
+    <string name="set_theme_desc_light">淺色</string>
     <string name="live_lens_front">前鏡頭</string>
     <string name="live_lens_back">後鏡頭</string>
     <string name="swap_show_faces">顯示偵測到的臉孔</string>
@@ -365,6 +379,26 @@
     <string name="live_rec_start">錄製</string>
     <string name="live_rec_stop">停止錄製</string>
     <string name="live_rec_badge">錄製</string>
+    <string name="live_mic">麥克風</string>
+    <string name="live_mic_on">錄製麥克風音訊，需在開始錄製前設定。</string>
+    <string name="live_mic_off">僅影片，麥克風已關閉。</string>
+    <string name="live_mic_busy">使用麥克風錄製即時畫面前，請先停止語音錄製。</string>
+    <string name="live_target_all">替換所有偵測到的人臉</string>
+    <string name="live_target_one">僅替換最大的人臉</string>
+    <string name="live_target_locked">按人分配開啟時已鎖定</string>
+    <string name="live_assign_title">按人分配</string>
+    <string name="live_assign_off">每張人臉使用所選來源</string>
+    <string name="live_assign_on">點按人臉前不會變更</string>
+    <string name="live_assign_hint">按人分配：選擇來源，再點按人臉。未點按的人臉保持原來源。</string>
+    <string name="live_assign_set">已為該人分配來源 %1$d</string>
+    <string name="live_assign_missed">無人臉 — 已清除選取</string>
+    <string name="live_assign_cleared">已清除分配</string>
+    <string name="live_assign_clear">清除</string>
+    <string name="live_assign_count">已分配 %1$d 人</string>
+    <string name="live_assign_help">按人分配如何使用</string>
+    <string name="live_assign_help_title">按人分配</string>
+    <string name="live_assign_help_body">1. 開啟開關，畫面保持目前效果。\n2. 選擇一個來源（來源 1、來源 2…）。\n3. 點按應使用該來源的人 — 該人會被選取（白色框）並立即使用該來源。\n4. 選取狀態下，切換來源只會改變該人 — 你可以為同一人嘗試不同來源。\n5. 為下一個人，點按他（選取會移動），或點按空白處取消選取 — 該人保持其最後的來源，不再改變。\n\n被點按的人在整個工作階段中保持其來源。未點按的人保持開啟該模式時的效果。\n\n「清除」會移除所有分配。關閉開關則回到預設行為（所有人臉跟隨來源）。</string>
+    <string name="live_assign_help_gotit">知道了</string>
     <string name="status_live_recording">正在錄製即時畫面。</string>
     <string name="status_live_rec_saved">錄製已儲存，共 %1$d 影格。</string>
     <string name="status_live_rec_empty">沒有錄製到任何內容。</string>
@@ -373,6 +407,7 @@
     <string name="notif_batch_channel">批次替換</string>
     <string name="status_batch_queued_some">已排入 %1$d 個片段。已略過 %2$d 張相片，批次僅支援影片。</string>
     <string name="status_batch_images_only">相片逐張替換；結果已顯示在面板上。</string>
+    <string name="swap_batch_menu">批次新增</string>
     <string name="swap_batch_add">新增更多片段（批次）</string>
     <string name="swap_batch_add_more">新增更多片段</string>
     <string name="status_faces_found">偵測到 %1$d 張臉孔，點按其中一張僅替換該臉孔。</string>

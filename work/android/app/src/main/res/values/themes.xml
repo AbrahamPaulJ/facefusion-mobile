@@ -14,13 +14,12 @@
 <resources>
     <style name="Theme.FaceFusion" parent="@android:style/Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/ff_background</item>
+        <!-- The top bar follows the theme background (day #F7F8FA / night #121212), so the
+             status bar is painted the same colour and its icons are dark on the light
+             scheme. "windowLightStatusBar" names the BAR, not the icons: true means the
+             bar is light and Android draws dark icons. values-night/ mirrors this. -->
         <item name="android:statusBarColor">@color/ff_background</item>
         <item name="android:navigationBarColor">@color/ff_background</item>
-        <!--
-            LIGHT chrome, so the system-bar icons must be DARK. "windowLightStatusBar"
-            names the BAR, not the icons: true means the bar is light and Android draws
-            dark icons on it. values-night/ flips both back.
-        -->
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowLightNavigationBar">true</item>
     </style>

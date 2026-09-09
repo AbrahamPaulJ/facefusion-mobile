@@ -3,5 +3,5 @@
     The dark half of the window chrome. See values/colors.xml.
 -->
 <resources>
-    <color name="ff_background">#FF0D0D10</color>
+    <color name="ff_background">#FF121212</color>
 </resources>

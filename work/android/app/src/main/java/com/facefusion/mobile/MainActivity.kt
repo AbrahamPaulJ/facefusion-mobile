@@ -291,6 +291,13 @@ class MainActivity : ComponentActivity() {
 
     /** "" | "qnn" | "ncnn" -- the runtime pinned in Settings, mirrored for composition. */
     private var forcedBackend by mutableStateOf("")
+    /**
+     * The user's manual light/dark choice, or null to follow the system.
+     *
+     * Mirrored for composition and written by the Settings switch; persisted in
+     * [ThemePrefs] so the choice survives a restart.
+     */
+    private var darkTheme by mutableStateOf<Boolean?>(null)
     private var confirmMetered by mutableStateOf(false)
 
     /**
@@ -600,6 +607,7 @@ class MainActivity : ComponentActivity() {
             batchQueue = videos.map {
                 BatchItem(it, displayName(it) ?: getString(R.string.batch_unnamed_clip))
             }
+            seedBatchThumbs(videos, 0)
             status = if (images > 0)
                          getString(R.string.status_batch_queued_some, videos.size, images)
                      else getString(R.string.status_batch_queued, videos.size)
@@ -644,6 +652,7 @@ class MainActivity : ComponentActivity() {
         batchQueue = head + fresh.map {
             BatchItem(it, displayName(it) ?: getString(R.string.batch_unnamed_clip))
         }
+        seedBatchThumbs(fresh, head.size)
         status = getString(R.string.status_batch_queued, batchQueue.size)
     }
 
@@ -828,6 +837,9 @@ class MainActivity : ComponentActivity() {
         }
         ModelPaths.apply(this)
         forcedBackend = ModelPaths.forcedBackend(this)
+        // Restore the manual theme choice (if any) BEFORE the first composition, so a
+        // pinned dark mode does not flash the light scheme on launch.
+        darkTheme = ThemePrefs.load(this)
         modelDir()
         opts = SwapOptions.load(this)
         ApiService.restore(this)
@@ -894,7 +906,7 @@ class MainActivity : ComponentActivity() {
         if (intent?.getStringExtra("download") != null) onDownloadTapped()
 
         setContent {
-            FaceFusionTheme {
+            FaceFusionTheme(darkTheme) {
                 // The download runs in a service, on its own thread. Rather than trust a
                 // cross-thread state write to invalidate exactly the right scope, re-read
                 // the disk while it matters; the loop exits as soon as the set is complete.
@@ -1269,6 +1281,14 @@ class MainActivity : ComponentActivity() {
                                 onForceBackend =
                                     if (NativePipe.hasNcnnBackend()) ::onForceBackend
                                     else null,
+                                // The manual theme choice (null = follow the system) and
+                                // the switch that makes one. Saved immediately so a restart
+                                // keeps it -- see ThemePrefs.
+                                darkTheme = darkTheme,
+                                onSetTheme = { dark ->
+                                    darkTheme = dark
+                                    ThemePrefs.save(this@MainActivity, dark)
+                                },
                             )
                         }
                     }
@@ -3129,6 +3149,11 @@ class MainActivity : ComponentActivity() {
                         "swapped_${System.currentTimeMillis()}.mp4")
                     status = getString(R.string.status_swapping)
                     var lastPreview = 0L
+                    // The native loop calls onProgress for EVERY processed frame; writing
+                    // three top-level states at that rate re-composed the whole 1600-line
+                    // screen 25+ times a second and stalled the scroll. 10 Hz is past what
+                    // the progress readout can show, and the final tick always lands.
+                    var lastProgress = 0L
 
                     VideoSwapper(
                         outputFps = opts.outputFps,
@@ -3143,9 +3168,13 @@ class MainActivity : ComponentActivity() {
                         trimEndUs = if (trimEndMs >= durationMs) Long.MAX_VALUE
                                     else (trimEndMs * 1000).toLong(),
                         onProgress = { done, total ->
-                            framesDone = done; framesTotal = total
-                            progress = if (total > 0) done.toFloat() / total else 0f
-                            elapsedS = (System.currentTimeMillis() - t0) / 1000.0
+                            val now = System.currentTimeMillis()
+                            if (now - lastProgress >= 100 || done >= total) {
+                                lastProgress = now
+                                framesDone = done; framesTotal = total
+                                progress = if (total > 0) done.toFloat() / total else 0f
+                                elapsedS = (now - t0) / 1000.0
+                            }
                         },
                         onFrame = { bgr, w, h ->
                             // throttle: a Bitmap per frame is pure allocation churn and the
@@ -3366,6 +3395,10 @@ class MainActivity : ComponentActivity() {
                                        "_" + (i + 1) + ".mp4")
                         partial = out
                         var lastPreview = 0L
+                        // Same 10 Hz cap as the single-run path above: the native loop's
+                        // per-frame onProgress was a 25 Hz recomposition storm over the
+                        // whole screen, scroll included.
+                        var lastProgress = 0L
                         VideoSwapper(
                             outputFps = opts.outputFps,
                             outputMaxShortEdge = opts.outputMaxShortEdge,
@@ -3383,9 +3416,13 @@ class MainActivity : ComponentActivity() {
                             trimStartUs = 0L,
                             trimEndUs = Long.MAX_VALUE,
                             onProgress = { d, total ->
-                                framesDone = d; framesTotal = total
-                                progress = if (total > 0) d.toFloat() / total else 0f
-                                elapsedS = (System.currentTimeMillis() - t0) / 1000.0
+                                val now = System.currentTimeMillis()
+                                if (now - lastProgress >= 100 || d >= total) {
+                                    lastProgress = now
+                                    framesDone = d; framesTotal = total
+                                    progress = if (total > 0) d.toFloat() / total else 0f
+                                    elapsedS = (now - t0) / 1000.0
+                                }
                             },
                             onFrame = { bgr, w, h ->
                                 val now = System.currentTimeMillis()
@@ -3479,6 +3516,53 @@ class MainActivity : ComponentActivity() {
             }
         }
     }.getOrNull()
+
+    /**
+     * A small first frame of a PICKED clip ([uri]), for the queue row as soon as it is
+     * added -- before any swap runs. The queue used to show a play glyph until the clip
+     * FINISHED (the thumbnail came from the output), which read as "the row is empty"
+     * rather than "this clip is queued".
+     *
+     * Same retriever as [batchThumb], but on a content URI rather than an app-written
+     * file. Failure is null -- a missing thumbnail is cosmetic and must not refuse a clip.
+     */
+    private fun batchThumb(uri: Uri): Bitmap? = runCatching {
+        android.media.MediaMetadataRetriever().use { r ->
+            r.setDataSource(this@MainActivity, uri)
+            val full = r.getFrameAtTime(0) ?: return@use null
+            val w = 160
+            val h = (full.height.toLong() * w / full.width).toInt().coerceAtLeast(1)
+            Bitmap.createScaledBitmap(full, w, h, true).also {
+                if (it !== full) full.recycle()
+            }
+        }
+    }.getOrNull()
+
+    /**
+     * Fill in [BatchItem.thumb] for freshly queued clips, off the main thread.
+     *
+     * [startIndex] is where [uris] landed in [batchQueue] (0 for a fresh queue, `head.size`
+     * when appended). The retriever is cheap -- one keyframe -- but not free, and running
+     * it on the picker's main-thread callback would stutter the row draw for every video
+     * added at once.
+     */
+    private fun seedBatchThumbs(uris: List<Uri>, startIndex: Int) {
+        if (uris.isEmpty()) return
+        lifecycleScope.launch(Dispatchers.IO) {
+            uris.forEachIndexed { k, uri ->
+                val th = batchThumb(uri) ?: return@forEachIndexed
+                withContext(Dispatchers.Main) {
+                    // Only the row that is still waiting on its thumbnail, and only the
+                    // position it was queued at: a user can have removed or reordered the
+                    // row while the seek was in flight.
+                    batchQueue = batchQueue.mapIndexed { j, it ->
+                        if (j == startIndex + k && it.thumb == null && it.uri == uri)
+                            it.copy(thumb = th) else it
+                    }
+                }
+            }
+        }
+    }
 
     /** The finished video, into the shared Movies collection. */
     private fun saveToGallery(file: File) {

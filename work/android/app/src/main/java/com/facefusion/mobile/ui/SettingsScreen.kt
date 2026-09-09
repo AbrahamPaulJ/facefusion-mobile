@@ -2,6 +2,7 @@ package com.facefusion.mobile.ui
 
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -141,6 +142,16 @@ fun SettingsScreen(
      * the control entirely rather than drawing one that cannot do anything.
      */
     onForceBackend: ((String) -> Unit)? = null,
+    /**
+     * The manual light/dark choice, or null to follow the system.
+     *
+     * Mirrored from the Activity, which owns persistence ([com.facefusion.mobile.ui.ThemePrefs]).
+     * The switch below writes a real Boolean the first time it is used; until then null
+     * means "whatever the phone says".
+     */
+    darkTheme: Boolean? = null,
+    /** Pin light or dark. There is deliberately no way back to "follow the system". */
+    onSetTheme: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var confirming by remember { mutableStateOf<ModelRow?>(null) }
@@ -310,6 +321,38 @@ fun SettingsScreen(
             Spacer(Modifier.height(6.dp))
         }
 
+        Spacer(Modifier.height(6.dp))
+
+        // ---------------------------------------------------------------- theme
+        //
+        // A manual light/dark override, after the model inventory it shares the tab with.
+        // Until the switch is touched the phone decides (darkTheme == null); the caption
+        // says so rather than pretending the switch is the source of truth.
+        Caption(stringResource(R.string.set_theme_title))
+        Card(Modifier.fillMaxWidth()) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Hoisted to the Row: the Switch below reads it too, and a Column-local
+                // val is invisible to its siblings.
+                val systemDark = isSystemInDarkTheme()
+                val effectiveDark = darkTheme ?: systemDark
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.set_theme_dark),
+                         style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        stringResource(
+                            if (darkTheme == null) R.string.set_theme_follow_system
+                            else if (effectiveDark) R.string.set_theme_desc_dark
+                            else R.string.set_theme_desc_light),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = effectiveDark, onCheckedChange = { onSetTheme(it) })
+            }
+        }
         Spacer(Modifier.height(6.dp))
 
         // ---------------------------------------------------------------- device

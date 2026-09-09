@@ -6,6 +6,9 @@
 <resources>
     <style name="Theme.FaceFusion" parent="@android:style/Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/ff_background</item>
+        <!-- Same as the light theme: the top bar follows the theme background, so the
+             status bar gets the same colour and light icons (dark bar, windowLightStatusBar
+             false) on the dark scheme. -->
         <item name="android:statusBarColor">@color/ff_background</item>
         <item name="android:navigationBarColor">@color/ff_background</item>
         <!-- Dark chrome: icons in the system bars must stay light. -->

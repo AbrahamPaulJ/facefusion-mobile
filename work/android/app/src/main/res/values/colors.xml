@@ -10,6 +10,6 @@
     track ui/Theme.kt's two schemes, which follow the phone.
 -->
 <resources>
-    <color name="ff_background">#FFFFFFFF</color>
+    <color name="ff_background">#FFF7F8FA</color>
 
 </resources>

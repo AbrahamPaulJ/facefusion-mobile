@@ -2,11 +2,11 @@ package com.facefusion.mobile.ui
 
 import android.graphics.Bitmap
 import android.widget.VideoView
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.composed
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -41,6 +43,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -87,14 +90,14 @@ fun AppMark(size: Dp = 30.dp, modifier: Modifier = Modifier) {
  * it this is just a heading in caps.
  */
 @Composable
-fun Wordmark(modifier: Modifier = Modifier) {
+fun Wordmark(modifier: Modifier = Modifier, color: Color = MaterialTheme.colorScheme.onBackground) {
     Text(
         buildAnnotatedString {
             withStyle(SpanStyle(fontWeight = FontWeight.Light)) { append("FACE") }
             withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("FUSION") }
         },
         style = WordmarkStyle,
-        color = MaterialTheme.colorScheme.onBackground,
+        color = color,
         modifier = modifier,
     )
 }
@@ -142,6 +145,92 @@ fun Caption(text: String, modifier: Modifier = Modifier, singleLine: Boolean = f
         overflow = if (singleLine) TextOverflow.Ellipsis else TextOverflow.Clip,
         modifier = modifier,
     )
+}
+
+/**
+ * A labelled group card, the visual "room" the Swap screen is divided into.
+ *
+ * The screen used to be one long scroll of chips, panes and buttons with nothing saying
+ * which things belonged together. This is the divider: one card per group (the processor
+ * stages, the workbench, the output), with the brand-red square as its mark — the same
+ * mark the wordmark's two-weight break carries — and a trailing slot for a live status
+ * readout such as which stages are armed.
+ *
+ * Deliberately `surface`, not `surfaceVariant`: the card is the step the panes sit ON,
+ * and the panes inside it are already the recessed step. Nesting both the other way made
+ * the card read as a hole in the page.
+ */
+@Composable
+fun SectionCard(
+    title: String,
+    modifier: Modifier = Modifier,
+    trailing: @Composable RowScope.() -> Unit = {},
+    // Collapsible behaviour, opt-in. When [onToggle] is non-null the whole title row
+    // becomes the tap target and [content] animates in/out under it; the trailing arrow
+    // flips with the state so the affordance reads without a tap.
+    //
+    // ⚠ These sit BEFORE [content] deliberately: a trailing lambda at the call site binds
+    // to the LAST parameter, so content must stay last or the block goes to onToggle.
+    collapsible: Boolean = false,
+    expanded: Boolean = true,
+    onToggle: (() -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(20.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.then(
+                if (onToggle != null) Modifier
+                    // Slightly larger than the visual title so the whole band is easy to
+                    // hit, but not full-width-bleed: the card's own padding already frames
+                    // it, and an 100%-wide target would make accidental collapses common.
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable(onClick = onToggle)
+                    .padding(vertical = 2.dp)
+                else Modifier
+            ),
+        ) {
+            Box(
+                Modifier
+                    .size(10.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(MaterialTheme.colorScheme.primary),
+            )
+            Spacer(Modifier.width(8.dp))
+            Caption(title, Modifier.weight(1f))
+            trailing()
+            if (collapsible) {
+                Spacer(Modifier.width(6.dp))
+                Icon(
+                    Icons.Default.KeyboardArrowDown,
+                    stringResource(if (expanded) R.string.common_collapse
+                                   else R.string.common_expand),
+                    Modifier
+                        .size(20.dp)
+                        .rotate(if (expanded) 0f else 180f),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        // Plain `if`, deliberately NOT AnimatedVisibility.
+        //
+        // ⚠ The animated version caused a real overlap: inside the page's verticalScroll,
+        // expanding a card that holds sliders (the trim card's RangeSlider carries a 48 dp
+        // touch target) could leave the drawn content overlapping the elements below it --
+        // the "expanded but contents overlap and can't be used" report. A conditional
+        // render has no transition in which measured height and drawn height disagree,
+        // so the overlap cannot happen. The chevron above still rotates, which keeps the
+        // fold affordance's motion.
+        if (expanded) content()
+    }
 }
 
 /**
@@ -236,6 +325,13 @@ fun PreviewPane(
      * swallowing misses would break the way every other pane on the screen behaves.
      */
     onPickFace: ((Float, Float) -> Unit)? = null,
+    /**
+     * When set, the image box is THIS wide instead of filling the column, and is centred
+     * inside the (still full-width) container. Used by the swapped result pane: its box
+     * then matches the image's own aspect ratio rather than stretching full width and
+     * letterboxing a portrait result into grey side bars.
+     */
+    contentWidth: Dp? = null,
     trailing: @Composable RowScope.() -> Unit = {},
 ) {
     // ONE container around the caption row AND the image, rather than a caption floating
@@ -250,7 +346,6 @@ fun PreviewPane(
     // minus the padding -- which is what stops the corners looking doubled.
     Column(
         modifier
-            .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
             .background(MaterialTheme.colorScheme.surface)
             .padding(horizontal = 6.dp, vertical = 5.dp)
@@ -259,7 +354,24 @@ fun PreviewPane(
             Modifier.fillMaxWidth().padding(start = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Caption(label, Modifier.weight(1f), singleLine = true)
+            // A badge rather than a bare caption: the label names the pane, and a small
+            // recessed plate is how the name stops reading as a stray line of page text
+            // and starts reading as part of the pane. Same surfaceVariant as the image
+            // well, so the two line up like a label on a folder.
+            Text(
+                label.uppercase(),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                letterSpacing = 1.2.sp,
+                fontSize = 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+            )
             // Fixed HEIGHT, whatever the slot holds; width still wraps.
             //
             // It used to size to its content, and content alternated between an 18 dp
@@ -281,11 +393,15 @@ fun PreviewPane(
         }
         Box(
             Modifier
-                .fillMaxWidth()
+                .then(if (contentWidth != null)
+                          Modifier.align(Alignment.CenterHorizontally).width(contentWidth)
+                      else Modifier.fillMaxWidth())
                 .height(height)
                 // 12, not 14: concentric with the container 18 minus its 6 dp padding.
                 .clip(RoundedCornerShape(12.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant,
+                        RoundedCornerShape(12.dp))
                 .then(
                     // Gestures only once there is an image: with none, the pane is purely a
                     // picker and `clickable` keeps its ripple and accessibility semantics.
@@ -446,24 +562,305 @@ fun PreviewPane(
             } else {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     if (actionIcon != null) {
                         Icon(
                             actionIcon, null,
-                            Modifier.size(40.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            Modifier.size(48.dp),
+                            // The pane's call to action gets the brand tint, not the flat
+                            // grey: an empty pane is a button asking to be tapped, and the
+                            // accent is how a button is recognised.
+                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
                         )
                     }
                     Text(
                         placeholder,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
                         modifier = Modifier.padding(horizontal = 24.dp),
                     )
                 }
             }
             overlay?.invoke(this)
+        }
+    }
+}
+
+/**
+ * A compact 72 dp tile for the workbench row — source face on the left, target on the
+ * right.
+ *
+ * They used to be full-height panes; a portrait clip pushed them off the first screen and
+ * the panes competed with the stage chips for what a fresh install sees. A tile keeps both
+ * inputs permanently on screen: 72 dp tall whatever the state, width wrapping to whatever
+ * the row gives it, the label as a translucent plate ON the picture so the whole height is
+ * image, and the pick/remove actions tucked into the top corner.
+ *
+ * [fill] switches to the voice tile's layout: the tile stretches to whatever width the
+ * caller gives it (a `weight`), its content centres in the whole surface, and the actions
+ * float on the surface's own corners -- inside the element, the way every tile looked
+ * before the compact form existed.
+ */
+@Composable
+fun FaceTile(
+    label: String,
+    bitmap: Bitmap?,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    /** Makes the whole tile tappable — the target is picked by tapping its own frame. */
+    onClick: (() -> Unit)? = null,
+    /** Shown large and centred while [bitmap] is null, as the tile's call to action. */
+    actionIcon: ImageVector? = null,
+    /** Small actions (camera, change, delete…) over the tile's top-right corner. */
+    actions: @Composable () -> Unit = {},
+    /** Actions that keep the original bottom-right corner (the video camera). */
+    bottomActions: @Composable () -> Unit = {},
+    /** Stretch to the caller's width; actions float on the surface (the voice tile). */
+    fill: Boolean = false,
+    /**
+     * Face boxes over the tile's image, in the BITMAP's own pixel coordinates: five
+     * floats per face -- x0, y0, x1, y1, score -- exactly as `NativePipe.detectFaces`
+     * returns them. Drawn in FfRed, the chosen face thicker.
+     */
+    faceBoxes: FloatArray? = null,
+    /** The chosen reference face's box, drawn differently from the rest. Four floats. */
+    referenceBox: FloatArray? = null,
+    /**
+     * A tap landed inside one of [faceBoxes]; the arguments are the tap in the BITMAP's
+     * own pixel coordinates. A tap that misses every box still runs [onClick] -- the
+     * tile is the target picker first, a face picker second.
+     */
+    onPickFace: ((Float, Float) -> Unit)? = null,
+) {
+    if (fill) {
+        // The voice tile: same bottom-pinned icon column as the compact tiles, but
+        // the content stretches to the row's leftover width instead of a fixed square.
+        FaceTileFilled(label, bitmap, placeholder, modifier, onClick, actionIcon,
+                       actions, bottomActions)
+        return
+    }
+    // ONE element wraps everything: the 72 x 72 dp content square and, right beside it
+    // with only 3 dp of air, the small action icons. The icons live INSIDE the tile's
+    // rounded surface -- they never add to the content square's 72 dp.
+    Box(
+        modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        // BOTTOM-aligned, not centred: with a single action icon (the source's camera,
+        // the filled tiles' delete) a mid-height icon reads as a floating stray; pinned
+        // to the bottom edge it reads as a corner button, which is where tile actions
+        // have always lived. Two icons keep their stack -- top one higher, bottom one
+        // still landing on the corner.
+        Row(verticalAlignment = Alignment.Bottom) {
+            Box(
+                Modifier
+                    .size(72.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .then(
+                        // Face picking takes the tap FIRST, and only over the image
+                        // itself: the icon column beside the square keeps its own
+                        // buttons, and a tap that misses every box runs the tile's own
+                        // onClick -- the tile stays the target picker first.
+                        if (bitmap != null && onPickFace != null) {
+                            Modifier.pointerInput(onPickFace, faceBoxes, bitmap) {
+                                detectTapGestures(
+                                    onTap = { tap ->
+                                        var picked = false
+                                        val boxes = faceBoxes
+                                        if (boxes != null && boxes.size >= 5) {
+                                            val bw = size.width.toFloat()
+                                            val bh = size.height.toFloat()
+                                            val iw = bitmap.width.toFloat()
+                                            val ih = bitmap.height.toFloat()
+                                            // ContentScale.Crop, the tile's own scale: the
+                                            // LARGER ratio fills the square and the
+                                            // overflow is clipped, centred on both axes.
+                                            val k = maxOf(bw / iw, bh / ih)
+                                            val ix = (tap.x - (bw - iw * k) / 2f) / k
+                                            val iy = (tap.y - (bh - ih * k) / 2f) / k
+                                            for (i in 0 until boxes.size / 5) {
+                                                val b = i * 5
+                                                if (ix >= boxes[b] && ix <= boxes[b + 2] &&
+                                                    iy >= boxes[b + 1] && iy <= boxes[b + 3]) {
+                                                    onPickFace(ix, iy)
+                                                    picked = true
+                                                    break
+                                                }
+                                            }
+                                        }
+                                        if (!picked) onClick?.invoke()
+                                    },
+                                )
+                            }
+                        } else Modifier
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (bitmap != null) {
+                    // FULL-BLEED, no inset: the bitmap covers the whole 72 dp square. The
+                    // square's own clip rounds the image, so there is no frame, no border
+                    // and no margin left around it -- the picture IS the content square.
+                    Image(
+                        bitmap.asImageBitmap(), label,
+                        Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
+                    if (faceBoxes != null && faceBoxes.size >= 5) {
+                        // The outlines live on the image, in the image's own coordinates:
+                        // ContentScale.Crop (the LARGER ratio fills the square, overflow
+                        // clipped, centred on both axes) converts them to the square.
+                        Canvas(Modifier.fillMaxSize()) {
+                            val iw = bitmap.width.toFloat()
+                            val ih = bitmap.height.toFloat()
+                            if (iw > 0f && ih > 0f) {
+                                val k = maxOf(size.width / iw, size.height / ih)
+                                val ox = (size.width - iw * k) / 2f
+                                val oy = (size.height - ih * k) / 2f
+                                val w = 1.5.dp.toPx()
+                                for (i in 0 until faceBoxes.size / 5) {
+                                    val b = i * 5
+                                    val chosen = referenceBox != null &&
+                                        referenceBox.size >= 4 &&
+                                        kotlin.math.abs(referenceBox[0] - faceBoxes[b]) < 1f &&
+                                        kotlin.math.abs(referenceBox[1] - faceBoxes[b + 1]) < 1f
+                                    drawRect(
+                                        color = if (chosen) FfRed
+                                                else FfRed.copy(alpha =
+                                                    if (referenceBox != null) 0.35f else 1f),
+                                        topLeft = Offset(ox + faceBoxes[b] * k,
+                                                         oy + faceBoxes[b + 1] * k),
+                                        size = Size((faceBoxes[b + 2] - faceBoxes[b]) * k,
+                                                    (faceBoxes[b + 3] - faceBoxes[b + 1]) * k),
+                                        style = Stroke(width = if (chosen) w * 2f else w),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // The add-state content fills the same 72 x 72 dp square, so empty and
+                    // filled tiles measure identically.
+                    Column(
+                        modifier = Modifier.size(72.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        if (actionIcon != null) {
+                            Icon(
+                                actionIcon, null,
+                                Modifier.size(26.dp),
+                                // Same brand-tinted call-to-action as the full panes use, scaled
+                                // down to fit the tile's smaller plate.
+                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
+                            )
+                        }
+                        Text(
+                            placeholder,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 6.dp),
+                        )
+                    }
+                }
+            }
+            // Small actions (camera, change, delete…), stacked in a column just 3 dp
+            // to the right of the content square, inside the same tile surface and
+            // pinned to its bottom edge with the Row above.
+            Column(
+                Modifier.padding(start = 3.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                actions()
+                bottomActions()
+            }
+        }
+    }
+}
+
+/**
+ * The voice tile's stretched form as a private helper: ONE surface that stretches to
+ * the width the caller hands it (a `weight`), content centred in the whole element,
+ * and the small actions in the same bottom-pinned icon column the compact tiles use --
+ * 3 dp to the right of the content, inside the same surface.
+ *
+ * `label` is kept for the content description only; it is no longer drawn on the
+ * tile. The square/compact tiles do NOT use this form -- they keep the 72 dp content
+ * square with the icon column beside it.
+ */
+@Composable
+private fun FaceTileFilled(
+    label: String,
+    bitmap: Bitmap?,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    actionIcon: ImageVector? = null,
+    actions: @Composable () -> Unit = {},
+    bottomActions: @Composable () -> Unit = {},
+) {
+    Box(
+        modifier
+            .height(72.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        // The voice tile lays its icons out exactly like the compact tiles: a
+        // bottom-pinned column 3 dp to the right of the content, inside the same
+        // surface. Only the content itself stretches to the row's leftover width.
+        Row(verticalAlignment = Alignment.Bottom) {
+            if (bitmap != null) {
+                Image(
+                    bitmap.asImageBitmap(), label,
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(16.dp)),
+                    contentScale = ContentScale.Crop,
+                )
+            } else {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    if (actionIcon != null) {
+                        Icon(
+                            actionIcon, null,
+                            Modifier.size(26.dp),
+                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
+                        )
+                    }
+                    Text(
+                        placeholder,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 6.dp),
+                    )
+                }
+            }
+            // Small actions (record, delete…), stacked in a column just 3 dp to the
+            // right of the content and pinned to the tile's bottom edge -- the same
+            // icon column the source and target tiles use.
+            Column(
+                Modifier.padding(start = 3.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                actions()
+                bottomActions()
+            }
         }
     }
 }
@@ -487,6 +884,10 @@ fun OutputPane(
     modifier: Modifier = Modifier,
     partial: Boolean = false,
     enabled: Boolean = true,
+    /** When set, the video box is THIS wide instead of filling the column, and is
+     *  centred inside the (still full-width) pane -- so a portrait clip is not
+     *  letterboxed into side bars. Mirrors PreviewPane.contentWidth. */
+    contentWidth: Dp? = null,
 ) {
     // Keyed on the file: a second run replaces the video, and stale position/duration from
     // the previous one would put the scrub bar somewhere that no longer exists.
@@ -520,10 +921,14 @@ fun OutputPane(
         }
         Box(
             Modifier
-                .fillMaxWidth()
+                .then(if (contentWidth != null)
+                          Modifier.align(Alignment.CenterHorizontally).width(contentWidth)
+                      else Modifier.fillMaxWidth())
                 .height(height)
-                .clip(RoundedCornerShape(14.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant,
+                        RoundedCornerShape(12.dp)),
             contentAlignment = Alignment.Center,
         ) {
             // ⚠ KEYED ON THE PATH, and this is not decoration. AndroidView's `factory`
@@ -572,6 +977,14 @@ fun OutputPane(
                 enabled = enabled,
             ) { Text(stringResource(if (playing) R.string.out_pause else R.string.out_play)) }
 
+            // The slider reads too dark / high-contrast against the theme, so every part
+            // (thumb, active and inactive track) has its opacity cut by 31%: 69% alpha
+            // keeps the exact same hue with a much softer contrast.
+            val slimColors = SliderDefaults.colors(
+                thumbColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.69f),
+                activeTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.69f),
+                inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.69f),
+            )
             Slider(
                 value = positionMs.toFloat().coerceIn(0f, durationMs.toFloat()),
                 onValueChange = {
@@ -581,6 +994,7 @@ fun OutputPane(
                 valueRange = 0f..durationMs.coerceAtLeast(1).toFloat(),
                 enabled = enabled && durationMs > 0,
                 modifier = Modifier.weight(1f),
+                colors = slimColors,
             )
             Text(
                 "%d.%02ds".format(positionMs / 1000, (positionMs % 1000) / 10),
@@ -634,7 +1048,9 @@ fun Accordion(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            AnimatedVisibility(expanded) {
+            // Same plain conditional as SectionCard: a transition here can draw the
+            // content over the elements below it inside a scrolling container.
+            if (expanded) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Spacer(Modifier.height(4.dp))
                     content()
@@ -647,29 +1063,64 @@ fun Accordion(
 /**
  * The log, in a panel that scrolls on its own.
  *
- * The height is FIXED and must stay so: this sits inside the page's vertical scroll, and a
- * scrollable of unbounded height nested in another one cannot measure.
+ * The whole row is the toggle: tap "Log" (or its chevron) to fold the 170 dp panel away
+ * and tap again to bring it back. Default COLLAPSED -- the log is debug output, not a
+ * thing every visit needs open, and a standing 170 dp panel pushed the controls below it
+ * down the page.
+ *
+ * The height of the open panel is FIXED and must stay so: this sits inside the page's
+ * vertical scroll, and a scrollable of unbounded height nested in another one cannot
+ * measure.
  */
 @Composable
-fun LogBox(text: String, modifier: Modifier = Modifier) {
+fun LogBox(
+    text: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val scroll = rememberScrollState()
     // Follow the tail, which is the only part anyone reads while a run is going.
-    LaunchedEffect(text) { scroll.animateScrollTo(scroll.maxValue) }
+    LaunchedEffect(text, expanded) {
+        if (expanded) scroll.animateScrollTo(scroll.maxValue)
+    }
     Column(modifier.fillMaxWidth()) {
-        Caption(stringResource(R.string.out_log), Modifier.padding(bottom = 4.dp))
-        Surface(
-            Modifier.fillMaxWidth().height(170.dp),
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant,
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .clickable(onClick = onToggle)
+                .padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text,
-                Modifier.verticalScroll(scroll).padding(12.dp),
-                fontFamily = FontFamily.Monospace,
-                fontSize = 10.sp,
-                lineHeight = 14.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Caption(stringResource(R.string.out_log), Modifier.weight(1f))
+            Icon(
+                Icons.Default.KeyboardArrowDown,
+                stringResource(if (expanded) R.string.common_collapse
+                               else R.string.common_expand),
+                Modifier
+                    .size(20.dp)
+                    .rotate(if (expanded) 0f else 180f),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+        // Plain `if` for the same reason as SectionCard: AnimatedVisibility in this
+        // verticalScroll could draw the panel over what followed it mid-transition.
+        if (expanded) {
+            Surface(
+                Modifier.fillMaxWidth().height(170.dp).padding(top = 4.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+            ) {
+                Text(
+                    text,
+                    Modifier.verticalScroll(scroll).padding(12.dp),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 10.sp,
+                    lineHeight = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }

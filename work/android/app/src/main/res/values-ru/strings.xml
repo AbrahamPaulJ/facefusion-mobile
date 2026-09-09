@@ -15,12 +15,12 @@
 
     <string name="nav_swap">Замена</string>
     <string name="nav_settings">Настройки</string>
+    <string name="nav_live">Live</string>
 
     <string name="swap_source_face">Исходное лицо</string>
     <string name="swap_source_pick">Выберите исходное лицо</string>
     <string name="swap_pane_original">Оригинал</string>
     <string name="swap_pane_target">Цель</string>
-    <string name="swap_pane_original_at">Оригинал  %1$s</string>
     <string name="swap_pane_swapped">Результат</string>
     <string name="swap_reading_video">Чтение видео…</string>
     <string name="swap_seeking">Перемотка…</string>
@@ -43,6 +43,8 @@
     <string name="swap_voice_pause">Пауза</string>
     <string name="swap_voice_trim">Фрагмент голоса</string>
     <string name="swap_voice_trim_hint">Только эта часть управляет губами</string>
+    <!-- Складная карточка с воспроизведением голоса и фрагментом. -->
+    <string name="swap_voice_settings">Настройки голоса</string>
     <string name="swap_loading_models">Загрузка моделей, это займёт несколько секунд…</string>
     <string name="swap_swapping_frame">Замена на этом кадре…</string>
     <string name="swap_pick_a_source">Выберите исходное лицо</string>
@@ -59,6 +61,7 @@
     <string name="proc_get_cancel">Не сейчас</string>
 
     <string name="swap_clip">Клип</string>
+    <string name="swap_clip_rate">Клип</string>
     <string name="swap_clip_summary">%1$d кадров из %2$s   %3$d fps</string>
     <string name="swap_frame_rate">Частота кадров</string>
     <string name="swap_rate_same">Как в исходнике (%1$d)</string>
@@ -295,6 +298,11 @@
     <string name="live_stat">%1$s fps   %2$s</string>
     <string name="live_faces">лиц: %1$d</string>
     <string name="live_no_face">нет лица</string>
+    <string name="live_source_label">Источник %1$d</string>
+    <string name="live_swap">Замена лица</string>
+    <string name="live_swap_on">Замена активна</string>
+    <string name="live_swap_off">Замена отключена</string>
+    <string name="live_target">Целевые лица</string>
     <string name="live_stop_to_change">Остановите, чтобы сменить исходное лицо</string>
     <string name="live_source_hint">Лицо, которое накладывается НА живое видео</string>
     <string name="live_fast_mode">Быстрый режим</string>
@@ -323,6 +331,11 @@
     <string name="set_tab_device">Устройство</string>
     <string name="set_tab_api">API</string>
     <string name="set_tab_about">О программе</string>
+    <string name="set_theme_title">Тема</string>
+    <string name="set_theme_dark">Тёмная тема</string>
+    <string name="set_theme_follow_system">По системе</string>
+    <string name="set_theme_desc_dark">Тёмная</string>
+    <string name="set_theme_desc_light">Светлая</string>
     <string name="live_lens_front">ФРОНТ</string>
     <string name="live_lens_back">ТЫЛ</string>
     <string name="swap_show_faces">Показать найденные лица</string>
@@ -346,6 +359,26 @@
     <string name="live_rec_start">Запись</string>
     <string name="live_rec_stop">Остановить запись</string>
     <string name="live_rec_badge">ЗАП</string>
+    <string name="live_mic">Микрофон</string>
+    <string name="live_mic_on">Записывать звук с микрофона. Измените до начала записи.</string>
+    <string name="live_mic_off">Только видео. Микрофон выключен.</string>
+    <string name="live_mic_busy">Остановите запись голоса перед записью трансляции с микрофоном.</string>
+    <string name="live_target_all">Заменять все обнаруженные лица</string>
+    <string name="live_target_one">Заменять только самое крупное лицо</string>
+    <string name="live_target_locked">Заблокировано при включённом режиме «Назначить по человеку»</string>
+    <string name="live_assign_title">Назначить по человеку</string>
+    <string name="live_assign_off">Каждое лицо использует выбранный источник</string>
+    <string name="live_assign_on">Ничего не меняется, пока вы не коснётесь лица</string>
+    <string name="live_assign_hint">Назначение по человеку: выберите источник, затем коснитесь лица. Нетронутые лица сохраняют свой источник.</string>
+    <string name="live_assign_set">Источник %1$d назначен этому человеку</string>
+    <string name="live_assign_missed">Лицо не найдено — выбор снят</string>
+    <string name="live_assign_cleared">Назначения очищены</string>
+    <string name="live_assign_clear">Очистить</string>
+    <string name="live_assign_count">Назначено: %1$d</string>
+    <string name="live_assign_help">Как работает назначение по человеку</string>
+    <string name="live_assign_help_title">Назначить по человеку</string>
+    <string name="live_assign_help_body">1. Включите переключатель. Изображение сохранит текущий вид.\n2. Выберите чип источника (Источник 1, Источник 2…).\n3. Коснитесь человека, которому нужен этот источник — он будет ВЫБРАН (белая рамка) и сразу получит этот источник.\n4. Пока он выбран, смена чипа меняет только ЕГО — можно пробовать разные источники на одном человеке.\n5. Для следующего человека коснитесь его (выбор перейдёт) или коснитесь пустого места, чтобы СНЯТЬ выбор — человек сохранит последний источник, и его больше нельзя изменить.\n\nВыбранные люди сохраняют свой источник на всю сессию. Нетронутые сохраняют вид, который был при включении режима.\n\n«Очистить» удаляет все назначения. Выключение переключателя возвращает поведение по умолчанию (каждое лицо следует за чипом).</string>
+    <string name="live_assign_help_gotit">Понятно</string>
     <string name="status_live_recording">Идёт запись трансляции.</string>
     <string name="status_live_rec_saved">Запись сохранена, кадров: %1$d.</string>
     <string name="status_live_rec_empty">Записать ничего не удалось.</string>

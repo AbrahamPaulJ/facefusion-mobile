@@ -3,6 +3,7 @@ package com.facefusion.mobile.ui
 import android.graphics.Bitmap
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -164,7 +165,7 @@ fun LiveScreen(
                     FilterChip(
                         selected = index == activeSource,
                         onClick = { onSelectSource(index) },
-                        label = { Text("Source ${index + 1}") },
+                        label = { Text(stringResource(R.string.live_source_label, index + 1)) },
                         // The whole point of the multi-source mode: switch ON THE FLY,
                         // including while a recording is in flight -- the native side
                         // reads the active slot per frame, so the file simply changes
@@ -275,14 +276,14 @@ fun LiveScreen(
             // making before pressing Start.
             Surface(
                 onClick = onSwitchCamera,
-                color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.55f),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
             ) {
                 Text(
                     stringResource(if (frontCamera) R.string.live_lens_front
                                    else R.string.live_lens_back),
-                    color = MaterialTheme.colorScheme.inverseOnSurface,
+                    color = MaterialTheme.colorScheme.onBackground,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 11.sp,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -313,6 +314,7 @@ fun LiveScreen(
             // draws with, so the outline sits on the person the user tapped.
             if (assignFade && assignBox != null && assignBox.size >= 5 && frame != null) {
                 val b = assignBox
+                val label = stringResource(R.string.live_source_label, b[4].toInt() + 1)
                 Canvas(Modifier.fillMaxSize()) {
                     val fw = frame.width.toFloat(); val fh = frame.height.toFloat()
                     val bw = size.width.toFloat(); val bh = size.height.toFloat()
@@ -325,7 +327,6 @@ fun LiveScreen(
                     drawRect(FfRed, topLeft = Offset(l, t),
                              size = androidx.compose.ui.geometry.Size(r - l, bo - t),
                              style = androidx.compose.ui.graphics.drawscope.Stroke(3.dp.toPx()))
-                    val label = "Source ${b[4].toInt() + 1}"
                     val paint = android.graphics.Paint().apply {
                         color = android.graphics.Color.RED
                         textSize = 13.dp.toPx()
@@ -345,6 +346,7 @@ fun LiveScreen(
             // mapping as the confirmation box.
             if (selectionBox != null && selectionBox.size >= 5 && frame != null) {
                 val b = selectionBox
+                val label = stringResource(R.string.live_source_label, b[4].toInt() + 1)
                 Canvas(Modifier.fillMaxSize()) {
                     val fw = frame.width.toFloat(); val fh = frame.height.toFloat()
                     val bw = size.width.toFloat(); val bh = size.height.toFloat()
@@ -357,7 +359,6 @@ fun LiveScreen(
                     drawRect(Color.White, topLeft = Offset(l, t),
                              size = androidx.compose.ui.geometry.Size(r - l, bo - t),
                              style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
-                    val label = "Source ${b[4].toInt() + 1}"
                     val paint = android.graphics.Paint().apply {
                         color = android.graphics.Color.WHITE
                         textSize = 13.dp.toPx()
@@ -374,7 +375,7 @@ fun LiveScreen(
             // than after it. Only while running: a stale rate on a stopped feed is a lie.
             if (running) {
                 Surface(
-                    color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.55f),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
                 ) {
@@ -382,7 +383,7 @@ fun LiveScreen(
                         stringResource(R.string.live_stat, "%.1f".format(fps),
                             if (faces > 0) stringResource(R.string.live_faces, faces)
                             else stringResource(R.string.live_no_face)),
-                        color = MaterialTheme.colorScheme.inverseOnSurface,
+                        color = MaterialTheme.colorScheme.onBackground,
                         fontFamily = FontFamily.Monospace,
                         fontSize = 11.sp,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -396,6 +397,13 @@ fun LiveScreen(
                 onClick = onToggleRun,
                 enabled = modelsReady && sourceThumb != null,
                 modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.onBackground,
+                    disabledContainerColor = MaterialTheme.colorScheme.surface,
+                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) { Text(stringResource(if (running) R.string.live_stop else R.string.live_start)) }
             // RECORD, beside Start rather than over the feed: it writes a file, which is
             // the kind of thing that belongs with the other button that commits something,
@@ -405,6 +413,16 @@ fun LiveScreen(
                 onClick = onToggleRecord,
                 enabled = running && !finalizing,
                 modifier = Modifier.weight(1f),
+                // Same control background as the Start button next to it: card-surface in
+                // both schemes, not the default transparent/accent OutlinedButton.
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.onBackground,
+                    disabledContainerColor = MaterialTheme.colorScheme.surface,
+                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
                 Text(stringResource(if (recording) R.string.live_rec_stop
                                     else R.string.live_rec_start),
@@ -424,8 +442,9 @@ fun LiveScreen(
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Face swap", style = MaterialTheme.typography.bodyMedium)
-                Text(if (swapEnabled) "Swapping active" else "Swapping disabled",
+                Text(stringResource(R.string.live_swap), style = MaterialTheme.typography.bodyMedium)
+                Text(if (swapEnabled) stringResource(R.string.live_swap_on)
+                     else stringResource(R.string.live_swap_off),
                      style = MaterialTheme.typography.bodySmall)
             }
             Switch(checked = swapEnabled,
@@ -438,7 +457,7 @@ fun LiveScreen(
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Target faces", style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.live_target), style = MaterialTheme.typography.bodyMedium)
                 // Mutually exclusive with assign per person (both choose which face gets
                 // which source). While assign is on the selector is pinned to "all
                 // faces", so the switch is locked and says so.
