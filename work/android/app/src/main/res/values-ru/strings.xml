@@ -21,6 +21,7 @@
     <string name="swap_source_pick">Выберите исходное лицо</string>
     <string name="swap_pane_original">Оригинал</string>
     <string name="swap_pane_target">Цель</string>
+    <string name="swap_pane_original_at">Оригинал  %1$s</string>
     <string name="swap_pane_swapped">Результат</string>
     <string name="swap_reading_video">Чтение видео…</string>
     <string name="swap_seeking">Перемотка…</string>
@@ -44,7 +45,6 @@
     <string name="swap_voice_trim">Фрагмент голоса</string>
     <string name="swap_voice_trim_hint">Только эта часть управляет губами</string>
     <!-- Складная карточка с воспроизведением голоса и фрагментом. -->
-    <string name="swap_voice_settings">Настройки голоса</string>
     <string name="swap_loading_models">Загрузка моделей, это займёт несколько секунд…</string>
     <string name="swap_swapping_frame">Замена на этом кадре…</string>
     <string name="swap_pick_a_source">Выберите исходное лицо</string>
@@ -61,7 +61,6 @@
     <string name="proc_get_cancel">Не сейчас</string>
 
     <string name="swap_clip">Клип</string>
-    <string name="swap_clip_rate">Клип</string>
     <string name="swap_clip_summary">%1$d кадров из %2$s   %3$d fps</string>
     <string name="swap_frame_rate">Частота кадров</string>
     <string name="swap_rate_same">Как в исходнике (%1$d)</string>

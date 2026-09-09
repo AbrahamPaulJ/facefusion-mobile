@@ -22,6 +22,7 @@
     <string name="swap_source_pick">选择源人脸</string>
     <string name="swap_pane_original">原图</string>
     <string name="swap_pane_target">目标</string>
+    <string name="swap_pane_original_at">原图  %1$s</string>
     <string name="swap_pane_swapped">换脸结果</string>
     <string name="swap_reading_video">正在读取视频…</string>
     <string name="swap_seeking">正在定位…</string>
@@ -38,7 +39,6 @@
     <string name="swap_voice_trim">语音片段</string>
     <string name="swap_voice_trim_hint">只有这段会驱动口型</string>
     <!-- 语音播放与片段裁剪的可折叠面板 -->
-    <string name="swap_voice_settings">语音设置</string>
     <string name="swap_loading_models">正在加载模型，需要几秒钟…</string>
     <string name="swap_swapping_frame">正在处理这一帧…</string>
     <string name="swap_pick_a_source">请选择源人脸</string>
@@ -55,7 +55,6 @@
     <string name="proc_get_cancel">暂不</string>
 
     <string name="swap_clip">片段</string>
-    <string name="swap_clip_rate">片段</string>
     <string name="swap_clip_summary">%1$d 帧，共 %2$s   %3$d fps</string>
     <string name="swap_frame_rate">帧率</string>
     <string name="swap_rate_same">与原片相同 (%1$d)</string>
@@ -81,7 +80,6 @@
     <string name="out_play">播放</string>
     <string name="out_pause">暂停</string>
     <string name="out_log">日志</string>
-    <string name="swap_output_result">输出结果</string>
     <string name="out_expand">展开</string>
     <string name="out_collapse">收起</string>
 
@@ -404,7 +402,6 @@
     <string name="notif_batch_channel">批量替换</string>
     <string name="status_batch_queued_some">已排入 %1$d 个片段。已忽略 %2$d 张照片，批量仅支持视频。</string>
     <string name="status_batch_images_only">照片逐张替换；结果已显示在面板上。</string>
-    <string name="swap_batch_menu">批量添加</string>
     <string name="swap_batch_add">添加更多片段（批量）</string>
     <string name="swap_batch_add_more">添加更多片段</string>
     <string name="status_faces_found">检测到 %1$d 张人脸，点按其中一张仅替换该人脸。</string>

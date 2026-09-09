@@ -3,7 +3,6 @@ package com.facefusion.mobile.ui
 import android.graphics.Bitmap
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -397,13 +396,6 @@ fun LiveScreen(
                 onClick = onToggleRun,
                 enabled = modelsReady && sourceThumb != null,
                 modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    contentColor = MaterialTheme.colorScheme.onBackground,
-                    disabledContainerColor = MaterialTheme.colorScheme.surface,
-                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                ),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) { Text(stringResource(if (running) R.string.live_stop else R.string.live_start)) }
             // RECORD, beside Start rather than over the feed: it writes a file, which is
             // the kind of thing that belongs with the other button that commits something,
@@ -413,16 +405,6 @@ fun LiveScreen(
                 onClick = onToggleRecord,
                 enabled = running && !finalizing,
                 modifier = Modifier.weight(1f),
-                // Same control background as the Start button next to it: card-surface in
-                // both schemes, not the default transparent/accent OutlinedButton.
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    contentColor = MaterialTheme.colorScheme.onBackground,
-                    disabledContainerColor = MaterialTheme.colorScheme.surface,
-                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                ),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
                 Text(stringResource(if (recording) R.string.live_rec_stop
                                     else R.string.live_rec_start),

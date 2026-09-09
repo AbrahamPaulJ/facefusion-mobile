@@ -433,8 +433,12 @@ android {
         // the monochrome theme with a pinned light/dark choice, and the @Immutable +
         // 10 Hz recomposition fix.  v0.9.12 is published and is versionCode 84, so this
         // build has stopped being that release and must stop answering to its name.
-        versionCode = 85
-        versionName = "0.9.13$variantTag"    // "-dev" == NO content gate
+        // 86 = #3's layout reverted on the bench's own judgement, the theme, the perf fix
+        // and the translations kept.  A separate CODE because 85 left this machine and is
+        // installed on the test phone: reusing it would leave two different layouts
+        // answering to one version, which is the ambiguity the rule exists to stop.
+        versionCode = 86
+        versionName = "0.9.14$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }
