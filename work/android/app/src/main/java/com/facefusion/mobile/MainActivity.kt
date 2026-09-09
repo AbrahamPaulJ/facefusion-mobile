@@ -3149,6 +3149,9 @@ class MainActivity : ComponentActivity() {
                         "swapped_${System.currentTimeMillis()}.mp4")
                     status = getString(R.string.status_swapping)
                     var lastPreview = 0L
+                    // Once per RUN: previewIntervalMs reads SharedPreferences and can probe
+                    // the backend, neither of which belongs on a per-frame callback.
+                    val previewInterval = previewIntervalMs()
                     // The native loop calls onProgress for EVERY processed frame; writing
                     // three top-level states at that rate re-composed the whole 1600-line
                     // screen 25+ times a second and stalled the scroll. 10 Hz is past what
@@ -3177,10 +3180,11 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         onFrame = { bgr, w, h ->
-                            // throttle: a Bitmap per frame is pure allocation churn and the
-                            // eye cannot use more than a few updates a second anyway
+                            // Real-time on the NPU, throttled elsewhere -- see
+                            // previewIntervalMs for why the number is derived and not a
+                            // setting. Read once per run, not per frame.
                             val now = System.currentTimeMillis()
-                            if (now - lastPreview > 250) {
+                            if (now - lastPreview >= previewInterval) {
                                 lastPreview = now
                                 val pw = 480
                                 val ph = (h.toLong() * pw / w).toInt().coerceAtLeast(1)
@@ -3395,6 +3399,7 @@ class MainActivity : ComponentActivity() {
                                        "_" + (i + 1) + ".mp4")
                         partial = out
                         var lastPreview = 0L
+                        val previewInterval = previewIntervalMs()
                         // Same 10 Hz cap as the single-run path above: the native loop's
                         // per-frame onProgress was a 25 Hz recomposition storm over the
                         // whole screen, scroll included.
@@ -3425,8 +3430,9 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                             onFrame = { bgr, w, h ->
+                                // Same rule as the single-clip path above.
                                 val now = System.currentTimeMillis()
-                                if (now - lastPreview > 250) {
+                                if (now - lastPreview >= previewInterval) {
                                     lastPreview = now
                                     val pw = 480
                                     val ph = (h.toLong() * pw / w).toInt().coerceAtLeast(1)
@@ -3526,6 +3532,34 @@ class MainActivity : ComponentActivity() {
      * Same retriever as [batchThumb], but on a content URI rather than an app-written
      * file. Failure is null -- a missing thumbnail is cosmetic and must not refuse a clip.
      */
+    /**
+     * How often a run's swapped frame is allowed to reach the SWAPPED pane, in ms.
+     *
+     * The pane has shown the run's own output since the video path existed -- `onFrame`
+     * hands over the frame that is about to be encoded, so this is the real result and not
+     * a re-render of it. What was missing is RATE: one frame every 250 ms reads as a
+     * slideshow, which is why the feature was not recognisable as one.
+     *
+     * ⚠ The cap is not allocation, it is RECOMPOSITION. Each frame is a new Bitmap in a new
+     * [PreviewUi], and a new instance is by definition not equal to the last, so the pane
+     * cannot be skipped and `SwapScreen` re-runs. That is the same cost the 10 Hz progress
+     * cap exists to bound; it is affordable here only because @Immutable now lets every
+     * card that did NOT change skip, which was not true when the 25 Hz storm was measured.
+     *
+     * So it is spent where it buys something. On the NPU a frame costs ~25-40 ms, so 50 ms
+     * delivers most of them and the pane genuinely tracks the encoder. On ncnn a frame is
+     * far slower, the extra updates would land on a pipeline that has nothing new to show,
+     * and the recomposition competes with the work -- so that path keeps 250 ms.
+     *
+     * Deliberately derived, not a setting: the answer follows from the runtime, and a
+     * switch would only let the user choose the worse one.
+     */
+    private fun previewIntervalMs(): Long {
+        val forced = ModelPaths.forcedBackend(this)
+        val active = if (forced.isNotEmpty()) forced else ModelPaths.backend(this)
+        return if (active == "qnn") 50L else 250L
+    }
+
     private fun batchThumb(uri: Uri): Bitmap? = runCatching {
         android.media.MediaMetadataRetriever().use { r ->
             r.setDataSource(this@MainActivity, uri)

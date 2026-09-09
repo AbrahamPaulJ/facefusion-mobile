@@ -437,8 +437,10 @@ android {
         // and the translations kept.  A separate CODE because 85 left this machine and is
         // installed on the test phone: reusing it would leave two different layouts
         // answering to one version, which is the ambiguity the rule exists to stop.
-        versionCode = 86
-        versionName = "0.9.14$variantTag"    // "-dev" == NO content gate
+        // 87 = the band's missing gap under its own divider, and the run preview at the
+        // rate the NPU can actually feed it.
+        versionCode = 87
+        versionName = "0.9.15$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }

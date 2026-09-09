@@ -77,6 +77,15 @@ fun AppScaffold(
                         thickness = 1.dp,
                         color = MaterialTheme.colorScheme.surfaceVariant,
                     )
+                    // ⚠ The gap below the RULE, not above it. Before the band existed the
+                    // top bar carried `bottom = 18.dp` and that was the whole separation
+                    // between the wordmark and the first control. The band kept 16.dp but
+                    // spends it ABOVE the divider, so every screen's first row -- the
+                    // Processors chips, the Live title -- ended up flush against the line
+                    // with nothing under it. Part of the top bar rather than of each
+                    // screen, so it measures into the Scaffold's own top inset and no
+                    // screen has to know the band is there.
+                    Spacer(Modifier.height(14.dp))
                 }
             }
         },
