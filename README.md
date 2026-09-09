@@ -50,7 +50,10 @@ Ruhs. The pipeline, the models, and the option names, defaults and ranges are Fa
 - Lip sync, optionally: redraws the mouth to match a voice you pick — a dub, a different
   take, any audio or video file — at about 1-2 ms per frame on the NPU. Play the voice back
   and trim it first, so only the part you want drives the mouth.
+- Shows the swap as it is written: while a video runs, the result pane is the frame going
+  into the file, not a re-render of it. The sound arrives with the finished clip.
 - Speaks English, Русский, 简体中文 and 繁體中文.
+- Follows your phone's light or dark theme, or pin one in Settings.
 - Can be driven from a browser on your PC over the local network, if you turn that on.
 
 Optional extras, each a separate download: a face enhancer (`gpen_bfr_256`, about 2.5 ms
