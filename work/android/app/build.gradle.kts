@@ -55,9 +55,16 @@ val hasNcnn = File(ncnnDir, "lib/libncnn.a").exists()
 
 // QNN headers and Android/Hexagon runtimes are generated locally from the Qualcomm SDK
 // and intentionally ignored by Git.  Make a fresh clone self-healing: every Android
-// build checks the required marker and representative files, and stages them when they
-// are absent.  The SDK location is supplied through QNN_SDK_ROOT/QAIRT_SDK_ROOT (or the
-// default understood by stage_qnn.sh).
+// build checks for the representative files, and stages them when they are absent.  The
+// SDK location is supplied through QNN_SDK_ROOT/QAIRT_SDK_ROOT (or the default understood
+// by stage_qnn.sh).
+//
+// ⚠ The test is the STAGED FILES THEMSELVES, never a marker file the script writes.  This
+// tree is staged BY HAND on the Windows bench (docs/rebuild.md), so `QNN_STAGED.txt` does
+// not exist here even though all fourteen libraries and the headers do -- and requiring it
+// made every build shell out to a script it did not need, on a machine where Gradle cannot
+// find `bash` at all.  The error was "A problem occurred starting process 'command
+// 'bash''", which says nothing about staging.
 val qnnStageScript = rootProject.file("stage_qnn.sh")
 val qnnTiers = (System.getenv("QNN_HTP_TIERS") ?: "68 69 73 75 79 81")
     .trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
@@ -65,7 +72,6 @@ val qnnStage by tasks.registering {
     doLast {
         val required = mutableListOf(
             file("src/main/cpp/include/QNN/QnnBackend.h"),
-            file("src/main/jniLibs/QNN_STAGED.txt"),
             file("src/main/jniLibs/arm64-v8a/libQnnHtp.so"),
             file("src/main/jniLibs/arm64-v8a/libQnnSystem.so"),
         )
@@ -85,9 +91,20 @@ val qnnStage by tasks.registering {
                 throw GradleException("Missing QNN staging script: ${qnnStageScript.absolutePath}")
             }
             logger.lifecycle("QNN staging is incomplete; running ${qnnStageScript.name}")
-            exec {
-                workingDir(rootProject.projectDir)
-                commandLine("bash", qnnStageScript.absolutePath)
+            // A failure here is reported in terms of STAGING, not of the process that was
+            // meant to do it.  `bash` is not on Gradle's PATH on the Windows bench, and the
+            // raw exec failure names only that -- leaving the reader to work out that the
+            // build wanted QNN libraries and could not fetch them.
+            try {
+                exec {
+                    workingDir(rootProject.projectDir)
+                    commandLine("bash", qnnStageScript.absolutePath)
+                }
+            } catch (e: Exception) {
+                throw GradleException(
+                    "QNN staging is incomplete and ${qnnStageScript.name} could not be run " +
+                    "(${e.message}). Stage by hand -- see docs/rebuild.md -- or run " +
+                    "`bash work/android/stage_qnn.sh` with QNN_SDK_ROOT set to a QAIRT SDK.", e)
             }
         }
     }
@@ -108,9 +125,12 @@ if (prebuiltNativeDir != null) {
 
 android {
     namespace = "com.facefusion.mobile"
-    // The sandbox SDK currently provides platform 34, which is sufficient for compilation.
-    compileSdk = 34
-    buildToolsVersion = "35.0.0"
+    // ⚠ compileSdk tracks targetSdk (35), which is what the manifest and the behaviour
+    // changes are written against.  It was moved DOWN to 34 in #3 because that PR's build
+    // container only had platform 34 -- "sufficient for compilation" is true and is not the
+    // test: compiling below targetSdk means the 35 APIs the app targets are not on the
+    // classpath, and the mismatch is a warning rather than an error.
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.facefusion.mobile$idSuffix"
@@ -409,8 +429,12 @@ android {
         // build someone is holding is precise and useless to them. 0.7.0 had four
         // APKs and 0.8.0 had ten, and in both cases the NAME could not tell them
         // apart -- which is the whole ambiguity the version rule exists to stop.
-        versionCode = 84
-        versionName = "0.9.12$variantTag"    // "-dev" == NO content gate
+        // 85 = PR #3 lands (squash d041ed4): the swap screen rebuild, the 72dp face tiles,
+        // the monochrome theme with a pinned light/dark choice, and the @Immutable +
+        // 10 Hz recomposition fix.  v0.9.12 is published and is versionCode 84, so this
+        // build has stopped being that release and must stop answering to its name.
+        versionCode = 85
+        versionName = "0.9.13$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }
@@ -433,11 +457,19 @@ android {
     if (prebuiltNativeDir == null) externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.28.3"
+            // ⚠ The version bundled with the Android SDK.  #3 pinned 3.28.3 because its
+            // container had that one, and the build here died at
+            // `[CXX1300] CMake '3.28.3' was not found in SDK, PATH, or by cmake.dir` --
+            // a pin only ever narrows who can build, so it names what ships with the SDK.
+            version = "3.22.1"
         }
     }
-    // The build sandbox provides NDK r29; keep this aligned with the selected toolchain.
-    ndkVersion = "29.0.14206865"
+    // ⚠ r27.2 is the toolchain every measurement in docs/perf.md was taken with, and moving
+    // it silently re-bases them.  #3 moved this to r29 to match its own container; r29 is
+    // installed on this bench too, so the build was green either way and the numbers would
+    // have quietly stopped comparing.  Change it deliberately, with a re-measure, or not at
+    // all.
+    ndkVersion = "27.2.12479018"
     if (prebuiltNativeDir != null) {
         sourceSets.getByName("main").jniLibs.srcDir(prebuiltNativeDir)
     }
