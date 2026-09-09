@@ -454,6 +454,7 @@ class MainActivity : ComponentActivity() {
                       else swapSources + SwapSource(uri, thumb)
         swapSourceIndex = swapSources.indexOfFirst { it.uri == uri }.coerceAtLeast(0)
         if (liveSources.none { it.uri == uri }) liveSources = liveSources + LiveSource(uri, thumb)
+        liveSourceIndex = liveSources.indexOfFirst { it.uri == uri }.coerceAtLeast(0)
         // A different face means the loaded pipeline is holding the wrong embedding.
         previewOptionsChanged()
     }
@@ -3312,6 +3313,15 @@ class MainActivity : ComponentActivity() {
                                 ContentGate.message(this@MainActivity,
                                                     R.string.gate_subject_source_image, it))
                         }
+                    }
+                    // The target must be checked independently of the source. The
+                    // multi-source refactor previously dropped this gate from the single
+                    // video swap path.
+                    ContentGate.checkVideo(tgt).let {
+                        appendLog("target content score %+.3f".format(it.score))
+                        if (!it.ok) throw ContentGate.Refused(
+                            ContentGate.message(this@MainActivity,
+                                                R.string.gate_subject_target_video, it))
                     }
                     val firstSource = decodedSources.first().second
                     val firstSoft = firstSource.asArgb8888()
