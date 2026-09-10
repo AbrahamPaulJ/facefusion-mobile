@@ -1036,7 +1036,7 @@ void Pipeline::setActiveSource(int index) {
 bool Pipeline::setFaceSourceAt(const ffcv::Image& frame, float x, float y, int sourceIndex,
                                bool disabled, float* outBox, float* outEmbedding) {
   err_.clear();
-  if (sourceIndex < 0 || sourceIndex >= (int)p_->sourceSlots.size()) {
+  if ((sourceIndex < 0 && !disabled) || sourceIndex >= (int)p_->sourceSlots.size()) {
     err_ = "source index out of range"; return false;
   }
   // noTrack, like every source-image analysis: this records an identity, and an identity
@@ -1064,7 +1064,7 @@ bool Pipeline::setFaceSourceAt(const ffcv::Image& frame, float x, float y, int s
 }
 
 bool Pipeline::addFaceAssignmentEmbedding(const float* embedding, int sourceIndex) {
-  if (!p_ || !embedding || sourceIndex < 0 || sourceIndex >= (int)p_->sourceSlots.size()) {
+  if (!p_ || !embedding || sourceIndex < -1 || sourceIndex >= (int)p_->sourceSlots.size()) {
     err_ = "invalid face assignment";
     return false;
   }
@@ -1078,6 +1078,7 @@ bool Pipeline::addFaceAssignmentEmbedding(const float* embedding, int sourceInde
   Pipeline::Impl::FaceAssignment a{};
   std::memcpy(a.embedding.data(), embedding, sizeof(float) * 512);
   a.source = sourceIndex;
+  a.disabled = sourceIndex < 0;
   p_->faceAssignments.push_back(a);
   return true;
 }
@@ -1088,6 +1089,29 @@ void Pipeline::clearFaceSourceAssignments() {
   // assignments; clearing the memory clears the presence table too, and the selection
   // with it.
   p_->tracked.clear(); p_->frameSources.clear(); p_->selectedId = -1;
+}
+
+void Pipeline::setSelectedFaceDisabled(bool disabled) {
+  if (!p_ || !p_->assignEnabled || p_->selectedId < 0) return;
+  for (auto& t : p_->tracked) {
+    if (t.id != p_->selectedId) continue;
+    const float kSamePerson = 0.15f;
+    p_->faceAssignments.erase(
+        std::remove_if(p_->faceAssignments.begin(), p_->faceAssignments.end(),
+            [&](const Pipeline::Impl::FaceAssignment& a) {
+              return faceDistance(t.embeddingNorm, a.embedding.data()) < kSamePerson;
+            }),
+        p_->faceAssignments.end());
+    t.source = disabled ? -1 : p_->activeSource;
+    t.pinned = true;
+    t.missed = 0;
+    Pipeline::Impl::FaceAssignment a{};
+    std::memcpy(a.embedding.data(), t.embeddingNorm, sizeof(float) * 512);
+    a.source = disabled ? -1 : p_->activeSource;
+    a.disabled = disabled;
+    p_->faceAssignments.push_back(a);
+    return;
+  }
 }
 
 void Pipeline::setFaceAssignEnabled(bool enabled) {
@@ -1176,6 +1200,10 @@ bool Pipeline::updateLiveTracking(const std::vector<Face>& faces,
     return false;
   }
   err_.clear();
+  // -2 is the Live UI's No face brush. Internally use slot 0 for validation, then
+  // preserve the disabled flag when pinning the tracked person.
+  const bool tapDisabled = tapSource == -2;
+  if (tapDisabled) tapSource = 0;
   const int kMaxTracked = 16;
   const float kMatchDist = 1.3f;     // centre distance, in box-dimension units
   const float kTapDist = 1.0f;       // how far a tap may be from a box centre
@@ -1318,7 +1346,7 @@ bool Pipeline::updateLiveTracking(const std::vector<Face>& faces,
       else if (d < secondD) secondD = d;
     }
     if (hit && secondD - bestD > kAdoptMargin &&
-        hit->source >= 0 && hit->source < (int)p_->sourceSlots.size()) {
+        (hit->disabled || (hit->source >= 0 && hit->source < (int)p_->sourceSlots.size()))) {
       t.source = hit->source; t.pinned = true;
     }
     t.id = p_->nextTrackedId++;
@@ -1331,7 +1359,7 @@ bool Pipeline::updateLiveTracking(const std::vector<Face>& faces,
   // only found a current face pins the entry that face has (creating it if the tap
   // preceded the association). The pin lands in the table the swap on THIS frame reads,
   // so the new source applies immediately.
-  if (tapSource >= 0 && (tappedEntry >= 0 || tappedFace >= 0)) {
+  if ((tapDisabled || tapSource >= 0) && (tappedEntry >= 0 || tappedFace >= 0)) {
     int idx = tappedEntry;
     if (idx < 0) {
       idx = faceTrack[(size_t)tappedFace];
@@ -1344,7 +1372,7 @@ bool Pipeline::updateLiveTracking(const std::vector<Face>& faces,
       }
     }
     Pipeline::Impl::TrackedFace& t = trk[(size_t)idx];
-    t.source = tapSource; t.pinned = true; t.missed = 0;
+    t.source = tapDisabled ? -1 : tapSource; t.pinned = true; t.missed = 0;
     // The tapped person becomes the SELECTED one: they follow the chip until an empty
     // tap deselects them (see the miss branch above).
     p_->selectedId = t.id;
@@ -1375,7 +1403,8 @@ bool Pipeline::updateLiveTracking(const std::vector<Face>& faces,
         p_->faceAssignments.end());
     Pipeline::Impl::FaceAssignment a{};
     std::memcpy(a.embedding.data(), t.embeddingNorm, sizeof(float) * 512);
-    a.source = tapSource;
+    a.source = tapDisabled ? -1 : tapSource;
+    a.disabled = tapDisabled;
     p_->faceAssignments.push_back(a);
     if (outTapBox) std::memcpy(outTapBox, t.box, sizeof(float) * 4);
   }
@@ -1617,6 +1646,10 @@ bool Pipeline::swapAll(ffcv::Image& frame, const std::vector<Face>& faces) {
   for (size_t fi = 0; fi < faces.size(); ++fi) {
     const Face& f = faces[fi];
     if (only && &f != only) continue;
+    // A negative per-person source is the explicit "No face" assignment. Leave the
+    // target pixels untouched, including when the enhancer is enabled later.
+    if (p_->assignEnabled && p_->frameSources.size() == faces.size() &&
+        p_->frameSources[fi] < 0) continue;
     // face_selector.py:find_match_faces -- ALL faces near the reference, not the nearest
     // one. Upstream returns a list, and a clip where the same person is detected twice
     // (a reflection, a poster) should swap both rather than pick between them.
@@ -1643,15 +1676,21 @@ bool Pipeline::swapAll(ffcv::Image& frame, const std::vector<Face>& faces) {
       const Pipeline::Impl::FaceAssignment* bestAssignment = nullptr;
       float bestDistance = cfg.referenceDistance;
       for (const auto& assignment : p_->faceAssignments) {
-        if (assignment.disabled || assignment.source < 0 ||
-            assignment.source >= (int)p_->sourceSlots.size()) continue;
+        // A disabled assignment is still a real assignment: it means this matched
+        // person must remain untouched, not that the entry should be ignored.
+        if ((!assignment.disabled && assignment.source < 0) ||
+            (!assignment.disabled && assignment.source >= (int)p_->sourceSlots.size()))
+          continue;
         const float distance = faceDistance(f.embeddingNorm, assignment.embedding.data());
         if (distance < bestDistance) {
           bestDistance = distance;
           bestAssignment = &assignment;
         }
       }
-      if (bestAssignment) six = bestAssignment->source;
+      if (bestAssignment) {
+        if (bestAssignment->disabled) continue;
+        six = bestAssignment->source;
+      }
     }
     // PER-PERSON ASSIGNMENT (Live, switch ON): the per-face table updateLiveTracking
     // built this frame overrides the slot. A PINNED face keeps ITS source -- sticky,
@@ -1662,6 +1701,7 @@ bool Pipeline::swapAll(ffcv::Image& frame, const std::vector<Face>& faces) {
     // is byte-for-byte the active-slot path below.
     if (p_->assignEnabled && p_->frameSources.size() == faces.size())
       six = p_->frameSources[fi];
+    if (six < 0) continue;
     const float* srcEmbNorm = p_->srcEmbeddingNorm;
     if (!p_->sourceSlots.empty() && six >= 0 && six < (int)p_->sourceSlots.size())
       srcEmbNorm = p_->sourceSlots[(size_t)six].data();
@@ -1760,8 +1800,12 @@ bool Pipeline::enhance(ffcv::Image& frame, const std::vector<Face>& faces) {
   }
 
   const int ES = kEnhSize, EPB = CS / ES;
-  for (const Face& f : faces) {
+  for (size_t fi = 0; fi < faces.size(); ++fi) {
+    const Face& f = faces[fi];
     if (only && &f != only) continue;
+    // Keep an explicitly unmodified person untouched by the optional enhancer too.
+    if (p_->assignEnabled && p_->frameSources.size() == faces.size() &&
+        p_->frameSources[fi] < 0) continue;
 
     double t0 = nowMs();
     ffcv::Affine am = ffcv::umeyama(f.landmark5_68, tmpl, 5);

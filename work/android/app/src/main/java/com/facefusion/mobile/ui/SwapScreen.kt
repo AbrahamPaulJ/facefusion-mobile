@@ -190,6 +190,8 @@ fun SwapScreen(
     personThumbs: List<Bitmap> = emptyList(),
     selectedPerson: Int = -1,
     personAssignments: Map<Int, Int> = emptyMap(),
+    /** The no-face brush is selected in the source row. */
+    noFaceSelected: Boolean = false,
     onToggleAssignMode: () -> Unit = {},
     onSelectPerson: (Int) -> Unit = {},
     onClearAssignments: () -> Unit = {},
@@ -677,11 +679,42 @@ fun SwapScreen(
                 }
             }
         }
-        if (sourceThumbs.size > 1) {
+        if (sourceThumbs.isNotEmpty()) {
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                // This option is kept in the source row permanently so it is visible
+                // before and after Assign per person is enabled. It is selectable only in
+                // that mode: selecting it first, then tapping a target person, preserves
+                // that person's original face.
+                Column(
+                        Modifier
+                            .width(72.dp)
+                            .clickable(enabled = idle && assignMode) { onSelectSource(-1) },
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Box(
+                            Modifier
+                                .size(62.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .border(
+                                    BorderStroke(
+                                        if (noFaceSelected) 3.dp else 1.dp,
+                                        if (noFaceSelected) FfRed
+                                        else MaterialTheme.colorScheme.outlineVariant,
+                                    ), RoundedCornerShape(10.dp)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Default.Face, null,
+                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                 modifier = Modifier.size(28.dp))
+                            Text("×", fontSize = 22.sp, color = FfRed)
+                        }
+                        Text(stringResource(R.string.swap_assign_no_face), fontSize = 10.sp,
+                             maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 sourceThumbs.forEachIndexed { index, thumb ->
                     Column(
                         Modifier
@@ -697,8 +730,8 @@ fun SwapScreen(
                                 .clip(RoundedCornerShape(10.dp))
                                 .border(
                                     BorderStroke(
-                                        if (index == activeSource) 3.dp else 1.dp,
-                                        if (index == activeSource) FfRed
+                                        if (index == activeSource && !noFaceSelected) 3.dp else 1.dp,
+                                        if (index == activeSource && !noFaceSelected) FfRed
                                         else MaterialTheme.colorScheme.outlineVariant,
                                     ),
                                     RoundedCornerShape(10.dp),
@@ -730,7 +763,9 @@ fun SwapScreen(
                 }
                 Switch(checked = assignMode,
                        onCheckedChange = { onToggleAssignMode() },
-                       enabled = idle && sourceThumbs.size > 1)
+                       // One source plus "No face" is already useful: it lets the user
+                       // preserve selected people while swapping the others.
+                       enabled = idle && sourceThumbs.isNotEmpty())
             }
             if (assignMode && personThumbs.isNotEmpty()) {
                 Text(stringResource(R.string.swap_assign_choose_person),
@@ -763,7 +798,7 @@ fun SwapScreen(
                                 )
                                 personAssignments[index]?.let { source ->
                                     Text(
-                                        "S${source + 1}",
+                                        if (source < 0) "NO" else "S${source + 1}",
                                         color = Color.White,
                                         fontSize = 10.sp,
                                         modifier = Modifier
