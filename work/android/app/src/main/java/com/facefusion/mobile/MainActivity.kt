@@ -3031,7 +3031,12 @@ class MainActivity : ComponentActivity() {
             }
         }
         val f = File(outputDir(), "live_" + System.currentTimeMillis() + ".mp4")
-        val rec = LiveRecorder(f, if (liveMicrophone) LiveMicrophone(this) else null) { appendLog(it) }
+        val rec = LiveRecorder(
+            f,
+            if (liveMicrophone) LiveMicrophone(this) else null,
+            mirrorCamera = liveMirrorCamera,
+            onLog = { appendLog(it) },
+        )
         liveRecorder = rec
         live.recorder = rec
         liveRecording = true
