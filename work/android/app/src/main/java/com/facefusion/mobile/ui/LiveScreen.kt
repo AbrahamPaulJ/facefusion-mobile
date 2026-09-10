@@ -1,10 +1,14 @@
 package com.facefusion.mobile.ui
 
 import android.graphics.Bitmap
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -12,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -48,6 +53,8 @@ import kotlinx.coroutines.delay
 @Composable
 fun LiveScreen(
     sourceThumb: Bitmap?,
+    /** All Live source thumbnails, in native slot order. */
+    sourceThumbs: List<Bitmap> = emptyList(),
     sourceCount: Int = 0,
     activeSource: Int = 0,
     onSelectSource: (Int) -> Unit = {},
@@ -69,6 +76,9 @@ fun LiveScreen(
     frontCamera: Boolean = true,
     /** Flip the lens. Stops and restarts the pump when it is running. */
     onSwitchCamera: () -> Unit = {},
+    /** Mirror only the displayed live image; this is independent from the selected lens. */
+    mirrorCamera: Boolean = true,
+    onToggleMirror: () -> Unit = {},
     /** Whether a recording is in flight -- roadmap 13b. */
     recording: Boolean = false,
     microphone: Boolean = false,
@@ -80,6 +90,8 @@ fun LiveScreen(
     onToggleSwapEnabled: () -> Unit = {},
     /** Assign-per-person mode: OFF is default behaviour, ON lets each face keep a source. */
     assignMode: Boolean = false,
+    /** Whether the No face assignment chip is selected for the next face tap. */
+    noFaceSelected: Boolean = false,
     onToggleAssignMode: () -> Unit = {},
     /** A tap on the feed, as DISPLAY bitmap coordinates (mirror and crop already undone). */
     onAssignFace: (Float, Float) -> Unit = { _, _ -> },
@@ -157,20 +169,76 @@ fun LiveScreen(
             style = MaterialTheme.typography.bodySmall, fontSize = 11.sp,
         )
 
-        if (sourceCount > 0) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth()) {
-                repeat(sourceCount) { index ->
-                    FilterChip(
-                        selected = index == activeSource,
-                        onClick = { onSelectSource(index) },
-                        label = { Text(stringResource(R.string.live_source_label, index + 1)) },
-                        // The whole point of the multi-source mode: switch ON THE FLY,
-                        // including while a recording is in flight -- the native side
-                        // reads the active slot per frame, so the file simply changes
-                        // face at the switch. Only finalization is locked.
-                        enabled = !finalizing,
-                    )
+        if (sourceThumbs.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // The No face choice belongs beside the source faces. It is visible as soon
+                // as Assign per person is enabled, but can only be selected in that mode.
+                if (assignMode) {
+                    Column(
+                        Modifier
+                            .width(72.dp)
+                            .clickable(enabled = !finalizing) {
+                                onSelectSource(-1)
+                            },
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Box(
+                            Modifier
+                                .size(62.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .border(
+                                    BorderStroke(
+                                        if (noFaceSelected) 3.dp else 1.dp,
+                                        if (noFaceSelected) FfRed
+                                        else MaterialTheme.colorScheme.outlineVariant,
+                                    ), RoundedCornerShape(10.dp)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Default.Face, null,
+                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                 modifier = Modifier.size(28.dp))
+                            Text("×", fontSize = 22.sp, color = FfRed)
+                        }
+                        Text(
+                            stringResource(R.string.swap_assign_no_face),
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                        )
+                    }
+                }
+                sourceThumbs.forEachIndexed { index, thumb ->
+                    Column(
+                        Modifier
+                            .width(72.dp)
+                            .clickable(enabled = !finalizing) { onSelectSource(index) },
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Image(
+                            bitmap = thumb.asImageBitmap(),
+                            contentDescription = "Source ${index + 1}",
+                            modifier = Modifier
+                                .size(62.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .border(
+                                    BorderStroke(
+                                        if (index == activeSource && !noFaceSelected) 3.dp else 1.dp,
+                                        if (index == activeSource && !noFaceSelected) FfRed
+                                        else MaterialTheme.colorScheme.outlineVariant,
+                                    ),
+                                    RoundedCornerShape(10.dp),
+                                ),
+                            contentScale = ContentScale.Crop,
+                        )
+                        Text(
+                            "Source ${index + 1}",
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
         }
@@ -215,7 +283,7 @@ fun LiveScreen(
                 // DIMENSIONS are constant for a session, so they are the key: the detector
                 // restarts once when live starts (0 -> real size) and not again, and the
                 // mapping math below only needs them.
-                .pointerInput(assignMode, running, frontCamera, fw, fh) {
+                .pointerInput(assignMode, running, mirrorCamera, fw, fh) {
                     if (assignMode && running && frame != null) {
                         detectTapGestures { off ->
                             val bw = size.width.toFloat(); val bh = size.height.toFloat()
@@ -223,7 +291,7 @@ fun LiveScreen(
                             val ox = (bw - fw * s) / 2f; val oy = (bh - fh * s) / 2f
                             var bx = (off.x - ox) / s
                             val by = (off.y - oy) / s
-                            if (frontCamera) bx = fw - bx
+                            if (mirrorCamera) bx = fw - bx
                             onAssignFace(bx.coerceIn(0f, fw), by.coerceIn(0f, fh))
                         }
                     }
@@ -235,20 +303,13 @@ fun LiveScreen(
                     bitmap = frame.asImageBitmap(),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    // ⚠ THE MIRROR LIVES HERE AND NOWHERE ELSE. The pipeline sees the true
-                    // image so the detector gets a face the right way round; only what is
-                    // drawn is flipped, which is what every selfie camera does and what
-                    // makes moving left move left.
-                    //
-                    // ⚠ FRONT ONLY. The back camera is not a mirror -- it points at what
-                    // the user is looking at, and flipping it puts text backwards and
-                    // moves the world the wrong way. Mirroring it would not touch the
-                    // swap, which is what makes the mistake hard to read: the pipeline
-                    // gets the true image either way, so the bug would look like the
-                    // model failing when it is only the view.
+                    // The mirror is a DISPLAY choice, independent from the lens. The
+                    // pipeline always receives the unmirrored camera frame; only this
+                    // bitmap and its overlays are flipped, so detection and swapping keep
+                    // the same coordinates in either mode.
                     modifier = Modifier
                         .fillMaxSize()
-                        .graphicsLayer(scaleX = if (frontCamera) -1f else 1f),
+                        .graphicsLayer(scaleX = if (mirrorCamera) -1f else 1f),
                 )
             } else {
                 Text(
@@ -313,14 +374,15 @@ fun LiveScreen(
             // draws with, so the outline sits on the person the user tapped.
             if (assignFade && assignBox != null && assignBox.size >= 5 && frame != null) {
                 val b = assignBox
-                val label = stringResource(R.string.live_source_label, b[4].toInt() + 1)
+                val label = if (b[4] < 0) stringResource(R.string.swap_assign_no_face)
+                            else stringResource(R.string.live_source_label, b[4].toInt() + 1)
                 Canvas(Modifier.fillMaxSize()) {
                     val fw = frame.width.toFloat(); val fh = frame.height.toFloat()
                     val bw = size.width.toFloat(); val bh = size.height.toFloat()
                     val s = maxOf(bw / fw, bh / fh)
                     val ox = (bw - fw * s) / 2f; val oy = (bh - fh * s) / 2f
-                    val l = ox + (if (frontCamera) fw - b[2] else b[0]) * s
-                    val r = ox + (if (frontCamera) fw - b[0] else b[2]) * s
+                    val l = ox + (if (mirrorCamera) fw - b[2] else b[0]) * s
+                    val r = ox + (if (mirrorCamera) fw - b[0] else b[2]) * s
                     val t = oy + b[1] * s
                     val bo = oy + b[3] * s
                     drawRect(FfRed, topLeft = Offset(l, t),
@@ -345,14 +407,15 @@ fun LiveScreen(
             // mapping as the confirmation box.
             if (selectionBox != null && selectionBox.size >= 5 && frame != null) {
                 val b = selectionBox
-                val label = stringResource(R.string.live_source_label, b[4].toInt() + 1)
+                val label = if (b[4] < 0) stringResource(R.string.swap_assign_no_face)
+                            else stringResource(R.string.live_source_label, b[4].toInt() + 1)
                 Canvas(Modifier.fillMaxSize()) {
                     val fw = frame.width.toFloat(); val fh = frame.height.toFloat()
                     val bw = size.width.toFloat(); val bh = size.height.toFloat()
                     val s = maxOf(bw / fw, bh / fh)
                     val ox = (bw - fw * s) / 2f; val oy = (bh - fh * s) / 2f
-                    val l = ox + (if (frontCamera) fw - b[2] else b[0]) * s
-                    val r = ox + (if (frontCamera) fw - b[0] else b[2]) * s
+                    val l = ox + (if (mirrorCamera) fw - b[2] else b[0]) * s
+                    val r = ox + (if (mirrorCamera) fw - b[0] else b[2]) * s
                     val t = oy + b[1] * s
                     val bo = oy + b[3] * s
                     drawRect(Color.White, topLeft = Offset(l, t),
@@ -410,6 +473,37 @@ fun LiveScreen(
                                     else R.string.live_rec_start),
                      color = if (recording) FfRed else Color.Unspecified)
             }
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.live_camera),
+                     style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(if (frontCamera) R.string.live_lens_front
+                                    else R.string.live_lens_back),
+                     style = MaterialTheme.typography.bodySmall)
+            }
+            // CameraSelector is rebound by MainActivity. While the feed is running this
+            // briefly stops and restarts Live; while recording it is locked so one video
+            // cannot be split across two lenses.
+            Switch(
+                checked = frontCamera,
+                onCheckedChange = { if (it != frontCamera) onSwitchCamera() },
+                enabled = !recording && !finalizing,
+            )
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.live_mirror), style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(if (mirrorCamera) R.string.live_mirror_on else R.string.live_mirror_off),
+                     style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(
+                checked = mirrorCamera,
+                onCheckedChange = { onToggleMirror() },
+                enabled = !recording && !finalizing,
+            )
         }
 
         Row(verticalAlignment = Alignment.CenterVertically) {

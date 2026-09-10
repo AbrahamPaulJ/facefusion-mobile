@@ -43,11 +43,24 @@ import androidx.compose.ui.res.stringResource
 class MainActivity : ComponentActivity() {
 
     private data class LiveSource(val uri: Uri, val thumb: Bitmap)
+    private data class SwapSource(val uri: Uri, val thumb: Bitmap)
 
     private var sourceUri by mutableStateOf<Uri?>(null)
     private var sourceThumb by mutableStateOf<Bitmap?>(null)
+    private var swapSources by mutableStateOf<List<SwapSource>>(emptyList())
+    private var swapSourceIndex by mutableIntStateOf(0)
+    private var swapAssignMode by mutableStateOf(false)
+    private var swapSelectedPerson by mutableIntStateOf(-1)
+    private var swapPersonThumbs by mutableStateOf<List<Bitmap>>(emptyList())
+    private var swapPersonAssignments by mutableStateOf<Map<Int, Int>>(emptyMap())
+    private var swapAssignmentPoints by mutableStateOf<Map<Int, Pair<Float, Float>>>(emptyMap())
+    private var swapAssignmentEmbeddings by mutableStateOf<Map<Int, FloatArray>>(emptyMap())
+    /** Person indices assigned to the no-face option; -1 is used as the source sentinel. */
+    private var swapNoFaceSelected by mutableStateOf(false)
     private var liveSources by mutableStateOf<List<LiveSource>>(emptyList())
     private var liveSourceIndex by mutableIntStateOf(0)
+    /** Live Assign per person source brush: -2 means keep the original face. */
+    private var liveNoFaceSelected by mutableStateOf(false)
     private var liveLargestOnly by mutableStateOf(false)
     private var targetFile by mutableStateOf<File?>(null)
     private var targetName by mutableStateOf<String?>(null)
@@ -235,6 +248,8 @@ class MainActivity : ComponentActivity() {
      * restart would be a surprise on an app that opens on the Swap tab.
      */
     private var liveFrontCamera by mutableStateOf(true)
+    /** Whether Live mirrors the displayed feed; independent from front/back lens selection. */
+    private var liveMirrorCamera by mutableStateOf(true)
 
     /** The Live recording in flight, and whether the UI should say so -- roadmap 13b. */
     private var liveRecorder: LiveRecorder? = null
@@ -437,14 +452,137 @@ class MainActivity : ComponentActivity() {
      * list exists to prevent, arriving by way of a convenience button.
      */
     private fun setSourceFrom(uri: Uri) {
+        val thumb = decodeOriented(uri) ?: return
         sourceUri = uri
-        sourceThumb = decodeOriented(uri)
-        sourceThumb?.let { thumb ->
-            if (liveSources.none { it.uri == uri }) liveSources = liveSources + LiveSource(uri, thumb)
-            liveSourceIndex = liveSources.indexOfFirst { it.uri == uri }.coerceAtLeast(0)
-        }
+        sourceThumb = thumb
+        val existing = swapSources.indexOfFirst { it.uri == uri }
+        swapSources = if (existing >= 0) swapSources
+                      else swapSources + SwapSource(uri, thumb)
+        swapSourceIndex = swapSources.indexOfFirst { it.uri == uri }.coerceAtLeast(0)
+        if (liveSources.none { it.uri == uri }) liveSources = liveSources + LiveSource(uri, thumb)
+        liveSourceIndex = liveSources.indexOfFirst { it.uri == uri }.coerceAtLeast(0)
         // A different face means the loaded pipeline is holding the wrong embedding.
         previewOptionsChanged()
+    }
+
+    private fun selectSwapSource(index: Int) {
+        if (index == -1) {
+            swapNoFaceSelected = true
+            if (swapAssignMode && swapSelectedPerson >= 0) assignSwapPerson(swapSelectedPerson, -1)
+            return
+        }
+        if (index !in swapSources.indices) return
+        swapNoFaceSelected = false
+        swapSourceIndex = index
+        val selected = swapSources[index]
+        sourceUri = selected.uri
+        sourceThumb = selected.thumb
+        if (previewWarm) NativePipe.setActiveSource(index)
+        if (swapAssignMode && swapSelectedPerson >= 0) assignSwapPerson(swapSelectedPerson, index)
+        else previewOptionsChanged(reloads = false)
+    }
+
+    private fun removeSwapSource() {
+        if (swapSources.isEmpty() || swapSourceIndex !in swapSources.indices) return
+        val removedIndex = swapSourceIndex
+        val remaining = swapSources.filterIndexed { i, _ -> i != removedIndex }
+        swapSources = remaining
+        if (remaining.isEmpty()) {
+            clearSource()
+            return
+        }
+        swapNoFaceSelected = false
+        swapSourceIndex = swapSourceIndex.coerceAtMost(remaining.lastIndex)
+        sourceUri = remaining[swapSourceIndex].uri
+        sourceThumb = remaining[swapSourceIndex].thumb
+        swapPersonAssignments = swapPersonAssignments.mapNotNull { (person, source) ->
+            when {
+                source == removedIndex -> null
+                source > removedIndex -> person to (source - 1)
+                else -> person to source
+            }
+        }.toMap()
+        swapAssignmentEmbeddings = swapAssignmentEmbeddings.filterKeys { it in swapPersonAssignments }
+        swapAssignmentPoints = swapAssignmentPoints.filterKeys { it in swapPersonAssignments }
+        previewOptionsChanged()
+    }
+
+    private fun cropPersonThumb(frame: Bitmap, box: FloatArray): Bitmap? = runCatching {
+        if (box.size < 4) return@runCatching null
+        val x0 = box[0].toInt().coerceIn(0, frame.width - 1)
+        val y0 = box[1].toInt().coerceIn(0, frame.height - 1)
+        val x1 = box[2].toInt().coerceIn(x0 + 1, frame.width)
+        val y1 = box[3].toInt().coerceIn(y0 + 1, frame.height)
+        Bitmap.createScaledBitmap(Bitmap.createBitmap(frame, x0, y0, x1 - x0, y1 - y0), 64, 64, true)
+    }.getOrNull()
+
+    private fun assignSwapPerson(person: Int, source: Int) {
+        if (!swapAssignMode || person !in swapPersonThumbs.indices ||
+            (source != -1 && source !in swapSources.indices)) return
+        val frame = originalFrame ?: return
+        val boxes = faceBoxes ?: return
+        val box = boxes.asList().chunked(5).getOrNull(person) ?: return
+        val soft = frame.asArgb8888() ?: return
+        val px = IntArray(soft.width * soft.height)
+        soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
+        lifecycleScope.launch(Dispatchers.Default) {
+            val ok = NativePipe.assignFaceAt(
+                NativePipe.argbToBgr(px, soft.width, soft.height), soft.width, soft.height,
+                (box[0] + box[2]) / 2f, (box[1] + box[3]) / 2f,
+                if (source >= 0) source else 0, source < 0)
+            if (ok.size == 512) withContext(Dispatchers.Main) {
+                swapSelectedPerson = person
+                swapNoFaceSelected = source < 0
+                swapPersonAssignments = swapPersonAssignments + (person to source)
+                swapAssignmentPoints = swapAssignmentPoints +
+                    (person to (((box[0] + box[2]) / 2f) to ((box[1] + box[3]) / 2f)))
+                swapAssignmentEmbeddings = swapAssignmentEmbeddings + (person to ok)
+                status = if (source < 0) getString(R.string.swap_assign_no_face_set, person + 1)
+                         else getString(R.string.swap_assign_set, person + 1, source + 1)
+                previewOptionsChanged(reloads = false)
+            }
+        }
+    }
+
+    private fun selectSwapPerson(person: Int) {
+        if (person !in swapPersonThumbs.indices) return
+        swapSelectedPerson = person
+        if (swapAssignMode) assignSwapPerson(person, if (swapNoFaceSelected) -1 else swapSourceIndex)
+    }
+
+    private fun toggleSwapAssign() {
+        swapAssignMode = !swapAssignMode
+        swapSelectedPerson = -1
+        swapPersonAssignments = emptyMap()
+        swapAssignmentPoints = emptyMap()
+        swapAssignmentEmbeddings = emptyMap()
+        swapNoFaceSelected = false
+        if (swapAssignMode) NativePipe.clearFaceSourceAssignments()
+        // Target-face selection and per-person assignment are mutually exclusive native
+        // selectors. A reference face wins inside swapAll(), so leaving it set would make
+        // Assign per person affect only that one face.
+        if (swapAssignMode) {
+            dropReferenceFace()
+            NativePipe.clearReferenceFace()
+        }
+        NativePipe.setFaceAssignEnabled(swapAssignMode)
+        if (!swapAssignMode) NativePipe.clearFaceSourceAssignments()
+        if (swapAssignMode) {
+            showFaceBoxes = true
+            faceBoxes = null
+            refreshSwapped(force = true)
+        }
+    }
+
+    private fun clearSwapAssignments() {
+        swapPersonAssignments = emptyMap()
+        swapAssignmentPoints = emptyMap()
+        swapAssignmentEmbeddings = emptyMap()
+        swapSelectedPerson = -1
+        swapNoFaceSelected = false
+        NativePipe.clearFaceSourceAssignments()
+        status = getString(R.string.swap_assign_cleared)
+        previewOptionsChanged(reloads = false)
     }
 
     private val pickSource = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -477,9 +615,21 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun selectLiveSource(index: Int) {
+        if (index == -1) {
+            liveNoFaceSelected = true
+            // If a person was already selected, apply No face immediately. The next tap
+            // still uses the brush for a new person, but re-tapping the target is no longer
+            // required for the current selection.
+            if (liveAssignMode && liveRunning) NativePipe.setSelectedFaceDisabled(true)
+            return
+        }
         if (index !in liveSources.indices || index == liveSourceIndex) return
+        liveNoFaceSelected = false
         liveSourceIndex = index
-        if (liveRunning) NativePipe.setActiveSource(index)
+        if (liveRunning) {
+            NativePipe.setActiveSource(index)
+            if (liveAssignMode) NativePipe.setSelectedFaceDisabled(false)
+        }
     }
 
     private fun clearLiveSource() {
@@ -984,7 +1134,7 @@ class MainActivity : ComponentActivity() {
                 // switch's initial value, because the detector has to have run first -- and
                 // it is exactly the question the user has when a second face is on screen.
                 // One yoloface pass, ~2 ms, and no identity work at all.
-                LaunchedEffect(originalFrame, showFaceBoxes, previewWarm, busy,
+                LaunchedEffect(originalFrame, showFaceBoxes, swapAssignMode, previewWarm, busy,
                                targetVersion) {
                     val frame = originalFrame
                     // The boxes belong to ONE frame. The moment the frame changes they are
@@ -1011,18 +1161,25 @@ class MainActivity : ComponentActivity() {
                                 soft.width, soft.height)
                         }.getOrNull()
                     }
+                    val detected = found ?: FloatArray(0)
                     if (decide) {
                         // Once per target, whatever the answer: a user who turns the
                         // overlay back off must not have it turned on again by the next
                         // preview frame of the same clip.
                         autoBoxTarget = targetVersion
-                        if ((found?.size ?: 0) >= 10) {
+                        if (detected.size >= 10) {
                             showFaceBoxes = true
                             status = getString(R.string.status_faces_found,
-                                               (found?.size ?: 0) / 5)
+                                               detected.size / 5)
                         }
                     }
-                    faceBoxes = if (showFaceBoxes) found else null
+                    faceBoxes = if (showFaceBoxes) detected else null
+                    if (swapAssignMode && showFaceBoxes) {
+                        swapPersonThumbs = detected.asList().chunked(5).mapNotNull { values ->
+                            if (values.size < 4) null else cropPersonThumb(originalFrame ?: frame,
+                                values.take(4).toFloatArray())
+                        }
+                    }
                     faceBoxFrame = frame
                 }
 
@@ -1055,6 +1212,10 @@ class MainActivity : ComponentActivity() {
                         when (screen) {
                             Screen.Swap -> SwapScreen(
                                 sourceThumb = sourceThumb,
+                                sourceThumbs = swapSources.map { it.thumb },
+                                activeSource = swapSourceIndex,
+                                onSelectSource = ::selectSwapSource,
+                                onRemoveSource = ::removeSwapSource,
                                 hasSource = sourceUri != null,
                                 hasTarget = targetFile != null || targetImage != null,
                                 imageTarget = targetImage != null,
@@ -1106,6 +1267,14 @@ class MainActivity : ComponentActivity() {
                                     faceBoxes = null
                                 },
                                 onPickFace = ::pickReferenceFace,
+                                assignMode = swapAssignMode,
+                                personThumbs = swapPersonThumbs,
+                                selectedPerson = swapSelectedPerson,
+                                personAssignments = swapPersonAssignments,
+                                noFaceSelected = swapNoFaceSelected,
+                                onToggleAssignMode = ::toggleSwapAssign,
+                                onSelectPerson = ::selectSwapPerson,
+                                onClearAssignments = ::clearSwapAssignments,
                                 openCard = openCard,
                                 onToggleCard = { k -> openCard = if (openCard == k) "" else k },
                                 // A still needs no run, so it has no output FILE -- what
@@ -1213,6 +1382,7 @@ class MainActivity : ComponentActivity() {
 
                             Screen.Live -> LiveScreen(
                                 sourceThumb = liveSources.getOrNull(liveSourceIndex)?.thumb,
+                                sourceThumbs = liveSources.map { it.thumb },
                                 sourceCount = liveSources.size,
                                 activeSource = liveSourceIndex,
                                 onSelectSource = ::selectLiveSource,
@@ -1231,6 +1401,8 @@ class MainActivity : ComponentActivity() {
                                 onDownload = { onDownloadTapped() },
                                 frontCamera = liveFrontCamera,
                                 onSwitchCamera = ::switchLiveCamera,
+                                mirrorCamera = liveMirrorCamera,
+                                onToggleMirror = { liveMirrorCamera = !liveMirrorCamera },
                                 recording = liveRecording,
                                 microphone = liveMicrophone,
                                 finalizing = liveFinalizing,
@@ -1243,6 +1415,7 @@ class MainActivity : ComponentActivity() {
                                 swapEnabled = liveSwapEnabled,
                                 onToggleSwapEnabled = { toggleSwapEnabled() },
                                 assignMode = liveAssignMode,
+                                noFaceSelected = liveNoFaceSelected,
                                 onToggleAssignMode = ::toggleLiveAssign,
                                 onAssignFace = ::assignLiveFace,
                                 assignBox = liveAssignBox,
@@ -2010,37 +2183,75 @@ class MainActivity : ComponentActivity() {
                         previewNote = "Missing ${missing.joinToString()}"
                         return@launch
                     }
-
+                    val sourceItems = if (swapSources.isNotEmpty()) swapSources
+                                      else listOf(SwapSource(
+                                          src,
+                                          bmp,
+                                      ))
+                    val decodedSources = sourceItems.mapNotNull { item ->
+                        decodeOriented(item.uri)?.let { item to it }
+                    }
+                    if (decodedSources.size != sourceItems.size || decodedSources.isEmpty()) {
+                        previewNote = getString(R.string.status_cannot_read_source)
+                        return@launch
+                    }
+                    val sourceSlots = decodedSources.map { (item, sourceBmp) ->
+                        val softSource = sourceBmp.asArgb8888()
+                        val pixels = IntArray(softSource.width * softSource.height)
+                        softSource.getPixels(pixels, 0, softSource.width, 0, 0,
+                                             softSource.width, softSource.height)
+                        PreviewEngine.SourceData(
+                            item.uri,
+                            NativePipe.argbToBgr(pixels, softSource.width, softSource.height),
+                            softSource.width,
+                            softSource.height,
+                        )
+                    }
                     val lib = applicationInfo.nativeLibraryDir
                     val err = previews.ensureReady(
-                        lib, models.absolutePath, opts, src,
-                        NativePipe.argbToBgr(px, soft.width, soft.height), soft.width, soft.height,
+                        lib, models.absolutePath, opts,
+                        sourceSlots.first().tag,
+                        sourceSlots.first().bgr,
+                        sourceSlots.first().width,
+                        sourceSlots.first().height,
+                        sourceSlots = sourceSlots,
+                        activeSource = swapSourceIndex.coerceIn(
+                            0, sourceSlots.lastIndex.coerceAtLeast(0)),
+                        assignEnabled = swapAssignMode,
                         gate = {
                             // The same check runSwap makes. Without it the preview is a
                             // complete second processing path with no gate on it, and the
                             // gate becomes avoidable by simply never pressing Swap.
-                            val v = ContentGate.checkImage(bmp)
-                            // The score alone reads "NaN" and stops there. When the gate
-                            // FAULTS, the reason is the whole story and it was being
-                            // dropped on the floor.
-                            appendLog("preview source score %+.3f".format(v.score) +
-                                      (if (v.detail.isNotBlank()) "  [" + v.detail + "]" else ""))
-                            if (v.ok) null else ContentGate.message(this@MainActivity, R.string.gate_subject_source_image, v)
+                            var gateError: String? = null
+                            for ((_, sourceBmp) in decodedSources) {
+                                val v = ContentGate.checkImage(sourceBmp)
+                                appendLog("preview source score %+.3f".format(v.score) +
+                                          (if (v.detail.isNotBlank())
+                                              "  [" + v.detail + "]" else ""))
+                                if (!v.ok) {
+                                    gateError = ContentGate.message(
+                                        this@MainActivity,
+                                        R.string.gate_subject_source_image, v)
+                                    break
+                                }
+                            }
+                            gateError
                         },
                     )
                     // Before the error branch, because a rejection is worth recording even
                     // when the fallback then succeeded and there is no error to report.
                     noteTierRejection()
                     if (err != null) {
-                        // The LOG too, not just the pane. A bug report carries the log and
-                        // the status line; it does not carry the pane. So the one report
-                        // this project most needed to explain -- an 8 Elite Gen 5 whose
-                        // v81 tier loads and will not execute -- arrived with the failure
-                        // filling the screen and "-- run log --  (empty)" underneath it,
-                        // and the user had to photograph the pane to say what happened.
                         appendLog(err)
                         previewNote = err
                         return@launch
+                    }
+                    if (swapAssignMode) {
+                        for ((person, sourceIndex) in swapPersonAssignments) {
+                            val embedding = swapAssignmentEmbeddings[person] ?: continue
+                            if (!NativePipe.addFaceAssignmentEmbedding(embedding, sourceIndex))
+                                appendLog("could not restore preview assignment for person ${person + 1}")
+                        }
                     }
                     previewWarm = true
                 }
@@ -2589,6 +2800,16 @@ class MainActivity : ComponentActivity() {
     private fun clearSource() {
         sourceUri = null
         sourceThumb = null
+        swapSources = emptyList()
+        swapSourceIndex = 0
+        swapAssignMode = false
+        swapSelectedPerson = -1
+        swapPersonThumbs = emptyList()
+        swapPersonAssignments = emptyMap()
+        swapAssignmentPoints = emptyMap()
+        swapAssignmentEmbeddings = emptyMap()
+        NativePipe.setFaceAssignEnabled(false)
+        NativePipe.clearFaceSourceAssignments()
         status = ""
         previewOptionsChanged()
     }
@@ -2718,6 +2939,9 @@ class MainActivity : ComponentActivity() {
      * user cannot see and would have to guess at.
      */
     private fun pickReferenceFace(x: Float, y: Float) {
+        // Assign per person owns the target-face selector. Letting this gesture reach the
+        // reference selector would make native swapAll process only one face.
+        if (swapAssignMode) return
         val frame = originalFrame ?: return
         if (busy) return
         // ⚠ THIS USED TO RETURN SILENTLY, and that is the whole of the bug reported as
@@ -2807,7 +3031,12 @@ class MainActivity : ComponentActivity() {
             }
         }
         val f = File(outputDir(), "live_" + System.currentTimeMillis() + ".mp4")
-        val rec = LiveRecorder(f, if (liveMicrophone) LiveMicrophone(this) else null) { appendLog(it) }
+        val rec = LiveRecorder(
+            f,
+            if (liveMicrophone) LiveMicrophone(this) else null,
+            mirrorCamera = liveMirrorCamera,
+            onLog = { appendLog(it) },
+        )
         liveRecorder = rec
         live.recorder = rec
         liveRecording = true
@@ -2831,6 +3060,7 @@ class MainActivity : ComponentActivity() {
         }
         NativePipe.setFaceAssignEnabled(liveAssignMode)
         liveAssignBox = null
+        liveNoFaceSelected = false
         liveNote = if (liveAssignMode) getString(R.string.live_assign_hint)
                    else null
     }
@@ -2839,6 +3069,7 @@ class MainActivity : ComponentActivity() {
         NativePipe.clearFaceSourceAssignments()
         liveAssignBox = null
         liveAssignCount = 0
+        liveNoFaceSelected = false
         liveNote = getString(R.string.live_assign_cleared)
     }
 
@@ -2851,7 +3082,8 @@ class MainActivity : ComponentActivity() {
     private fun assignLiveFace(dispX: Float, dispY: Float) {
         if (!liveRunning || !liveAssignMode) return
         if (assignTapPending) return   // one tap in flight at a time
-        NativePipe.requestFaceAssignment(dispX, dispY, liveSourceIndex)
+        // -1 means no pending request to native; -2 is the explicit No face brush.
+        NativePipe.requestFaceAssignment(dispX, dispY, if (liveNoFaceSelected) -2 else liveSourceIndex)
         assignTapPending = true
     }
 
@@ -3009,7 +3241,8 @@ class MainActivity : ComponentActivity() {
                         liveAssignBox = box
                         liveAssignNonce++
                         liveAssignCount++
-                        liveNote = getString(R.string.live_assign_set, (box[4].toInt() + 1))
+                        liveNote = if (box[4] < 0) getString(R.string.live_assign_no_face_set)
+                                   else getString(R.string.live_assign_set, (box[4].toInt() + 1))
                     } else if (box.size == 1) {
                         assignTapPending = false
                         // The miss also DESELECTED the person (empty tap = deselect).
@@ -3108,40 +3341,70 @@ class MainActivity : ComponentActivity() {
                                 if (opts.largestOnly) "  largest face only" else ""))
 
                     status = getString(R.string.status_reading_source)
-                    val bmp = decodeOriented(src) ?: error("cannot decode source image")
-
-                    // The content gate, BEFORE anything is processed or previewed. It
-                    // blocks, as upstream does, so a refusal ends the run here -- there is
-                    // no partial output and nothing reaches the preview surface.
-                    status = getString(R.string.status_content_check)
-                    if (NativePipe.contentGateIsQuantised())
-                        appendLog("content gate: W8A16 build, biased " +
-                                  "+${ContentGate.QUANTISED_BIAS} toward refusing")
-                    ContentGate.checkImage(bmp).let {
-                        appendLog("source content score %+.3f".format(it.score))
-                        if (!it.ok) throw ContentGate.Refused(ContentGate.message(this@MainActivity,
-                                                                R.string.gate_subject_source_image, it))
+                    val sourceItems = if (swapSources.isNotEmpty()) swapSources
+                                      else listOf(SwapSource(
+                                          src,
+                                          decodeOriented(src) ?: error("cannot decode source image"),
+                                      ))
+                    val decodedSources = sourceItems.mapNotNull { item ->
+                        decodeOriented(item.uri)?.let { item to it }
                     }
-                    // The target, sampled across the clip.
-                    ContentGate.checkVideo(tgt).let {
-                        // `detail` is an ARGUMENT, never interpolated into the format
-                        // string: it reads "0/11 flagged (0.0%)", and that trailing `%)`
-                        // is parsed as a conversion -- UnknownFormatConversionException,
-                        // which killed the whole swap after the gate had already passed.
-                        appendLog("target content: %s, worst %+.3f".format(it.detail, it.score))
-                        if (!it.ok)
-                            throw ContentGate.Refused(
+                    if (decodedSources.size != sourceItems.size || decodedSources.isEmpty())
+                        error("cannot decode source image")
+                    for ((_, sourceBmp) in decodedSources) {
+                        ContentGate.checkImage(sourceBmp).let {
+                            appendLog("source content score %+.3f".format(it.score))
+                            if (!it.ok) throw ContentGate.Refused(
                                 ContentGate.message(this@MainActivity,
-                                                    R.string.gate_subject_target_video, it))
+                                                    R.string.gate_subject_source_image, it))
+                        }
                     }
-
-                    val soft = bmp.asArgb8888()
-                    val px = IntArray(soft.width * soft.height)
-                    soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
-                    if (!NativePipe.setSource(NativePipe.argbToBgr(px, soft.width, soft.height),
-                                              soft.width, soft.height))
+                    // The target must be checked independently of the source. The
+                    // multi-source refactor previously dropped this gate from the single
+                    // video swap path.
+                    ContentGate.checkVideo(tgt).let {
+                        appendLog("target content score %+.3f".format(it.score))
+                        if (!it.ok) throw ContentGate.Refused(
+                            ContentGate.message(this@MainActivity,
+                                                R.string.gate_subject_target_video, it))
+                    }
+                    val firstSource = decodedSources.first().second
+                    val firstSoft = firstSource.asArgb8888()
+                    val firstPixels = IntArray(firstSoft.width * firstSoft.height)
+                    firstSoft.getPixels(firstPixels, 0, firstSoft.width, 0, 0,
+                                        firstSoft.width, firstSoft.height)
+                    if (!NativePipe.setSource(
+                            NativePipe.argbToBgr(firstPixels, firstSoft.width, firstSoft.height),
+                            firstSoft.width, firstSoft.height))
                         error("source: ${NativePipe.lastError()}")
-                    appendLog("source ready (${soft.width}x${soft.height})")
+                    for ((_, sourceBmp) in decodedSources.drop(1)) {
+                        val softSource = sourceBmp.asArgb8888()
+                        val pixels = IntArray(softSource.width * softSource.height)
+                        softSource.getPixels(pixels, 0, softSource.width, 0, 0,
+                                             softSource.width, softSource.height)
+                        if (NativePipe.addSource(
+                                NativePipe.argbToBgr(pixels, softSource.width, softSource.height),
+                                softSource.width, softSource.height) < 0)
+                            error("source: ${NativePipe.lastError()}")
+                    }
+                    NativePipe.setActiveSource(swapSourceIndex.coerceIn(
+                        0, decodedSources.lastIndex.coerceAtLeast(0)))
+                    NativePipe.setFaceAssignEnabled(swapAssignMode)
+                    if (swapAssignMode && originalFrame != null) {
+                        val target = originalFrame!!.asArgb8888()
+                        val targetPixels = IntArray(target.width * target.height)
+                        target.getPixels(targetPixels, 0, target.width, 0, 0,
+                                         target.width, target.height)
+                        val targetBgr = NativePipe.argbToBgr(
+                            targetPixels, target.width, target.height)
+                        for ((person, sourceIndex) in swapPersonAssignments) {
+                            val embedding = swapAssignmentEmbeddings[person] ?: continue
+                            if (!NativePipe.addFaceAssignmentEmbedding(embedding, sourceIndex))
+                                appendLog("could not restore assignment for person ${person + 1}")
+                        }
+                    }
+                    appendLog("source ready (${firstSoft.width}x${firstSoft.height}, " +
+                              "${decodedSources.size} sources)")
 
                     val t0 = System.currentTimeMillis()
 
