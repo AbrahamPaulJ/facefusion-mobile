@@ -265,6 +265,12 @@ Java_com_facefusion_mobile_NativePipe_setFaceAssignEnabled(JNIEnv*, jclass, jboo
   if (g_pipe) g_pipe->setFaceAssignEnabled(g_assignEnabled);
 }
 
+JNIEXPORT void JNICALL
+Java_com_facefusion_mobile_NativePipe_setSelectedFaceDisabled(JNIEnv*, jclass,
+                                                               jboolean disabled) {
+  if (g_pipe) g_pipe->setSelectedFaceDisabled(disabled == JNI_TRUE);
+}
+
 // The SELECTED person (assign mode): the last one tapped, who follows the source chip
 // until an empty tap deselects them. FIVE floats -- x0, y0, x1, y1 and the person's
 // CURRENT source -- in DISPLAY bitmap coordinates, so the UI can draw a persistent
@@ -282,6 +288,44 @@ Java_com_facefusion_mobile_NativePipe_takeSelectionBox(JNIEnv* env, jclass) {
     env->SetFloatArrayRegion(out, 0, 5, five);
   }
   return out;
+}
+
+JNIEXPORT jfloatArray JNICALL
+Java_com_facefusion_mobile_NativePipe_assignFaceAt(JNIEnv* env, jclass,
+                                                   jbyteArray jBgr, jint w, jint h,
+                                                   jfloat x, jfloat y, jint source,
+                                                   jboolean noFace) {
+  if (!g_pipe) { g_err = "pipeline not initialised"; return env->NewFloatArray(0); }
+  ffcv::Image img(w, h, 3);
+  if (!jBgr || (size_t)env->GetArrayLength(jBgr) != img.data.size()) {
+    g_err = "assignFaceAt: frame is not w*h*3 bytes";
+    return env->NewFloatArray(0);
+  }
+  env->GetByteArrayRegion(jBgr, 0, (jsize)img.data.size(), (jbyte*)img.data.data());
+  float box[4] = {0, 0, 0, 0};
+  float embedding[512] = {0};
+  if (!g_pipe->setFaceSourceAt(img, x, y, (int)source, noFace == JNI_TRUE, box, embedding)) {
+    g_err = g_pipe->error();
+    return env->NewFloatArray(0);
+  }
+  // Return the embedding for both choices: the no-face flag is stored natively, while
+  // Kotlin needs the identity to restore this assignment after a pipeline reload.
+  jfloatArray out = env->NewFloatArray(512);
+  if (out) env->SetFloatArrayRegion(out, 0, 512, embedding);
+  return out;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_facefusion_mobile_NativePipe_addFaceAssignmentEmbedding(JNIEnv* env, jclass,
+                                                                jfloatArray jEmbedding,
+                                                                jint source) {
+  if (!g_pipe || !jEmbedding || env->GetArrayLength(jEmbedding) != 512) {
+    g_err = "invalid face assignment embedding";
+    return JNI_FALSE;
+  }
+  float embedding[512] = {0};
+  env->GetFloatArrayRegion(jEmbedding, 0, 512, embedding);
+  return g_pipe->addFaceAssignmentEmbedding(embedding, (int)source) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL
@@ -1066,7 +1110,9 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
   // geometry only this function knows. consumed is set whether or not the tap hit a
   // face: a miss must be reported, not left hanging.
   const bool tapPending = g_assignReq.pending;
+  int requestedSource = -1;
   if (tapPending) {
+    requestedSource = g_assignReq.source;
     g_assignReq.pending = false;
     g_assignResult.consumed = true;
     g_assignResult.have = false;
@@ -1082,7 +1128,7 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
       faces,
       tapPending ? g_assignReq.x * (float)w / (float)dw : 0.f,
       tapPending ? g_assignReq.y * (float)h / (float)dh : 0.f,
-      tapPending ? (int)g_assignReq.source : -1,
+      tapPending ? requestedSource : -1,
       tapBox);
   if (tapPending && tapped) {
     g_assignResult.have = true;
@@ -1092,7 +1138,8 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
     g_assignResult.box[1] = tapBox[1] * (float)dh / (float)h;
     g_assignResult.box[2] = tapBox[2] * (float)dw / (float)w;
     g_assignResult.box[3] = tapBox[3] * (float)dh / (float)h;
-    g_assignResult.source = (int)g_assignReq.source;
+    // -2 is the UI's No face brush; expose it as a negative source to the overlay.
+    g_assignResult.source = requestedSource == -2 ? -1 : requestedSource;
   }
 
   if (!faces.empty()) {

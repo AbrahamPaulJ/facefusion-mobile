@@ -34,6 +34,8 @@ import java.io.File
 class LiveRecorder(
     private val out: File,
     private val microphone: LiveMicrophone? = null,
+    /** The recording must use the same horizontal orientation as the displayed Live feed. */
+    private val mirrorCamera: Boolean = false,
     private val onLog: (String) -> Unit = {},
 ) {
 
@@ -130,6 +132,11 @@ class LiveRecorder(
     /**
      * One swapped frame, BGR, [w]*[h]*3 bytes.
      *
+     * The preview mirror is a Compose display transform, so the bytes arriving here are
+     * still in camera order. Apply the same horizontal flip before converting to the
+     * encoder's YUV planes; this mutates the reusable recording buffer in place and avoids
+     * another full-frame allocation or a second pipeline pass.
+     *
      * Called on the analyzer thread, in line with the pump. Encoding a 720p frame costs a
      * few milliseconds against the pump's ~60, so it is not worth another thread and its
      * queue — and a queue would be the wrong answer anyway: dropping the recording behind
@@ -144,6 +151,7 @@ class LiveRecorder(
         // arrives here afterwards, and must do nothing at all. See [stopped].
         if (stopped || failed != null) return
         if (!ensure(w, h)) return
+        if (mirrorCamera) mirrorHorizontally(bgr, w, h)
         val enc = encoder ?: return
         val ew = w and 1.inv()
         val eh = h and 1.inv()
@@ -177,6 +185,23 @@ class LiveRecorder(
             onLog("recorder: $failed")
         }
       }
+    }
+
+    /** Flip packed BGR pixels in place so the encoder matches the mirrored display. */
+    private fun mirrorHorizontally(bgr: ByteArray, w: Int, h: Int) {
+        for (y in 0 until h) {
+            var left = 0
+            var right = w - 1
+            while (left < right) {
+                val li = (y * w + left) * 3
+                val ri = (y * w + right) * 3
+                val b = bgr[li]; bgr[li] = bgr[ri]; bgr[ri] = b
+                val g = bgr[li + 1]; bgr[li + 1] = bgr[ri + 1]; bgr[ri + 1] = g
+                val r = bgr[li + 2]; bgr[li + 2] = bgr[ri + 2]; bgr[ri + 2] = r
+                left++
+                right--
+            }
+        }
     }
 
     /**

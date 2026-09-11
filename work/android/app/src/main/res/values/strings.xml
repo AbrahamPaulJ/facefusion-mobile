@@ -400,7 +400,17 @@
     <string name="live_stop">Stop</string>
     <!-- %1$s frames per second, %2$s the face count phrase below -->
     <string name="live_stat">%1$s fps   %2$s</string>
+    <string name="swap_assign_title">Assign per person</string>
+    <string name="swap_assign_off">One source is used for every detected face</string>
+    <string name="swap_assign_on">Choose a person, then choose their source</string>
+    <string name="swap_assign_choose_person">Target people</string>
+    <string name="swap_assign_set">Source %1$d assigned to person %2$d</string>
+    <string name="swap_assign_no_face">No face</string>
+    <string name="swap_assign_no_face_set">Person %1$d will keep their original face</string>
+    <string name="swap_assign_clear">Clear assignments</string>
+    <string name="swap_assign_cleared">Assignments cleared</string>
     <string name="swap_show_faces">Show detected faces</string>
+
     <string name="swap_action_batch">Swap %1$d clips</string>
     <string name="status_batch_queued">%1$d clips queued. Trim and frame rate apply to the first only.</string>
     <string name="status_batch_item">Clip %1$d of %2$d: %3$s</string>
@@ -448,6 +458,10 @@
     <string name="status_live_recording">Recording the live feed.</string>
     <string name="status_live_rec_saved">Recording saved, %1$d frames.</string>
     <string name="status_live_rec_empty">Nothing was recorded.</string>
+    <string name="live_camera">Camera</string>
+    <string name="live_mirror">Mirror camera</string>
+    <string name="live_mirror_on">Mirrored display</string>
+    <string name="live_mirror_off">Normal display</string>
     <string name="live_lens_front">FRONT</string>
     <string name="live_lens_back">BACK</string>
     <string name="live_faces">%1$d face(s)</string>
@@ -500,8 +514,9 @@ Turning it off runs your own Swap settings instead. This is experimental: the en
     <string name="live_assign_title">Assign per person</string>
     <string name="live_assign_off">Each face takes the selected source</string>
     <string name="live_assign_on">Nothing changes until you tap a face</string>
-    <string name="live_assign_hint">Assign per person: select a source, then tap a face. Untapped faces keep their source.</string>
+    <string name="live_assign_hint">Assign per person: tap a face, then select a source or No face. You can also select the choice first, then tap a face.</string>
     <string name="live_assign_set">Source %1$d assigned to this person</string>
+    <string name="live_assign_no_face_set">This person will keep their original face</string>
     <string name="live_assign_missed">No face — selection cleared</string>
     <string name="live_assign_cleared">Assignments cleared</string>
     <string name="live_assign_clear">Clear</string>
@@ -511,6 +526,6 @@ Turning it off runs your own Swap settings instead. This is experimental: the en
     <string name="live_target_locked">Locked while Assign per person is on</string>
     <string name="live_assign_help">How Assign per person works</string>
     <string name="live_assign_help_title">Assign per person</string>
-    <string name="live_assign_help_body">1. Turn the switch on. The feed keeps its current look.\n2. Select a source chip (Source 1, Source 2…).\n3. Tap the person who should have that source — they are now SELECTED (white box) and take that source right away.\n4. While they are selected, changing the chip changes THEM — you can try different sources on one person.\n5. For the next person, tap them (the selection moves), or tap empty space to DESELECT — the person keeps their last source and nothing can change them anymore.\n\nTapped people keep their source for the whole session. Untapped people keep the look from when the mode was switched on.\n\nClear removes all assignments. Turning the switch off goes back to the default behaviour (every face follows the chip).</string>
+    <string name="live_assign_help_body">1. Turn the switch on. The feed keeps its current look.\n2. Tap a person to select them, then choose Source 1, Source 2… or No face. The choice applies immediately.\n3. You can also choose a source or No face first, then tap a person.\n4. While a person is selected, changing the choice updates THEM immediately.\n5. For the next person, tap them to move the selection, or tap empty space to deselect — the person keeps their last choice.\n\nAssigned people keep their choice for the whole session. Untapped people keep the look from when the mode was switched on.\n\nClear removes all assignments. Turning the switch off goes back to the default behaviour (every face follows the chip).</string>
     <string name="live_assign_help_gotit">Got it</string>
 </resources>

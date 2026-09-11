@@ -225,7 +225,8 @@ class Pipeline {
   void clearSourceSlots();
   void setActiveSource(int index);
   bool setFaceSourceAt(const ffcv::Image& frame, float x, float y, int sourceIndex,
-                       bool disabled, float* outBox);
+                       bool disabled, float* outBox, float* outEmbedding = nullptr);
+  bool addFaceAssignmentEmbedding(const float* embedding, int sourceIndex);
   void clearFaceSourceAssignments();
 
   /**
@@ -241,6 +242,9 @@ class Pipeline {
    * the switch the user asked for: off means nothing about a session changes.
    */
   void setFaceAssignEnabled(bool enabled);
+
+  /** Immediately change the currently selected Live person to/from the original face. */
+  void setSelectedFaceDisabled(bool disabled);
 
   /**
    * Record that [f] -- a face of a LIVE frame, embedding included -- belongs to

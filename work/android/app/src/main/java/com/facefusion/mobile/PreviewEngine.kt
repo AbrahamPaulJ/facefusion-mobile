@@ -20,10 +20,14 @@ import kotlin.math.roundToInt
  */
 class PreviewEngine {
 
+    /** A source image ready to be registered in a native source slot. */
+    data class SourceData(val tag: Any, val bgr: ByteArray, val width: Int, val height: Int)
+
     /** What a swap preview produced. [faces] is 0 when nothing was detected. */
     data class Swapped(val bitmap: Bitmap?, val faces: Int, val error: String? = null)
 
-    // ------------------------------------------------------------------ the target frame
+    /** Source tags currently registered after the primary slot. */
+    private var appliedSourceSlots: List<Any> = emptyList()
 
     private var mmr: MediaMetadataRetriever? = null
 
@@ -318,6 +322,9 @@ class PreviewEngine {
         sourceBgr: ByteArray,
         sourceW: Int,
         sourceH: Int,
+        sourceSlots: List<SourceData> = emptyList(),
+        activeSource: Int = 0,
+        assignEnabled: Boolean = false,
         gate: (suspend () -> String?)? = null,
     ): String? = withContext(Dispatchers.Default) {
         // The SMALLEST job that is out of date, of three, in increasing cost:
@@ -333,7 +340,13 @@ class PreviewEngine {
             loadedOpts = opts
         } else {
             applyOptions(opts)
-            if (appliedSource == sourceTag) return@withContext null
+            if (appliedSource == sourceTag &&
+                appliedSourceSlots.size == sourceSlots.size &&
+                appliedSourceSlots.zip(sourceSlots).all { it.first == it.second.tag }) {
+                NativePipe.setActiveSource(activeSource)
+                NativePipe.setFaceAssignEnabled(assignEnabled)
+                return@withContext null
+            }
         }
 
         // Dropped BEFORE the attempt, not after it: everything below can fail, and a stale
@@ -358,6 +371,15 @@ class PreviewEngine {
             invalidate()
             return@withContext "No face found in the source image"
         }
+        for (slot in sourceSlots.drop(1)) {
+            if (NativePipe.addSource(slot.bgr, slot.width, slot.height) < 0) {
+                invalidate()
+                return@withContext "No face found in source image"
+            }
+        }
+        appliedSourceSlots = sourceSlots.map { it.tag }
+        NativePipe.setActiveSource(activeSource.coerceIn(0, sourceSlots.lastIndex.coerceAtLeast(0)))
+        NativePipe.setFaceAssignEnabled(assignEnabled)
         appliedSource = sourceTag
         null
     }
