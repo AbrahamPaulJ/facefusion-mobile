@@ -122,6 +122,15 @@
     <string name="out_expand">Expand</string>
     <string name="out_collapse">Collapse</string>
 
+    <!-- ==================== Live player (dev builds only) ====================
+         Shown only when BuildConfig.DEV_BUILD is true. They are translated anyway:
+         the dev line is a build of the same app, and a half-translated screen is
+         harder to read than an untranslated one. -->
+    <string name="player_action">Play with live swap</string>
+    <string name="player_starting">Starting…</string>
+    <string name="player_landscape">Landscape</string>
+    <string name="player_close">Close</string>
+
     <!-- ==================================================== model download overlay -->
     <string name="dl_models_required">Models required</string>
     <string name="dl_not_on_device">The face models are not on this device yet.</string>

@@ -86,6 +86,11 @@
     <string name="out_expand">展開</string>
     <string name="out_collapse">收合</string>
 
+    <string name="player_action">即時換臉播放</string>
+    <string name="player_starting">正在啟動…</string>
+    <string name="player_landscape">橫向</string>
+    <string name="player_close">關閉</string>
+
     <string name="dl_models_required">需要下載模型</string>
     <string name="dl_not_on_device">此裝置上還沒有人臉模型。</string>
     <string name="dl_download">下載模型</string>

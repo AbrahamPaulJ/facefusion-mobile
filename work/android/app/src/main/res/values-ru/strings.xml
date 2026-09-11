@@ -91,6 +91,11 @@
     <string name="out_expand">Развернуть</string>
     <string name="out_collapse">Свернуть</string>
 
+    <string name="player_action">Воспроизвести с живой заменой</string>
+    <string name="player_starting">Запуск…</string>
+    <string name="player_landscape">Альбомная ориентация</string>
+    <string name="player_close">Закрыть</string>
+
     <string name="dl_models_required">Нужны модели</string>
     <string name="dl_not_on_device">Моделей лиц пока нет на этом устройстве.</string>
     <string name="dl_download">Скачать модели</string>

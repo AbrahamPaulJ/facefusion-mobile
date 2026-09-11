@@ -83,6 +83,11 @@
     <string name="out_expand">展开</string>
     <string name="out_collapse">收起</string>
 
+    <string name="player_action">实时换脸播放</string>
+    <string name="player_starting">正在启动…</string>
+    <string name="player_landscape">横屏</string>
+    <string name="player_close">关闭</string>
+
     <string name="dl_models_required">需要下载模型</string>
     <string name="dl_not_on_device">此设备上还没有人脸模型。</string>
     <string name="dl_download">下载模型</string>

@@ -45,6 +45,7 @@ import com.facefusion.mobile.FaceDetectorCard
 import com.facefusion.mobile.FaceMaskerCard
 import com.facefusion.mobile.FaceSwapperCard
 import com.facefusion.mobile.BatchItem
+import com.facefusion.mobile.BuildConfig
 import com.facefusion.mobile.BatchState
 import com.facefusion.mobile.ModelDownload
 import com.facefusion.mobile.OptionSegments
@@ -190,6 +191,14 @@ fun SwapScreen(
     onRemoveFromBatch: (Int) -> Unit,
     /** Add more clips to the queue, leaving the visible target alone. */
     onAddToBatch: () -> Unit,
+    /**
+     * Play the target through the pipeline, live -- see [LivePlayerOverlay].
+     *
+     * Always passed, reachable only on dev: the button below is the ONE place the
+     * feature is switched on, and `MainActivity.startPlayer` checks the same flag
+     * again rather than trusting that a button nobody drew cannot be pressed.
+     */
+    onLivePlay: () -> Unit,
     /** Show a finished batch clip in the output pane, by its index in [batch]. */
     onOpenBatchOutput: (Int) -> Unit,
     /**
@@ -976,6 +985,21 @@ fun SwapScreen(
                     else R.string.swap_action,
                     batch.size),
                  fontSize = 16.sp) }
+
+        // THE LIVE PLAYER, dev builds only: the target clip through the pipeline at
+        // whatever rate the phone manages, with its own sound, instead of waiting for a
+        // whole render. It sits under Swap because it is an ALTERNATIVE to pressing Swap --
+        // same pipeline, same options, no output file.
+        //
+        // ⚠ `BuildConfig.DEV_BUILD` is the one switch, and it is a BUILD FLAG rather than
+        // a dev-branch edit on purpose: a branch would make `dev` two commits deep and turn
+        // every re-derivation of the gate into a merge. See LivePlayerOverlay's doc.
+        if (BuildConfig.DEV_BUILD && hasSource && hasTarget && !imageTarget && idle &&
+            !modelsMissing) {
+            TextButton(onLivePlay, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.player_action))
+            }
+        }
 
         // HOW THE QUEUE IS FOUND. Picking several files at once still builds it, but that
         // needs a long-press in the system picker and is invisible to anyone who does not

@@ -330,6 +330,25 @@ class MainActivity : ComponentActivity() {
 
     // ---- the two preview panes
     private val previews = PreviewEngine()
+
+    /**
+     * The dev-only live player: the TARGET clip swapped as it plays, with its sound.
+     *
+     * ⚠ It owns the native pipeline while it runs, exactly as Live does, so it takes
+     * [PipeGuard] and drops the preview's warm pipeline rather than sharing one --
+     * see [startPlayer]. Everything it shows is a swapped frame that no run produced
+     * and no file holds, which is why it is behind `BuildConfig.DEV_BUILD`.
+     */
+    private val player = LivePlayer()
+    private var playerOpen by mutableStateOf(false)
+    private var playerFrame by mutableStateOf<Bitmap?>(null)
+    private var playerPos by mutableStateOf(0)
+    private var playerDuration by mutableStateOf(0)
+    private var playerPlaying by mutableStateOf(false)
+    private var playerFps by mutableStateOf(0.0)
+    private var playerFaces by mutableStateOf(0)
+    private var playerDropped by mutableStateOf(0)
+    private var playerNote by mutableStateOf<String?>(null)
     private var originalFrame by mutableStateOf<Bitmap?>(null)
     private var swappedFrame by mutableStateOf<Bitmap?>(null)
     private var previewWarm by mutableStateOf(false)
@@ -1186,6 +1205,7 @@ class MainActivity : ComponentActivity() {
                                 onAddToBatch = {
                                     pickMoreTargets.launch(arrayOf("video/*"))
                                 },
+                                onLivePlay = { startPlayer() },
                                 onRemoveFromBatch = { i ->
                                     // A finished row holds a render. Ask before losing one,
                                     // exactly as the single output does -- unless auto-save
@@ -1327,6 +1347,31 @@ class MainActivity : ComponentActivity() {
                         )
                     }
 
+                    // The live player, over everything. A Dialog, so it does not matter
+                    // where in the tree it sits -- it is here with the other dialogs rather
+                    // than inside the Swap branch because it outlives a tab switch.
+                    if (playerOpen) LivePlayerOverlay(
+                        frame = playerFrame,
+                        positionMs = playerPos,
+                        durationMs = playerDuration,
+                        playing = playerPlaying,
+                        fps = playerFps,
+                        faces = playerFaces,
+                        dropped = playerDropped,
+                        note = playerNote,
+                        onPlayPause = {
+                            if (player.isPlaying) { player.pause(); playerPlaying = false }
+                            else { player.play(); playerPlaying = true }
+                        },
+                        onSeek = { ms ->
+                            player.seekTo(ms)
+                            // Optimistic, so the thumb stays where it was dropped instead
+                            // of snapping back for the frame it takes the pump to re-seek.
+                            playerPos = ms
+                        },
+                        onClose = { stopPlayer() },
+                    )
+
                     confirmBatchDelete?.let { ix ->
                         val name = batchQueue.getOrNull(ix)?.name ?: ""
                         AlertDialog(
@@ -1382,6 +1427,9 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
         scrubJob?.cancel()
         stopVoicePlayback()
+        // Before the preview's own teardown: the pump holds the pipeline this is about to
+        // release, and stop() is what makes it let go.
+        player.stop()
         previews.release()
     }
 
@@ -3054,6 +3102,108 @@ class MainActivity : ComponentActivity() {
         live.stop {
             NativePipe.release()
             PipeGuard.release()
+        }
+    }
+
+    /**
+     * Start the dev-only live player on the current target.
+     *
+     * Mirrors [startLive] step for step, and for the same reasons: acquire [PipeGuard],
+     * drop the preview's warm pipeline rather than mutate it, init, set the source, then
+     * hand the pump a thread of its own. The differences are that the frames come from a
+     * file instead of a camera and that the options are the user's OWN -- there is no
+     * forced preset, because the whole point is to watch what the real run would produce.
+     *
+     * ⚠ DEV BUILDS ONLY, checked HERE as well as at the button. On the gated line this
+     * would be a SEVENTH processing path showing swapped frames, and it would need a check
+     * of its own before it could ship -- exactly as the Live camera was dev-only until
+     * 0.6.3 gave it one. A button that is simply not drawn is an appearance, not a
+     * guarantee, so the flag is tested at the place the processing actually starts.
+     */
+    private fun startPlayer() {
+        if (!BuildConfig.DEV_BUILD) return
+        val src = sourceUri ?: return
+        val tgt = targetFile ?: return
+        lifecycleScope.launch {
+            if (!PipeGuard.acquire("player", 5000)) {
+                status = pipeBusyMessage(); return@launch
+            }
+            // The preview holds a warm pipeline configured for the Swap screen. The player
+            // needs its own, so the preview's is dropped rather than shared -- sharing it
+            // would leave the Swap screen warm for a pipeline the player had replaced.
+            previews.invalidate()
+            previewWarm = false
+            playerNote = null
+            playerFrame = null
+            playerPos = 0; playerFps = 0.0; playerFaces = 0; playerDropped = 0
+            playerOpen = true
+
+            val opts = SwapOptions.load(this@MainActivity)
+            val err = withContext(Dispatchers.Default) {
+                val models = modelDir()
+                val libDir = applicationInfo.nativeLibraryDir
+                if (!NativePipe.init(libDir, libDir, models.absolutePath, opts))
+                    return@withContext "init: " + NativePipe.lastError()
+                NativePipe.setTrackPeriod(opts.trackPeriod)
+                val bmp = decodeOriented(src) ?: return@withContext "cannot decode source image"
+                val soft = bmp.asArgb8888()
+                val px = IntArray(soft.width * soft.height)
+                soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
+                if (!NativePipe.setSource(
+                        NativePipe.argbToBgr(px, soft.width, soft.height),
+                        soft.width, soft.height))
+                    return@withContext "no face found in the source image"
+                null
+            }
+            if (err != null) {
+                // The pipeline goes back before the overlay does, so a failed start cannot
+                // leave the guard held by a player that is not running.
+                NativePipe.release(); PipeGuard.release()
+                playerOpen = false
+                status = getString(R.string.status_failed, err)
+                return@launch
+            }
+            player.start(tgt.absolutePath) { shot ->
+                // The pump thread writes snapshot state directly, which is what
+                // LiveEngine's analyzer thread does and is safe for the same reason.
+                //
+                // ⚠ A null bitmap is a DROPPED frame, not a blank screen: the last picture
+                // stays and only the position moves. See LivePlayer.Shot.
+                shot.bitmap?.let { playerFrame = it }
+                playerPos = shot.positionMs
+                playerFps = shot.fps
+                playerFaces = shot.faces
+                playerDropped = shot.dropped
+                if (shot.error != null) playerNote = shot.error
+                if (shot.ended) playerPlaying = false
+            }
+            playerDuration = player.durationMs
+            player.play()
+            playerPlaying = true
+        }
+    }
+
+    /**
+     * Close the player and hand the pipeline back.
+     *
+     * The teardown runs OFF the main thread: [LivePlayer.stop] joins the pump, which can be
+     * mid-`processFrame`, and waiting for that on the UI thread is a visible stall at best.
+     * The order is the same one [stopLive] documents -- the pump first, then the native
+     * release, then the guard -- because the pump is what might still be inside the
+     * pipeline this is about to free.
+     */
+    private fun stopPlayer() {
+        if (!playerOpen) return
+        playerOpen = false
+        playerPlaying = false
+        lifecycleScope.launch {
+            withContext(Dispatchers.Default) { player.stop() }
+            playerFrame = null
+            NativePipe.release()
+            PipeGuard.release()
+            // The Swap screen's preview was invalidated on the way in and its pipeline is
+            // gone; this is what warms it again and redraws the swapped pane.
+            previewOptionsChanged()
         }
     }
 
