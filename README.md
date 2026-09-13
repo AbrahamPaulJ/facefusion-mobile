@@ -181,13 +181,18 @@ The models are converted from FaceFusion's and are not uniformly permissive.
 
 The app icon is FaceFusion's, used with permission.
 
-## Contributors
+## Authors
+
+Written and maintained by **[@AbrahamPaulJ](https://github.com/AbrahamPaulJ)** — the NPU
+port and the model conversions, the hand-written geometry, the pipeline, the app, the batch
+runner, the lip syncer, the Live tab, the live player and the remote API.
+
+Outside contributions, with thanks:
 
 - **[@doctormajid7-ux](https://github.com/doctormajid7-ux)** — microphone audio in Live
-  recordings and the first version of **Assign per person** ([#1]), then the ideas this
-  release is largely built out of: several source faces on the Swap screen, per-person
-  assignment there, the option to leave a person's own face alone, and a Live mirror
-  independent of the lens ([#2], [#4]).
+  recordings and the first version of **Assign per person** on Live ([#1]), then the ideas
+  behind several source faces on the Swap screen, per-person assignment there, the option to
+  leave a person's own face alone, and a Live mirror independent of the lens ([#2], [#4]).
 - **[@aaazhouaa](https://github.com/aaazhouaa)** — the monochrome light/dark theme and the
   theme setting, the Russian and Chinese translations, batch thumbnails, the collapsible
   log, and a preview performance fix ([#3]).
