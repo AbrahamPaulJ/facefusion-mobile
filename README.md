@@ -27,6 +27,12 @@ Ruhs. The pipeline, the models, and the option names, defaults and ranges are Fa
 - Falls back to the GPU and CPU on phones without a Qualcomm NPU. Same result, about four
   times the time per frame.
 - Shows the target frame and the swapped frame side by side before you commit to a run.
+- **Play with live swap**: press it instead of Swap and watch the clip run through the
+  pipeline as it plays, with its own sound, at whatever rate the phone manages. Nothing is
+  written to disk — it is there to show you what a run would produce before you wait for
+  one. Seek and pause as you would in any player.
+- Load **several source faces** and switch between them from a row under the source pane.
+  The row is the same on both screens, so a face picked on one is there on the other.
 - Trims the clip, and under **Output settings** drops the frame rate or caps the size
   (1080p, 720p, 480p) for a smaller file and a faster run. Any run can be cancelled.
 - **Fast video** (the gear on the `face_swapper` chip → Face detector): tracks the face
@@ -37,13 +43,19 @@ Ruhs. The pipeline, the models, and the option names, defaults and ranges are Fa
   (Android asks for permission); leave it off for silent video. The switch is locked while
   recording and saving. Fast mode forces the settings a camera can keep up with; turning it
   off is experimental and asks first.
-- **Assign per person** (Live): with more than one source face loaded, tap a person to give
-  them a specific source. They keep it for as long as they are in frame, while everyone
-  else follows whichever source is selected.
+- **Assign per person**: give each person in the shot their own source face. On **Live**,
+  tap a person on the feed and they keep that source for as long as they are in frame; on
+  **Swap**, pick them from the row of people found in the frame you are looking at. Anyone
+  you do not pick follows whichever source is selected.
+- **Keep face**: pick it instead of a source and that person is left exactly as they were
+  filmed — untouched by the swapper and by the enhancer. It is how you swap everyone in a
+  shot except somebody.
 - **Batch**: queue several clips and swap them all in one run, with one source face. Each
   finished clip gets a thumbnail you can tap, and can be saved to your gallery as it lands.
 - **Pick the face**: tap a face on the target to swap only that person. The boxes appear on
   their own when there is more than one face in the frame.
+- The Live preview is mirrored on the front camera, as a selfie camera is, and not on the
+  back one. A switch overrides that per lens; recordings are never mirrored.
 - Takes its inputs from the camera and microphone as well as your files — shoot a source
   face, film a target, or record the voice that drives the lip syncer.
 - Saves to your gallery, or hands a still straight out of the preview.
@@ -142,8 +154,8 @@ you say otherwise.
 
 The app includes FaceFusion's content checker and it blocks. Flagged material is refused,
 with no output file and nothing shown. Every path that processes an image is checked: the
-source face, the target photo or video, the preview, the Live camera, every clip in a batch
-and the remote API. If the checker cannot run, for instance if its model is missing, the app
+source face and every other source face you have loaded, the target photo or video, the
+preview, the live player, the Live camera, every clip in a batch and the remote API. If the checker cannot run, for instance if its model is missing, the app
 refuses to process anything rather than continuing unchecked.
 
 **Do not use this on real people without their consent.** That is the main way software of
@@ -168,3 +180,31 @@ The models are converted from FaceFusion's and are not uniformly permissive.
 [model repository](https://huggingface.co/AbrahamPJ/facefusion-mobile-models) for details.
 
 The app icon is FaceFusion's, used with permission.
+
+## Contributors
+
+- **[@doctormajid7-ux](https://github.com/doctormajid7-ux)** — microphone audio in Live
+  recordings and the first version of **Assign per person** ([#1]), then the ideas this
+  release is largely built out of: several source faces on the Swap screen, per-person
+  assignment there, the option to leave a person's own face alone, and a Live mirror
+  independent of the lens ([#2], [#4]).
+- **[@aaazhouaa](https://github.com/aaazhouaa)** — the monochrome light/dark theme and the
+  theme setting, the Russian and Chinese translations, batch thumbnails, the collapsible
+  log, and a preview performance fix ([#3]).
+
+[#1]: https://github.com/AbrahamPaulJ/facefusion-mobile/pull/1
+[#2]: https://github.com/AbrahamPaulJ/facefusion-mobile/pull/2
+[#3]: https://github.com/AbrahamPaulJ/facefusion-mobile/pull/3
+[#4]: https://github.com/AbrahamPaulJ/facefusion-mobile/pull/4
+
+## Support
+
+This is built and maintained in spare time, on hardware bought for it, and it is free with
+no accounts, no analytics and nothing to pay for. If it has been useful to you and you would
+like to put something towards it:
+
+**[buymeacoffee.com/abrahampaulj](https://buymeacoffee.com/abrahampaulj)**
+
+Bug reports and pull requests are worth just as much. The fastest way to get something
+fixed is **Share bug report** in Settings, which assembles the device details and the run
+log and contains no media.
