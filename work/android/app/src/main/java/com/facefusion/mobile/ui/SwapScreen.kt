@@ -8,6 +8,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -45,7 +46,6 @@ import com.facefusion.mobile.FaceDetectorCard
 import com.facefusion.mobile.FaceMaskerCard
 import com.facefusion.mobile.FaceSwapperCard
 import com.facefusion.mobile.BatchItem
-import com.facefusion.mobile.BuildConfig
 import com.facefusion.mobile.BatchState
 import com.facefusion.mobile.ModelDownload
 import com.facefusion.mobile.OptionSegments
@@ -120,6 +120,26 @@ data class RunUi(
 @Composable
 fun SwapScreen(
     sourceThumb: Bitmap?,
+    /** Every source face, in native slot order. Drawn by the shared [SourceRow]. */
+    sourceThumbs: List<Bitmap> = emptyList(),
+    activeSource: Int = 0,
+    onSelectSource: (Int) -> Unit = {},
+    /**
+     * ASSIGN PER PERSON, the Swap screen's own. Live decides by tracking a person through
+     * a sequence of frames; there is no sequence here, so a tap stores the person's
+     * IDENTITY and native matches it on every frame of the run.
+     */
+    assignMode: Boolean = false,
+    /** The people detected in the frame on screen, in the same order as `faceBoxes`. */
+    personThumbs: List<Bitmap> = emptyList(),
+    selectedPerson: Int = -1,
+    /** person index -> source slot, or -1 for "keeps their own face". */
+    personAssignments: Map<Int, Int> = emptyMap(),
+    keepOriginalBrush: Boolean = false,
+    onKeepOriginal: () -> Unit = {},
+    onToggleAssignMode: () -> Unit = {},
+    onSelectPerson: (Int) -> Unit = {},
+    onClearAssignments: () -> Unit = {},
     hasSource: Boolean,
     hasTarget: Boolean,
     /**
@@ -658,12 +678,112 @@ fun SwapScreen(
                     }
                 }
                 // Removing the source is not destructive -- it drops a reference to a photo
-                // the user still has -- so unlike the output it does not confirm.
+                // the user still has -- so unlike the output it does not confirm. With
+                // several sources it removes the one SHOWN, not the list: the pane shows
+                // one face and the button under it has to mean that face.
                 if (hasSource && idle) {
                     IconButton(onClearSource, Modifier.size(28.dp)) {
                         Icon(Icons.Default.Delete,
                              stringResource(R.string.swap_remove_source),
                              Modifier.size(16.dp))
+                    }
+                }
+            }
+        }
+
+        // EVERY source, under the pane that shows the selected one. The same row Live
+        // draws, from the same list: picking a face on either screen makes it available
+        // on both, which is what one shared list means for the person using it.
+        SourceRow(
+            thumbs = sourceThumbs,
+            active = activeSource,
+            keepOriginalBrush = keepOriginalBrush,
+            onSelect = onSelectSource,
+            onKeepOriginal = if (assignMode) onKeepOriginal else null,
+            enabled = idle,
+        )
+
+        // ---- ASSIGN PER PERSON. Video targets only: a still is one frame the user is
+        // already looking at, and the pane IS the result, so there is nothing the mode
+        // could do there that tapping a target face does not already do.
+        if (!imageTarget && hasTarget && sourceThumbs.isNotEmpty()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.live_assign_title),
+                         style = MaterialTheme.typography.bodyMedium)
+                    Text(stringResource(if (assignMode) R.string.swap_assign_on
+                                        else R.string.swap_assign_off),
+                         style = MaterialTheme.typography.bodySmall,
+                         color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (assignMode && personAssignments.isNotEmpty()) {
+                    TextButton(onClick = onClearAssignments, enabled = idle) {
+                        Text(stringResource(R.string.live_assign_clear))
+                    }
+                }
+                // One source plus "keep the original face" is already useful: it is how
+                // you swap everyone EXCEPT somebody.
+                Switch(checked = assignMode,
+                       onCheckedChange = { onToggleAssignMode() },
+                       enabled = idle)
+            }
+            if (assignMode) {
+                Text(stringResource(if (personThumbs.isEmpty())
+                                        R.string.swap_assign_no_people
+                                    else R.string.swap_assign_hint),
+                     style = MaterialTheme.typography.bodySmall,
+                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    personThumbs.forEachIndexed { index, thumb ->
+                        val label = stringResource(R.string.swap_assign_person, index + 1)
+                        Column(
+                            Modifier.width(72.dp).clickable(enabled = idle) {
+                                onSelectPerson(index)
+                            },
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Box {
+                                Image(
+                                    thumb.asImageBitmap(),
+                                    contentDescription = label,
+                                    modifier = Modifier
+                                        .size(62.dp)
+                                        .clip(CircleShape)
+                                        .border(
+                                            BorderStroke(
+                                                if (index == selectedPerson) 3.dp else 1.dp,
+                                                if (index == selectedPerson) FfRed
+                                                else MaterialTheme.colorScheme.outlineVariant,
+                                            ), CircleShape),
+                                    contentScale = ContentScale.Crop,
+                                )
+                                // ROUND faces, SQUARE sources, and a badge saying which
+                                // source each face got -- so the whole mapping is legible
+                                // without tapping anything to find out.
+                                personAssignments[index]?.let { slot ->
+                                    Text(
+                                        if (slot < 0)
+                                            stringResource(R.string.swap_assign_badge_keep)
+                                        else stringResource(
+                                            R.string.swap_assign_badge, slot + 1),
+                                        color = Color.White,
+                                        fontSize = 9.sp,
+                                        modifier = Modifier
+                                            .align(Alignment.BottomEnd)
+                                            .background(FfRed, CircleShape)
+                                            .padding(horizontal = 5.dp, vertical = 1.dp),
+                                    )
+                                }
+                            }
+                            Text(label, fontSize = 10.sp, maxLines = 1,
+                                 overflow = TextOverflow.Ellipsis,
+                                 color = if (index == selectedPerson)
+                                             MaterialTheme.colorScheme.onSurface
+                                         else MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                 }
             }
@@ -716,7 +836,10 @@ fun SwapScreen(
                 // Only while the overlay is on: picking a face you cannot see is not a
                 // feature, and without the boxes a tap here has always meant "choose a
                 // different target".
-                onPickFace = if (showFaceBoxes && idle) onPickFace else null,
+                // ⚠ Not while Assign per person is on. The two are exclusive selectors
+                // and the reference wins inside swapAll, so a tap here would quietly cut
+                // the mode down to the one face it had picked.
+                onPickFace = if (showFaceBoxes && !assignMode && idle) onPickFace else null,
             ) {
                 // CAMERA, beside the gallery pick, and shown while the pane is EMPTY --
                 // which is when someone deciding what to swap needs it. Two buttons because
@@ -986,19 +1109,46 @@ fun SwapScreen(
                     batch.size),
                  fontSize = 16.sp) }
 
-        // THE LIVE PLAYER, dev builds only: the target clip through the pipeline at
-        // whatever rate the phone manages, with its own sound, instead of waiting for a
-        // whole render. It sits under Swap because it is an ALTERNATIVE to pressing Swap --
-        // same pipeline, same options, no output file.
+        // THE LIVE PLAYER: the target clip through the pipeline at whatever rate the phone
+        // manages, with its own sound, instead of waiting for a whole render. It sits under
+        // Swap because it is an ALTERNATIVE to pressing Swap -- same pipeline, same
+        // options, no output file.
         //
-        // ⚠ `BuildConfig.DEV_BUILD` is the one switch, and it is a BUILD FLAG rather than
-        // a dev-branch edit on purpose: a branch would make `dev` two commits deep and turn
-        // every re-derivation of the gate into a merge. See LivePlayerOverlay's doc.
-        if (BuildConfig.DEV_BUILD && hasSource && hasTarget && !imageTarget && idle &&
+        // ⚠ It used to be behind `BuildConfig.DEV_BUILD`, and what took it off that flag is
+        // `MainActivity.startPlayer` growing a check of its own, NOT this condition. A
+        // button drawn or not drawn is an appearance; the guarantee is at the place the
+        // processing starts, which is where the seventh path was added.
+        //
+        // ⚠ A CONTAINER, not bare text. Both of these were TextButtons -- a word floating
+        // under the one real button, with no shape to say they could be pressed at all.
+        // They are TONAL rather than filled, and 46 dp against Swap's 52: there is one
+        // primary action on this screen and these are the two alternatives to it, so they
+        // have to read as buttons without reading as the same button. The theme is
+        // monochrome on purpose, so the weight comes from the secondaryContainer fill and
+        // the 14 dp shape, never from a second accent colour.
+        if (hasSource && hasTarget && !imageTarget && idle &&
             !modelsMissing) {
-            TextButton(onLivePlay, modifier = Modifier.fillMaxWidth()) {
+            // ⚠ DISABLED once a QUEUE exists. The player runs the one visible clip, and
+            // Swap next to it would run all of them -- so with a queue built the two
+            // buttons stop being alternatives and the player silently becomes "preview the
+            // first one". Left DRAWN rather than hidden: a control that vanishes when you
+            // add a clip reads as a bug, and the caption says which it is.
+            val queued = batch.size > 1
+            FilledTonalButton(
+                onLivePlay,
+                enabled = !queued,
+                modifier = Modifier.fillMaxWidth().height(46.dp),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
                 Text(stringResource(R.string.player_action))
             }
+            if (queued) Text(
+                stringResource(R.string.player_batch_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
 
         // HOW THE QUEUE IS FOUND. Picking several files at once still builds it, but that
@@ -1006,7 +1156,13 @@ fun SwapScreen(
         // already know -- which is exactly what the first field report said. One text
         // button, under the Swap button, only while a video target is loaded.
         if (hasTarget && !imageTarget && idle) {
-            TextButton(onAddToBatch, modifier = Modifier.fillMaxWidth()) {
+            FilledTonalButton(
+                onAddToBatch,
+                modifier = Modifier.fillMaxWidth().height(46.dp),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Icon(Icons.Default.Add, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
                 Text(stringResource(if (batch.size > 1) R.string.swap_batch_add_more
                                     else R.string.swap_batch_add))
             }

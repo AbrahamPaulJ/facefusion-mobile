@@ -440,8 +440,8 @@ android {
         // 87 = the band's missing gap under its own divider, and the run preview at the
         // rate the NPU can actually feed it.
         // 88 = an optional model that is absent by design stopped logging at ERROR.
-        versionCode = 89
-        versionName = "0.9.17$variantTag"    // "-dev" == NO content gate
+        versionCode = 94
+        versionName = "0.9.22$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }

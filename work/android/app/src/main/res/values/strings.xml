@@ -522,4 +522,22 @@ Turning it off runs your own Swap settings instead. This is experimental: the en
     <string name="live_assign_help_title">Assign per person</string>
     <string name="live_assign_help_body">1. Turn the switch on. The feed keeps its current look.\n2. Select a source chip (Source 1, Source 2…).\n3. Tap the person who should have that source — they are now SELECTED (white box) and take that source right away.\n4. While they are selected, changing the chip changes THEM — you can try different sources on one person.\n5. For the next person, tap them (the selection moves), or tap empty space to DESELECT — the person keeps their last source and nothing can change them anymore.\n\nTapped people keep their source for the whole session. Untapped people keep the look from when the mode was switched on.\n\nClear removes all assignments. Turning the switch off goes back to the default behaviour (every face follows the chip).</string>
     <string name="live_assign_help_gotit">Got it</string>
+    <string name="assign_keep_original">Keep face</string>
+    <string name="live_mirror">Mirror the preview</string>
+    <string name="live_mirror_on">Flipped, like a selfie camera</string>
+    <string name="live_mirror_off">As the camera sees it</string>
+    <string name="live_assign_kept">This person keeps their own face</string>
+    <string name="swap_assign_on">Nothing changes until you tap a person</string>
+    <string name="swap_assign_off">Every face takes the selected source</string>
+    <string name="swap_assign_hint">Pick a source (or Keep face), then tap a person below. People you do not tap take the source that was selected when you turned this on.</string>
+    <string name="swap_assign_no_people">No faces found in the frame shown. Move the trim handle to a frame with the people you want to assign.</string>
+    <string name="swap_assign_person">Person %1$d</string>
+    <string name="swap_assign_badge">S%1$d</string>
+    <string name="swap_assign_badge_keep">KEEP</string>
+    <string name="swap_assign_set">Person %1$d takes source %2$d</string>
+    <string name="swap_assign_kept">Person %1$d keeps their own face</string>
+    <string name="swap_assign_cleared">Assignments cleared</string>
+    <string name="swap_assign_failed">No face found for person %1$d</string>
+    <string name="swap_assign_not_ready">Still loading — try again in a moment</string>
+    <string name="player_batch_hint">Play with live swap runs one clip. Clear the queue to use it.</string>
 </resources>

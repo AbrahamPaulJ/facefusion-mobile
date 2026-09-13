@@ -40,14 +40,69 @@ import androidx.compose.ui.res.stringResource
  *
  * This class holds STATE and LOGIC only; every composable lives in `ui/`.
  */
+/**
+ * "This person keeps the face they were filmed with" -- not a source slot, and it never
+ * indexes one. The native side calls it kNoSource and tests a separate boolean beside it;
+ * here it is only ever a map VALUE, compared and never dereferenced.
+ */
+private const val KEEP_ORIGINAL = -1
+
 class MainActivity : ComponentActivity() {
 
-    private data class LiveSource(val uri: Uri, val thumb: Bitmap)
+    /** One face the user has picked. [thumb] is the decode the pane and the row draw. */
+    private data class SourceItem(val uri: Uri, val thumb: Bitmap)
 
-    private var sourceUri by mutableStateOf<Uri?>(null)
-    private var sourceThumb by mutableStateOf<Bitmap?>(null)
-    private var liveSources by mutableStateOf<List<LiveSource>>(emptyList())
+    /**
+     * EVERY source face, shared by both screens, in the order the native slots hold them.
+     *
+     * ⚠ ONE list, deliberately. Swap and Live used to keep the count separately while
+     * `setSourceFrom` quietly pushed into the other one -- already one list with two
+     * names, and the drift between them was only invisible because Swap used just the
+     * first entry. Adding a THIRD list for the Swap screen's own multi-source row was the
+     * obvious next step and the wrong one: the gate's whole guarantee is that there is
+     * exactly one way a face becomes a source, and that is only checkable while there is
+     * exactly one place they live.
+     *
+     * The two screens differ only in which slot each is pointing at, which is what
+     * [swapSourceIndex] and [liveSourceIndex] are.
+     */
+    private var sources by mutableStateOf<List<SourceItem>>(emptyList())
+    private var swapSourceIndex by mutableIntStateOf(0)
     private var liveSourceIndex by mutableIntStateOf(0)
+
+    /**
+     * What the SWAP pane is showing: whichever source that screen is pointing at.
+     *
+     * ⚠ Derived, never stored. These used to be two independent pieces of state that
+     * every path had to remember to keep in step with the list -- and with one list and
+     * two screens there are now several more such paths, including a removal that
+     * renumbers everything above it. A fact kept twice is a fact that can disagree with
+     * itself; this one is cheap enough to just read.
+     */
+    private val sourceUri: Uri? get() = sources.getOrNull(swapSourceIndex)?.uri
+    private val sourceThumb: Bitmap? get() = sources.getOrNull(swapSourceIndex)?.thumb
+
+    // ---- Assign per person, on the SWAP screen (Live has its own, below).
+    //
+    // Live decides by TRACKING -- it has a sequence of frames and a person moving through
+    // them. A video swap has no such thing at the moment the user is choosing: there is
+    // one still frame on screen. So a tap here stores the person's IDENTITY, and native
+    // matches it on every frame of the run.
+    private var swapAssignMode by mutableStateOf(false)
+    /** The brush: which source the NEXT tapped person gets, or their own face back. */
+    private var swapBrushKeepOriginal by mutableStateOf(false)
+    private var swapSelectedPerson by mutableIntStateOf(-1)
+    private var swapPersonThumbs by mutableStateOf<List<Bitmap>>(emptyList())
+    /** person index -> source slot, or [KEEP_ORIGINAL]. */
+    private var swapPersonAssignments by mutableStateOf<Map<Int, Int>>(emptyMap())
+    /**
+     * person index -> their 512-float identity.
+     *
+     * ⚠ Kept in Kotlin because pressing Swap builds a FRESH pipeline and every assignment
+     * on the warm one goes with it. Without this the mode would work perfectly in the
+     * preview and do nothing at all in the output -- the worst shape a bug can take.
+     */
+    private var swapPersonIdentity by mutableStateOf<Map<Int, FloatArray>>(emptyMap())
     private var liveLargestOnly by mutableStateOf(false)
     private var targetFile by mutableStateOf<File?>(null)
     private var targetName by mutableStateOf<String?>(null)
@@ -236,6 +291,26 @@ class MainActivity : ComponentActivity() {
      */
     private var liveFrontCamera by mutableStateOf(true)
 
+    /**
+     * Whether the DISPLAYED live feed is mirrored, when the user has said so explicitly.
+     *
+     * null means "follow the lens", which is the default and the only sane one: a front
+     * camera is a mirror because that is what every selfie preview on the phone does, and
+     * a back camera is NOT -- it points at what the user is already looking at, so
+     * flipping it puts text backwards and moves the world the wrong way. Switching the
+     * lens clears the override, because an answer given about one camera is not an answer
+     * about the other.
+     *
+     * ⚠ Display only. The pipeline is fed the true image either way, and so is the
+     * recorder -- a flip applied to the frames would be a per-pixel pass on the analyzer
+     * thread and a silent change to what every existing recording looks like.
+     */
+    private var liveMirrorOverride by mutableStateOf<Boolean?>(null)
+    private val liveMirror: Boolean get() = liveMirrorOverride ?: liveFrontCamera
+
+    /** Live's brush: the counterpart of [swapBrushKeepOriginal] on the other screen. */
+    private var liveBrushKeepOriginal by mutableStateOf(false)
+
     /** The Live recording in flight, and whether the UI should say so -- roadmap 13b. */
     private var liveRecorder: LiveRecorder? = null
     private var liveRecording by mutableStateOf(false)
@@ -349,6 +424,8 @@ class MainActivity : ComponentActivity() {
     private var playerFaces by mutableStateOf(0)
     private var playerDropped by mutableStateOf(0)
     private var playerNote by mutableStateOf<String?>(null)
+    /** A seek is being resolved. The picture is stale and the sound is deliberately off. */
+    private var playerSeeking by mutableStateOf(false)
     private var originalFrame by mutableStateOf<Bitmap?>(null)
     private var swappedFrame by mutableStateOf<Bitmap?>(null)
     private var previewWarm by mutableStateOf(false)
@@ -456,14 +533,275 @@ class MainActivity : ComponentActivity() {
      * list exists to prevent, arriving by way of a convenience button.
      */
     private fun setSourceFrom(uri: Uri) {
-        sourceUri = uri
-        sourceThumb = decodeOriented(uri)
-        sourceThumb?.let { thumb ->
-            if (liveSources.none { it.uri == uri }) liveSources = liveSources + LiveSource(uri, thumb)
-            liveSourceIndex = liveSources.indexOfFirst { it.uri == uri }.coerceAtLeast(0)
-        }
+        val at = addToSources(uri) ?: return
+        swapSourceIndex = at
+        liveSourceIndex = at
+        swapBrushKeepOriginal = false
         // A different face means the loaded pipeline is holding the wrong embedding.
         previewOptionsChanged()
+    }
+
+    /**
+     * Put [uri] in [sources] if it is not already there, and say which slot it is.
+     *
+     * The ONE place the list grows. Null when the image cannot be decoded -- and the
+     * caller is told, because a picker that visibly does nothing is the bug report.
+     */
+    private fun addToSources(uri: Uri): Int? {
+        val existing = sources.indexOfFirst { it.uri == uri }
+        if (existing >= 0) return existing
+        val thumb = decodeOriented(uri) ?: run {
+            status = getString(R.string.status_cannot_read_source)
+            return null
+        }
+        sources = sources + SourceItem(uri, thumb)
+        return sources.lastIndex
+    }
+
+    /**
+     * Remove one source, from either screen, and leave every index that named it right.
+     *
+     * ⚠ Slots are named by INDEX everywhere -- the two screens' selections, every stored
+     * per-person assignment, and `setActiveSource` natively -- so a removal RENUMBERS the
+     * ones above it. A person assigned to the slot that went away loses their assignment;
+     * a person above it keeps theirs, one lower. "Keep the original face" survives either
+     * way: it indexes nothing, and the person was excluded regardless of how many sources
+     * are left.
+     */
+    private fun removeSource(index: Int) {
+        if (index !in sources.indices) return
+        sources = sources.filterIndexed { i, _ -> i != index }
+        swapPersonAssignments = swapPersonAssignments.mapNotNull { (person, slot) ->
+            when {
+                slot == index -> null
+                slot > index -> person to (slot - 1)
+                else -> person to slot
+            }
+        }.toMap()
+        swapPersonIdentity = swapPersonIdentity.filterKeys { it in swapPersonAssignments }
+        fun shift(i: Int) = (if (i > index) i - 1 else i)
+            .coerceIn(0, sources.lastIndex.coerceAtLeast(0))
+        swapSourceIndex = shift(swapSourceIndex)
+        liveSourceIndex = shift(liveSourceIndex)
+        if (sources.isEmpty()) {
+            resetSwapAssign()
+            status = ""
+        }
+        previewOptionsChanged()
+    }
+
+    /** Every source face, decoded once: the bitmaps to CHECK and the bytes to register. */
+    private class PreparedSources(
+        val bitmaps: List<Bitmap>,
+        val slots: List<PreviewEngine.SourceSlot>,
+    )
+
+    /**
+     * Decode every source in [sources] and convert it for the pipeline. Null if any of
+     * them cannot be read -- a partial list would register faces at the wrong slots.
+     *
+     * Decoding is not processing, so this needs no pipeline and carries no check. The
+     * check is [gateSources], which runs against the bitmaps this returns.
+     */
+    private fun prepareSources(): PreparedSources? {
+        if (sources.isEmpty()) return null
+        val bitmaps = sources.map { decodeOriented(it.uri) ?: return null }
+        val slots = sources.zip(bitmaps).map { (item, bmp) ->
+            val soft = bmp.asArgb8888() ?: return null
+            val px = IntArray(soft.width * soft.height)
+            soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
+            PreviewEngine.SourceSlot(
+                item.uri, NativePipe.argbToBgr(px, soft.width, soft.height),
+                soft.width, soft.height)
+        }
+        return PreparedSources(bitmaps, slots)
+    }
+
+    /**
+     * THE SOURCE CHECK, over the WHOLE list. Null to allow, a finished sentence to refuse.
+     *
+     * ⚠ Every slot, never only the active one. Any face in this list is one tap away from
+     * being the one that gets swapped in -- on either screen, and mid-run on both -- so
+     * checking the first and registering the rest would leave the others processed and
+     * unexamined. That is also why the list is shared: one list is one loop.
+     *
+     * ⚠ `ok` is ALLOW alone. A check that could not run refuses, the same as one that
+     * refused, so a broken graph is never a way through.
+     */
+    private fun gateSources(bitmaps: List<Bitmap>, tag: String): String? {
+        for ((i, bmp) in bitmaps.withIndex()) {
+            val v = ContentGate.checkImage(bmp)
+            // The reason, not only the number. A faulted check reads "NaN" and stops
+            // there, and the detail is then the whole story.
+            appendLog("$tag source ${i + 1} score %+.3f".format(v.score) +
+                      (if (v.detail.isNotBlank()) "  [" + v.detail + "]" else ""))
+            if (!v.ok) return ContentGate.message(
+                this, R.string.gate_subject_source_image, v)
+        }
+        return null
+    }
+
+    /** Register a prepared list into the pipeline that is loaded now. Null on success. */
+    private fun registerSources(prepared: PreparedSources): String? {
+        val first = prepared.slots.first()
+        if (!NativePipe.setSource(first.bgr, first.width, first.height))
+            return "source: ${NativePipe.lastError()}"
+        for ((i, slot) in prepared.slots.withIndex()) {
+            if (i == 0) continue
+            if (NativePipe.addSource(slot.bgr, slot.width, slot.height) < 0)
+                return "source ${i + 1}: ${NativePipe.lastError()}"
+        }
+        NativePipe.setActiveSource(swapSourceIndex.coerceIn(0, prepared.slots.lastIndex))
+        NativePipe.setFaceAssignEnabled(swapAssignMode)
+        return null
+    }
+
+    /** Forget every per-person choice and turn the mode off, natively as well as here. */
+    private fun resetSwapAssign() {
+        swapAssignMode = false
+        swapSelectedPerson = -1
+        swapPersonThumbs = emptyList()
+        swapPersonAssignments = emptyMap()
+        swapPersonIdentity = emptyMap()
+        swapBrushKeepOriginal = false
+        NativePipe.setFaceAssignEnabled(false)
+        NativePipe.clearFaceSourceAssignments()
+    }
+
+    /**
+     * The Swap screen's source row: point at a face that is ALREADY a slot.
+     *
+     * ⚠ It adds nothing, which is why it needs no check of its own: every slot in the
+     * list was gated on the way into the pipeline that holds it (see the gate hook in
+     * refreshSwapped, which covers all of them, not just the first). Changing which
+     * gated slot is active processes nothing new.
+     */
+    private fun selectSwapSource(index: Int) {
+        if (index !in sources.indices) return
+        swapBrushKeepOriginal = false
+        swapSourceIndex = index
+        if (previewWarm) NativePipe.setActiveSource(index)
+        // In assign mode the row is a BRUSH: picking a source while a person is selected
+        // applies it to them at once, which is what makes either tap order work.
+        if (swapAssignMode && swapSelectedPerson >= 0)
+            assignSwapPerson(swapSelectedPerson, index, keepOriginal = false)
+        else previewOptionsChanged(reloads = false)
+    }
+
+    /** The other brush: the next person tapped keeps the face they were filmed with. */
+    private fun selectSwapKeepOriginal() {
+        if (!swapAssignMode) return
+        swapBrushKeepOriginal = true
+        if (swapSelectedPerson >= 0)
+            assignSwapPerson(swapSelectedPerson, KEEP_ORIGINAL, keepOriginal = true)
+    }
+
+    /**
+     * Record what happens to [person] -- one of the faces detected in the frame on screen.
+     *
+     * Runs off the main thread: it re-analyses the whole frame to find the identity under
+     * the tap, which is a detector pass plus an embedding, not a lookup.
+     */
+    private fun assignSwapPerson(person: Int, source: Int, keepOriginal: Boolean) {
+        if (!swapAssignMode || person !in swapPersonThumbs.indices) return
+        if (!keepOriginal && source !in sources.indices) return
+        if (!previewWarm) {
+            // Nothing to assign ON. Said out loud, because the alternative is a tap that
+            // silently does nothing while the pipeline is still coming up.
+            status = getString(R.string.swap_assign_not_ready)
+            return
+        }
+        val frame = originalFrame ?: return
+        val box = faceBoxes?.asList()?.chunked(5)?.getOrNull(person) ?: return
+        val soft = frame.asArgb8888() ?: return
+        val px = IntArray(soft.width * soft.height)
+        soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
+        val cx = (box[0] + box[2]) / 2f
+        val cy = (box[1] + box[3]) / 2f
+        lifecycleScope.launch {
+            val identity = withContext(Dispatchers.Default) {
+                NativePipe.assignFaceAt(
+                    NativePipe.argbToBgr(px, soft.width, soft.height), soft.width, soft.height,
+                    cx, cy, if (keepOriginal) 0 else source, keepOriginal)
+            }
+            if (identity.size != 512) {
+                status = getString(R.string.swap_assign_failed, person + 1)
+                return@launch
+            }
+            swapSelectedPerson = person
+            swapBrushKeepOriginal = keepOriginal
+            swapPersonAssignments = swapPersonAssignments +
+                (person to if (keepOriginal) KEEP_ORIGINAL else source)
+            swapPersonIdentity = swapPersonIdentity + (person to identity)
+            status = if (keepOriginal)
+                         getString(R.string.swap_assign_kept, person + 1)
+                     else getString(R.string.swap_assign_set, person + 1, source + 1)
+            // No reload: the assignment is already on the warm pipeline, and this only
+            // needs the swapped pane redrawn through it.
+            previewOptionsChanged(reloads = false)
+        }
+    }
+
+    /** Tap a face in the row: select them, and apply whatever the brush currently is. */
+    private fun selectSwapPerson(person: Int) {
+        if (person !in swapPersonThumbs.indices) return
+        swapSelectedPerson = person
+        if (!swapAssignMode) return
+        if (swapBrushKeepOriginal) assignSwapPerson(person, KEEP_ORIGINAL, keepOriginal = true)
+        else assignSwapPerson(person, swapSourceIndex, keepOriginal = false)
+    }
+
+    private fun toggleSwapAssign() {
+        swapAssignMode = !swapAssignMode
+        swapSelectedPerson = -1
+        swapPersonAssignments = emptyMap()
+        swapPersonIdentity = emptyMap()
+        swapBrushKeepOriginal = false
+        NativePipe.clearFaceSourceAssignments()
+        NativePipe.setFaceAssignEnabled(swapAssignMode)
+        if (swapAssignMode) {
+            // ⚠ The two target selectors are MUTUALLY EXCLUSIVE, and the reference wins
+            // inside swapAll. Leaving one set would quietly reduce "assign per person" to
+            // "assign the one person I picked earlier" -- the mode running on a single
+            // face, with nothing on screen to say why.
+            dropReferenceFace()
+            NativePipe.clearReferenceFace()
+            // The row is a row of DETECTED people, so the boxes have to exist first.
+            showFaceBoxes = true
+            faceBoxes = null
+            refreshSwapped(force = true)
+        } else {
+            swapPersonThumbs = emptyList()
+            previewOptionsChanged(reloads = false)
+        }
+    }
+
+    private fun clearSwapAssignments() {
+        swapPersonAssignments = emptyMap()
+        swapPersonIdentity = emptyMap()
+        swapSelectedPerson = -1
+        swapBrushKeepOriginal = false
+        NativePipe.clearFaceSourceAssignments()
+        status = getString(R.string.swap_assign_cleared)
+        previewOptionsChanged(reloads = false)
+    }
+
+    /**
+     * Every remembered assignment, pushed onto the pipeline that is loaded RIGHT NOW.
+     *
+     * Called after each init -- the preview's, the run's, the player's -- because native
+     * assignments do not survive one. Returns how many landed.
+     */
+    private fun restoreSwapAssignments(): Int {
+        if (!swapAssignMode) return 0
+        var n = 0
+        for ((person, slot) in swapPersonAssignments) {
+            val identity = swapPersonIdentity[person] ?: continue
+            val keep = slot == KEEP_ORIGINAL
+            if (NativePipe.restoreFaceAssignment(identity, if (keep) 0 else slot, keep)) n++
+            else appendLog("could not restore the choice for person ${person + 1}")
+        }
+        return n
     }
 
     private val pickSource = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -476,35 +814,74 @@ class MainActivity : ComponentActivity() {
 
     private fun pickLiveSource() = pickLiveSources.launch("image/*")
 
+    /**
+     * The Live screen's "+": another face, mid-session if need be.
+     *
+     * ⚠ GATED HERE when the pump is running, and that is not belt and braces -- it is the
+     * only check this path has. [startLive] gates the whole list on the way up, which
+     * covers every source that existed THEN; a face added afterwards reaches `addSource`
+     * and becomes swappable one tap later without ever passing that loop. Not running,
+     * nothing is registered yet and startLive's loop is still the check.
+     */
     private fun addLiveSource(uri: Uri) {
+        val already = sources.indexOfFirst { it.uri == uri }
+        if (already >= 0) { selectLiveSource(already); return }
         // ONE decode, two uses: the thumbnail stored for the pane and the pixels handed
         // to the pipeline are the same image -- a second decode is a full-size allocation
         // that produces nothing new.
-        val bmp = decodeOriented(uri) ?: return
-        val soft = bmp.asArgb8888()
-        val px = IntArray(soft.width * soft.height)
-        soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
-        val bgr = NativePipe.argbToBgr(px, soft.width, soft.height)
-
-        // While the pump is running, the native slots must stay aligned with this list,
-        // so the new face is registered at the same index the chip will show. Not running,
-        // there is no live pipeline to add to -- startLive registers the whole list.
-        if (liveRunning) NativePipe.addSource(bgr, soft.width, soft.height)
-
-        liveSources = liveSources + LiveSource(uri, bmp)
-        liveSourceIndex = liveSources.lastIndex
+        val bmp = decodeOriented(uri) ?: run {
+            liveNote = getString(R.string.status_cannot_read_source); return
+        }
+        if (!liveRunning) {
+            sources = sources + SourceItem(uri, bmp)
+            liveSourceIndex = sources.lastIndex
+            return
+        }
+        lifecycleScope.launch {
+            val soft = bmp.asArgb8888()
+            val px = IntArray(soft.width * soft.height)
+            soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
+            val bgr = NativePipe.argbToBgr(px, soft.width, soft.height)
+            val refusal = withContext(Dispatchers.Default) {
+                val v = ContentGate.checkImage(bmp)
+                if (!v.ok) ContentGate.message(
+                    this@MainActivity, R.string.gate_subject_source_image, v)
+                // The native slots must stay aligned with this list, so the new face is
+                // registered at the index the row will show it at.
+                else if (NativePipe.addSource(bgr, soft.width, soft.height) < 0)
+                    getString(R.string.status_no_face)
+                else null
+            }
+            if (refusal != null) { liveNote = refusal; return@launch }
+            sources = sources + SourceItem(uri, bmp)
+            selectLiveSource(sources.lastIndex)
+        }
     }
 
     private fun selectLiveSource(index: Int) {
-        if (index !in liveSources.indices || index == liveSourceIndex) return
+        if (index !in sources.indices) return
+        // ⚠ The brush is cleared BEFORE the no-op check, never after. Selecting "keep the
+        // original" and then tapping the source that was already active is the one way
+        // back, and an early return above this line made it the one way that did nothing.
+        val wasKeepOriginal = liveBrushKeepOriginal
+        liveBrushKeepOriginal = false
+        if (index == liveSourceIndex && !wasKeepOriginal) return
         liveSourceIndex = index
+        // setActiveSource also re-applies to the SELECTED person, which is exactly what
+        // takes them back off "keep the original" -- so this covers both directions.
         if (liveRunning) NativePipe.setActiveSource(index)
     }
 
+    /** Live's other brush. The next tapped person keeps the face they were filmed with. */
+    private fun selectLiveKeepOriginal() {
+        if (!liveAssignMode) return
+        liveBrushKeepOriginal = true
+        if (liveRunning) NativePipe.setSelectedFaceKeepOriginal(true)
+    }
+
     private fun clearLiveSource() {
-        if (liveRunning || liveSources.isEmpty()) return
-        liveSources = liveSources.filterIndexed { i, _ -> i != liveSourceIndex }
-        liveSourceIndex = liveSourceIndex.coerceAtMost(liveSources.lastIndex.coerceAtLeast(0))
+        if (liveRunning || sources.isEmpty()) return
+        removeSource(liveSourceIndex)
     }
 
     private val takeSourcePhoto = registerForActivityResult(
@@ -1003,8 +1380,8 @@ class MainActivity : ComponentActivity() {
                 // switch's initial value, because the detector has to have run first -- and
                 // it is exactly the question the user has when a second face is on screen.
                 // One yoloface pass, ~2 ms, and no identity work at all.
-                LaunchedEffect(originalFrame, showFaceBoxes, previewWarm, busy,
-                               targetVersion) {
+                LaunchedEffect(originalFrame, showFaceBoxes, swapAssignMode, previewWarm,
+                               busy, targetVersion) {
                     val frame = originalFrame
                     // The boxes belong to ONE frame. The moment the frame changes they are
                     // wrong, and being wrong on screen is worse than being absent -- so they
@@ -1042,6 +1419,16 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     faceBoxes = if (showFaceBoxes) found else null
+                    // Assign per person needs a FACE to point at, so the same detection
+                    // that draws the boxes also cuts the row of people. Same pass, same
+                    // frame, same order -- person N here is box N there, which is what
+                    // lets a tap in the row name a face without a second detector run.
+                    swapPersonThumbs =
+                        if (swapAssignMode && showFaceBoxes && found != null)
+                            found.asList().chunked(5).mapNotNull { b ->
+                                if (b.size < 4) null else cropPersonThumb(frame, b)
+                            }
+                        else emptyList()
                     faceBoxFrame = frame
                 }
 
@@ -1074,6 +1461,18 @@ class MainActivity : ComponentActivity() {
                         when (screen) {
                             Screen.Swap -> SwapScreen(
                                 sourceThumb = sourceThumb,
+                                sourceThumbs = sources.map { it.thumb },
+                                activeSource = swapSourceIndex,
+                                onSelectSource = ::selectSwapSource,
+                                assignMode = swapAssignMode,
+                                personThumbs = swapPersonThumbs,
+                                selectedPerson = swapSelectedPerson,
+                                personAssignments = swapPersonAssignments,
+                                keepOriginalBrush = swapBrushKeepOriginal,
+                                onKeepOriginal = ::selectSwapKeepOriginal,
+                                onToggleAssignMode = ::toggleSwapAssign,
+                                onSelectPerson = ::selectSwapPerson,
+                                onClearAssignments = ::clearSwapAssignments,
                                 hasSource = sourceUri != null,
                                 hasTarget = targetFile != null || targetImage != null,
                                 imageTarget = targetImage != null,
@@ -1232,8 +1631,9 @@ class MainActivity : ComponentActivity() {
                             )
 
                             Screen.Live -> LiveScreen(
-                                sourceThumb = liveSources.getOrNull(liveSourceIndex)?.thumb,
-                                sourceCount = liveSources.size,
+                                sourceThumb = sources.getOrNull(liveSourceIndex)?.thumb,
+                                sourceThumbs = sources.map { it.thumb },
+                                sourceCount = sources.size,
                                 activeSource = liveSourceIndex,
                                 onSelectSource = ::selectLiveSource,
                                 onPickSource = ::pickLiveSource,
@@ -1251,6 +1651,8 @@ class MainActivity : ComponentActivity() {
                                 onDownload = { onDownloadTapped() },
                                 frontCamera = liveFrontCamera,
                                 onSwitchCamera = ::switchLiveCamera,
+                                mirror = liveMirror,
+                                onToggleMirror = { liveMirrorOverride = !liveMirror },
                                 recording = liveRecording,
                                 microphone = liveMicrophone,
                                 finalizing = liveFinalizing,
@@ -1263,6 +1665,8 @@ class MainActivity : ComponentActivity() {
                                 swapEnabled = liveSwapEnabled,
                                 onToggleSwapEnabled = { toggleSwapEnabled() },
                                 assignMode = liveAssignMode,
+                                keepOriginalBrush = liveBrushKeepOriginal,
+                                onKeepOriginal = ::selectLiveKeepOriginal,
                                 onToggleAssignMode = ::toggleLiveAssign,
                                 onAssignFace = ::assignLiveFace,
                                 assignBox = liveAssignBox,
@@ -1363,7 +1767,12 @@ class MainActivity : ComponentActivity() {
                             if (player.isPlaying) { player.pause(); playerPlaying = false }
                             else { player.play(); playerPlaying = true }
                         },
+                        seeking = playerSeeking,
                         onSeek = { ms ->
+                            // Said immediately rather than waiting for the pump's first
+                            // shot: resolving the seek is what takes the time, so the
+                            // indicator has to be up before it starts, not after.
+                            playerSeeking = true
                             player.seekTo(ms)
                             // Optimistic, so the thumb stays where it was dropped instead
                             // of snapping back for the frame it takes the pump to re-seek.
@@ -2041,14 +2450,11 @@ class MainActivity : ComponentActivity() {
                 }
 
                 if (!previewWarm) {
-                    val bmp = withContext(Dispatchers.IO) { decodeOriented(src) }
-                    if (bmp == null) {
+                    val prepared = withContext(Dispatchers.IO) { prepareSources() }
+                    if (prepared == null) {
                         previewNote = getString(R.string.status_cannot_read_source)
                         return@launch
                     }
-                    val soft = bmp.asArgb8888()
-                    val px = IntArray(soft.width * soft.height)
-                    soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
 
                     val models = modelDir()
                     val t = tier
@@ -2061,20 +2467,14 @@ class MainActivity : ComponentActivity() {
 
                     val lib = applicationInfo.nativeLibraryDir
                     val err = previews.ensureReady(
-                        lib, models.absolutePath, opts, src,
-                        NativePipe.argbToBgr(px, soft.width, soft.height), soft.width, soft.height,
-                        gate = {
-                            // The same check runSwap makes. Without it the preview is a
-                            // complete second processing path with no gate on it, and the
-                            // gate becomes avoidable by simply never pressing Swap.
-                            val v = ContentGate.checkImage(bmp)
-                            // The score alone reads "NaN" and stops there. When the gate
-                            // FAULTS, the reason is the whole story and it was being
-                            // dropped on the floor.
-                            appendLog("preview source score %+.3f".format(v.score) +
-                                      (if (v.detail.isNotBlank()) "  [" + v.detail + "]" else ""))
-                            if (v.ok) null else ContentGate.message(this@MainActivity, R.string.gate_subject_source_image, v)
-                        },
+                        lib, models.absolutePath, opts,
+                        slots = prepared.slots,
+                        activeSource = swapSourceIndex,
+                        assignEnabled = swapAssignMode,
+                        // The same check runSwap makes, over the same list. Without it the
+                        // preview is a complete second processing path with no check on
+                        // it, and the check becomes avoidable by never pressing Swap.
+                        gate = { gateSources(prepared.bitmaps, "preview") },
                     )
                     // Before the error branch, because a rejection is worth recording even
                     // when the fallback then succeeded and there is no error to report.
@@ -2091,6 +2491,10 @@ class MainActivity : ComponentActivity() {
                         return@launch
                     }
                     previewWarm = true
+                    // ⚠ AFTER the init, every time. Native assignments live on the
+                    // pipeline and do not survive one being built, so a mode that is on
+                    // would come back empty and silently swap everybody.
+                    restoreSwapAssignments()
                 }
 
                 // Every previewed frame, not just the source. The source is checked once,
@@ -2506,6 +2910,24 @@ class MainActivity : ComponentActivity() {
         voicePosMs = voiceTrimStartMs
     }
 
+    /**
+     * One detected person, as a small square for the assignment row.
+     *
+     * ⚠ Every edge is clamped INTO the frame before the crop. Detector boxes routinely
+     * run off the side of the picture on a face at the edge, and `createBitmap` throws
+     * on a rectangle that does not fit -- which would take down the preview effect that
+     * calls this, not just the one thumbnail.
+     */
+    private fun cropPersonThumb(frame: Bitmap, box: List<Float>): Bitmap? = runCatching {
+        if (box.size < 4 || frame.width < 2 || frame.height < 2) return@runCatching null
+        val x0 = box[0].toInt().coerceIn(0, frame.width - 1)
+        val y0 = box[1].toInt().coerceIn(0, frame.height - 1)
+        val x1 = box[2].toInt().coerceIn(x0 + 1, frame.width)
+        val y1 = box[3].toInt().coerceIn(y0 + 1, frame.height)
+        Bitmap.createScaledBitmap(
+            Bitmap.createBitmap(frame, x0, y0, x1 - x0, y1 - y0), 96, 96, true)
+    }.getOrNull()
+
     /** Release the player entirely -- a new voice is loaded, or the screen is going away. */
     private fun stopVoicePlayback() {
         voicePollJob?.cancel()
@@ -2634,11 +3056,15 @@ class MainActivity : ComponentActivity() {
             else -> R.string.pipe_holder_other
         }))
 
+    /**
+     * The Swap pane's delete: drop the source it is SHOWING, not the whole list.
+     *
+     * Not destructive -- it drops a reference to a photo the user still has -- so unlike
+     * the output it does not confirm.
+     */
     private fun clearSource() {
-        sourceUri = null
-        sourceThumb = null
-        status = ""
-        previewOptionsChanged()
+        if (sources.isEmpty()) return
+        removeSource(swapSourceIndex)
     }
 
     private fun clearTarget() {
@@ -2766,6 +3192,10 @@ class MainActivity : ComponentActivity() {
      * user cannot see and would have to guess at.
      */
     private fun pickReferenceFace(x: Float, y: Float) {
+        // ⚠ Assign per person owns the target-face selector while it is on. A reference
+        // face wins inside swapAll, so letting this gesture through would silently cut
+        // the mode down to the single face it had picked.
+        if (swapAssignMode) return
         val frame = originalFrame ?: return
         if (busy) return
         // ⚠ THIS USED TO RETURN SILENTLY, and that is the whole of the bug reported as
@@ -2879,6 +3309,7 @@ class MainActivity : ComponentActivity() {
         }
         NativePipe.setFaceAssignEnabled(liveAssignMode)
         liveAssignBox = null
+        liveBrushKeepOriginal = false
         liveNote = if (liveAssignMode) getString(R.string.live_assign_hint)
                    else null
     }
@@ -2887,6 +3318,7 @@ class MainActivity : ComponentActivity() {
         NativePipe.clearFaceSourceAssignments()
         liveAssignBox = null
         liveAssignCount = 0
+        liveBrushKeepOriginal = false
         liveNote = getString(R.string.live_assign_cleared)
     }
 
@@ -2899,7 +3331,12 @@ class MainActivity : ComponentActivity() {
     private fun assignLiveFace(dispX: Float, dispY: Float) {
         if (!liveRunning || !liveAssignMode) return
         if (assignTapPending) return   // one tap in flight at a time
-        NativePipe.requestFaceAssignment(dispX, dispY, liveSourceIndex)
+        // ⚠ The brush rides as its OWN argument, never as a reserved value of the slot
+        // index. Native reads "is there a tap" as `source >= 0` in several places, and a
+        // magic negative would have turned every one of them into "is there a tap that is
+        // not the one brush the user just picked".
+        NativePipe.requestFaceAssignment(dispX, dispY, liveSourceIndex,
+                                         liveBrushKeepOriginal)
         assignTapPending = true
     }
 
@@ -2944,6 +3381,13 @@ class MainActivity : ComponentActivity() {
         val wasRunning = liveRunning
         if (wasRunning) stopLive()
         liveFrontCamera = !liveFrontCamera
+        // ⚠ The mirror goes back to following the lens. An answer the user gave about one
+        // camera is not an answer about the other: a front feed is a mirror because that
+        // is what every selfie preview does, and a back feed is not -- it points at what
+        // the user is already looking at, so a flip puts text backwards and moves the
+        // world the wrong way. Carrying the override across the switch would do exactly
+        // that, and it would look like the swap failing rather than the view being wrong.
+        liveMirrorOverride = null
         liveNote = null
         if (wasRunning) startLive()
     }
@@ -2951,7 +3395,7 @@ class MainActivity : ComponentActivity() {
     private fun startLive() {
         // Nothing to run with -- the guard the caller's button already relies on, kept so
         // this method cannot be entered with an empty list by any other path.
-        if (liveSources.getOrNull(liveSourceIndex) == null) return
+        if (sources.getOrNull(liveSourceIndex) == null) return
         // Read at bind time by the engine, so it must be set before start() and not after.
         live.frontCamera = liveFrontCamera
         lifecycleScope.launch {
@@ -2983,7 +3427,7 @@ class MainActivity : ComponentActivity() {
                 // nowhere at all -- as soon as the list held more than one face.
                 // Each one is gated too: a face the user can switch to mid-run must not
                 // be the one input the gate never saw.
-                for ((i, ls) in liveSources.withIndex()) {
+                for ((i, ls) in sources.withIndex()) {
                     val bmp = decodeOriented(ls.uri)
                         ?: return@withContext "cannot read source ${i + 1}"
                     val verdict = ContentGate.checkImage(bmp)
@@ -3057,7 +3501,12 @@ class MainActivity : ComponentActivity() {
                         liveAssignBox = box
                         liveAssignNonce++
                         liveAssignCount++
-                        liveNote = getString(R.string.live_assign_set, (box[4].toInt() + 1))
+                        // A negative slot in the confirmation means "keeps their own
+                        // face" -- the one answer that is a choice and not an index.
+                        liveNote = if (box[4] < 0)
+                                       getString(R.string.live_assign_kept)
+                                   else getString(R.string.live_assign_set,
+                                                  (box[4].toInt() + 1))
                     } else if (box.size == 1) {
                         assignTapPending = false
                         // The miss also DESELECTED the person (empty tap = deselect).
@@ -3114,15 +3563,20 @@ class MainActivity : ComponentActivity() {
      * file instead of a camera and that the options are the user's OWN -- there is no
      * forced preset, because the whole point is to watch what the real run would produce.
      *
-     * ⚠ DEV BUILDS ONLY, checked HERE as well as at the button. On the gated line this
-     * would be a SEVENTH processing path showing swapped frames, and it would need a check
-     * of its own before it could ship -- exactly as the Live camera was dev-only until
-     * 0.6.3 gave it one. A button that is simply not drawn is an appearance, not a
-     * guarantee, so the flag is tested at the place the processing actually starts.
+     * ⚠ THE SEVENTH GATED PATH, and the check below is what let it off the dev line. It
+     * shows swapped frames, so it is a processing path like any other and it carries the
+     * same two checks `runSwap` does in the same order -- source, then target, both after
+     * init and both before `setSource` reads a face. It was dev-only until this existed,
+     * exactly as the Live camera was dev-only until 0.6.3 gave it one; a feature behind
+     * `BuildConfig.DEV_BUILD` is ungated BY CONSTRUCTION, and the only way off that flag
+     * is onto this list.
+     *
+     * ⚠ The exposure is the same SET OF FRAMES `runSwap` has -- one file, played through
+     * from a position the user can move -- so `checkVideo`, which samples across the whole
+     * clip, is the same answer for both and neither is the weaker door.
      */
     private fun startPlayer() {
-        if (!BuildConfig.DEV_BUILD) return
-        val src = sourceUri ?: return
+        if (sources.isEmpty()) return
         val tgt = targetFile ?: return
         lifecycleScope.launch {
             if (!PipeGuard.acquire("player", 5000)) {
@@ -3136,6 +3590,7 @@ class MainActivity : ComponentActivity() {
             playerNote = null
             playerFrame = null
             playerPos = 0; playerFps = 0.0; playerFaces = 0; playerDropped = 0
+            playerSeeking = false
             playerOpen = true
 
             val opts = SwapOptions.load(this@MainActivity)
@@ -3145,14 +3600,29 @@ class MainActivity : ComponentActivity() {
                 if (!NativePipe.init(libDir, libDir, models.absolutePath, opts))
                     return@withContext "init: " + NativePipe.lastError()
                 NativePipe.setTrackPeriod(opts.trackPeriod)
-                val bmp = decodeOriented(src) ?: return@withContext "cannot decode source image"
-                val soft = bmp.asArgb8888()
-                val px = IntArray(soft.width * soft.height)
-                soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
-                if (!NativePipe.setSource(
-                        NativePipe.argbToBgr(px, soft.width, soft.height),
-                        soft.width, soft.height))
-                    return@withContext "no face found in the source image"
+                val prepared = prepareSources()
+                    ?: return@withContext "cannot decode source image"
+
+                // THE GATE, before a single frame is decoded or drawn. Init first because
+                // the check is a graph and needs the models; `setSource` after, because it
+                // already detects, aligns and embeds -- the refusal has to land in the gap
+                // between the two. Same ordering, same subjects and same fail-closed `ok`
+                // as runSwap.
+                if (NativePipe.contentGateIsQuantised())
+                    appendLog("content gate: W8A16 build, biased " +
+                              "+${ContentGate.QUANTISED_BIAS} toward refusing")
+                gateSources(prepared.bitmaps, "player")?.let { return@withContext it }
+                ContentGate.checkVideo(tgt).let {
+                    // `detail` is an ARGUMENT, never interpolated into the format string:
+                    // it reads "0/11 flagged (0.0%)" and that trailing `%)` parses as a
+                    // conversion. See runSwap -- it cost a whole run once.
+                    appendLog("player target content: %s, worst %+.3f".format(it.detail, it.score))
+                    if (!it.ok) return@withContext ContentGate.message(
+                        this@MainActivity, R.string.gate_subject_target_video, it)
+                }
+
+                registerSources(prepared)?.let { return@withContext it }
+                restoreSwapAssignments()
                 null
             }
             if (err != null) {
@@ -3174,6 +3644,7 @@ class MainActivity : ComponentActivity() {
                 playerFps = shot.fps
                 playerFaces = shot.faces
                 playerDropped = shot.dropped
+                playerSeeking = shot.seeking
                 if (shot.error != null) playerNote = shot.error
                 if (shot.ended) playerPlaying = false
             }
@@ -3258,7 +3729,7 @@ class MainActivity : ComponentActivity() {
                                 if (opts.largestOnly) "  largest face only" else ""))
 
                     status = getString(R.string.status_reading_source)
-                    val bmp = decodeOriented(src) ?: error("cannot decode source image")
+                    val prepared = prepareSources() ?: error("cannot decode source image")
 
                     // The content gate, BEFORE anything is processed or previewed. It
                     // blocks, as upstream does, so a refusal ends the run here -- there is
@@ -3267,11 +3738,7 @@ class MainActivity : ComponentActivity() {
                     if (NativePipe.contentGateIsQuantised())
                         appendLog("content gate: W8A16 build, biased " +
                                   "+${ContentGate.QUANTISED_BIAS} toward refusing")
-                    ContentGate.checkImage(bmp).let {
-                        appendLog("source content score %+.3f".format(it.score))
-                        if (!it.ok) throw ContentGate.Refused(ContentGate.message(this@MainActivity,
-                                                                R.string.gate_subject_source_image, it))
-                    }
+                    gateSources(prepared.bitmaps, "run")?.let { throw ContentGate.Refused(it) }
                     // The target, sampled across the clip.
                     ContentGate.checkVideo(tgt).let {
                         // `detail` is an ARGUMENT, never interpolated into the format
@@ -3285,13 +3752,15 @@ class MainActivity : ComponentActivity() {
                                                     R.string.gate_subject_target_video, it))
                     }
 
-                    val soft = bmp.asArgb8888()
-                    val px = IntArray(soft.width * soft.height)
-                    soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
-                    if (!NativePipe.setSource(NativePipe.argbToBgr(px, soft.width, soft.height),
-                                              soft.width, soft.height))
-                        error("source: ${NativePipe.lastError()}")
-                    appendLog("source ready (${soft.width}x${soft.height})")
+                    registerSources(prepared)?.let { error(it) }
+                    // ⚠ This init built a fresh pipeline, so every per-person choice the
+                    // user made against the PREVIEW is gone from it. Without this the mode
+                    // would work perfectly on screen and do nothing in the file.
+                    val restored = restoreSwapAssignments()
+                    appendLog("source ready (${prepared.slots[0].width}x" +
+                              "${prepared.slots[0].height}, ${prepared.slots.size} source" +
+                              (if (prepared.slots.size == 1) "" else "s") +
+                              (if (restored > 0) ", $restored assigned" else "") + ")")
 
                     val t0 = System.currentTimeMillis()
 

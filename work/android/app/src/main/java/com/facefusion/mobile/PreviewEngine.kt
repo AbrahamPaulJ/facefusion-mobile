@@ -20,6 +20,16 @@ import kotlin.math.roundToInt
  */
 class PreviewEngine {
 
+    /**
+     * One source face, ready for a native slot.
+     *
+     * [tag] identifies the image -- anything with sane equality; the Uri is what the
+     * caller has. It is what "the pipeline already holds these faces" is decided on, so
+     * it must identify the IMAGE and not the array (a fresh decode of the same file has
+     * to compare equal, or every refresh would reload).
+     */
+    data class SourceSlot(val tag: Any, val bgr: ByteArray, val width: Int, val height: Int)
+
     /** What a swap preview produced. [faces] is 0 when nothing was detected. */
     data class Swapped(val bitmap: Bitmap?, val faces: Int, val error: String? = null)
 
@@ -221,7 +231,14 @@ class PreviewEngine {
      * The comment above is the reasoning that was over-applied: it is true of the options,
      * because init takes them once, and it was extended to the source by proximity.
      */
-    private var appliedSource: Any? = null
+    /**
+     * The [SourceSlot.tag]s currently registered natively, in slot order.
+     *
+     * ⚠ Slot ORDER is part of the identity, not just the set: `setActiveSource(i)` and
+     * every stored per-person assignment name a slot by index, so two lists with the same
+     * faces in a different order are two different pipelines.
+     */
+    private var appliedSlots: List<Any> = emptyList()
 
     /**
      * The lip syncer's driving audio currently decoded onto the loaded pipeline, or null.
@@ -245,13 +262,16 @@ class PreviewEngine {
     private var appliedVoiceTrim: Pair<Long, Long>? = null
 
     /** True when a pipeline is loaded AND a source face has been applied to it. */
-    val isWarm: Boolean get() = loadedSwapper != null && appliedSource != null
+    val isWarm: Boolean get() = loadedSwapper != null && appliedSlots.isNotEmpty()
 
     fun invalidate() {
         if (loadedSwapper != null) NativePipe.release()
         loadedSwapper = null
         loadedOpts = null
-        appliedSource = null
+        // ⚠ Cleared HERE too, not only where it is set. It is the claim "the pipeline is
+        // holding these faces", and a claim that outlives the pipeline is the same stale
+        // promise the source tag was already emptied to avoid.
+        appliedSlots = emptyList()
         appliedVoice = null
         appliedVoiceTrim = null
         audioFps = 0.0
@@ -301,25 +321,31 @@ class PreviewEngine {
     /**
      * Load the pipeline for [opts] and [source], unless it is already loaded for exactly that.
      *
-     * [sourceTag] identifies the source image; anything with sane equality will do (the Uri
-     * is what the caller has). Returns null on success, an error string otherwise.
+     * [slots] are the source faces, in the order the UI shows them; the first becomes
+     * `setSource` and the rest `addSource`, so native slot N is [slots]`[N]`. It must not
+     * be empty. Returns null on success, an error string otherwise.
      *
-     * [gate] runs AFTER the pipeline comes up and BEFORE the source is read, and a non-null
-     * return aborts without reading it. That ordering is forced: a content check needs the
+     * [gate] runs AFTER the pipeline comes up and BEFORE any source is read, and a non-null
+     * return aborts without reading one. That ordering is forced: a content check needs the
      * models loaded before it can run at all, but `setSource` is already processing -- it
      * detects, aligns and embeds the face. Anything that must not be processed has to be
      * refused in the gap between those two, which is what this hook is.
+     *
+     * ⚠ [gate] must cover EVERY slot, not just the first. Anything in this list is one tap
+     * away from being the face that gets swapped in, so a check that only looked at slot 0
+     * would leave the others processed and unexamined.
      */
     suspend fun ensureReady(
         libDir: String,
         modelDir: String,
         opts: SwapOptions,
-        sourceTag: Any?,
-        sourceBgr: ByteArray,
-        sourceW: Int,
-        sourceH: Int,
+        slots: List<SourceSlot>,
+        activeSource: Int = 0,
+        assignEnabled: Boolean = false,
         gate: (suspend () -> String?)? = null,
     ): String? = withContext(Dispatchers.Default) {
+        if (slots.isEmpty()) return@withContext "No source image"
+        val tags = slots.map { it.tag }
         // The SMALLEST job that is out of date, of three, in increasing cost:
         //   options  -> push them to the loaded pipeline, no I/O at all
         //   source   -> one gate check and one setSource
@@ -333,12 +359,19 @@ class PreviewEngine {
             loadedOpts = opts
         } else {
             applyOptions(opts)
-            if (appliedSource == sourceTag) return@withContext null
+            if (appliedSlots == tags) {
+                // Same faces in the same order: nothing to reload. The two things that
+                // are NOT part of that identity still get pushed, because both are one
+                // tap away and neither needs a model touched.
+                NativePipe.setActiveSource(activeSource.coerceIn(0, slots.lastIndex))
+                NativePipe.setFaceAssignEnabled(assignEnabled)
+                return@withContext null
+            }
         }
 
         // Dropped BEFORE the attempt, not after it: everything below can fail, and a stale
         // claim about whose face is loaded is worse than no claim.
-        appliedSource = null
+        appliedSlots = emptyList()
 
         gate?.invoke()?.let {
             // Refused, or the check could not run. Either way nothing further happens and
@@ -348,7 +381,7 @@ class PreviewEngine {
             return@withContext it
         }
 
-        if (!NativePipe.setSource(sourceBgr, sourceW, sourceH)) {
+        if (!NativePipe.setSource(slots[0].bgr, slots[0].width, slots[0].height)) {
             // ⚠ Released, not merely left unapplied, even though the models are fine and a
             // reload is what this change exists to avoid. `ffpipe::setSource` does not clear
             // the previous identity when it finds no face -- it returns false with the old
@@ -358,7 +391,19 @@ class PreviewEngine {
             invalidate()
             return@withContext "No face found in the source image"
         }
-        appliedSource = sourceTag
+        for ((i, slot) in slots.withIndex()) {
+            if (i == 0) continue
+            if (NativePipe.addSource(slot.bgr, slot.width, slot.height) < 0) {
+                // Same trade as the first slot: a half-registered list would leave the
+                // chips and the native slots pointing at different faces, which is worse
+                // than paying for the reload.
+                invalidate()
+                return@withContext "No face found in source image ${i + 1}"
+            }
+        }
+        appliedSlots = tags
+        NativePipe.setActiveSource(activeSource.coerceIn(0, slots.lastIndex))
+        NativePipe.setFaceAssignEnabled(assignEnabled)
         null
     }
 

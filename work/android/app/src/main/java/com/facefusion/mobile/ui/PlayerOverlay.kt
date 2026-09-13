@@ -31,9 +31,11 @@ import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -109,22 +111,16 @@ val IconRotate: ImageVector = ImageVector.Builder(
 /**
  * The target clip, swapped as it plays, on the whole screen.
  *
- * ⚠ DEV BUILDS ONLY. The switch is `BuildConfig.DEV_BUILD` at the ONE call site in
- * [SwapScreen] -- the flag `build.gradle.kts` already derives from whether the gate's own
- * source file is present. Putting the feature on the dev BRANCH instead would have made
- * `dev` two commits deep and turned every future re-derivation into a merge; behind the
- * flag, `git diff main dev` stays exactly the gate, which is the invariant this repo is
- * built around.
+ * ⚠ It shows SWAPPED frames that no run produced and no file holds, which makes it a
+ * processing path like any other. It shipped dev-only until `MainActivity.startPlayer`
+ * grew the check every other path has; that check, not this file, is what puts it on both
+ * lines. This file stays pure UI on purpose -- it draws, it does not decide.
  *
  * ⚠ The gate class's NAME is deliberately not spelled anywhere in this file. The dev
  * line is verified by grepping this tree for that name and expecting nothing back, and
  * the grep reads comments as well as code -- so a file that is identical on both lines
  * must never be the thing that fails it. The first draft of this very paragraph did,
  * twice, which is how the rule earned the warning.
- *
- * ⚠ It shows SWAPPED frames that no run produced and no file holds. On the gated line that
- * would be a processing path and would need the check that every other one has -- which is
- * the reason this is not simply switched on for everybody.
  *
  * The controls hide themselves after a few seconds of playback and come back on a tap,
  * which is the one convention every video player on the phone already shares. They do NOT
@@ -141,6 +137,8 @@ fun LivePlayerOverlay(
     dropped: Int,
     /** A finished sentence from the Activity, or null. Shown over the picture. */
     note: String?,
+    /** A seek is being resolved: the picture is the old one and the sound is off. */
+    seeking: Boolean = false,
     onPlayPause: () -> Unit,
     onSeek: (Int) -> Unit,
     onClose: () -> Unit,
@@ -164,8 +162,13 @@ fun LivePlayerOverlay(
         }
     }
 
-    LaunchedEffect(showControls, playing) {
-        if (showControls && playing) { delay(3500); showControls = false }
+    // ⚠ The countdown does not start until a frame exists. Opening the player pays for an
+    // init and a model load, and hiding the controls during that wait left a black screen
+    // with nothing on it at all -- including no way out but the system back gesture.
+    LaunchedEffect(showControls, playing, seeking, frame != null) {
+        if (showControls && playing && !seeking && frame != null) {
+            delay(4500); showControls = false
+        }
     }
 
     Dialog(
@@ -195,6 +198,10 @@ fun LivePlayerOverlay(
             }
         }
 
+        // Computed INSIDE the Dialog: a dialog carries its own window and its own insets,
+        // and reading them from the Activity's would describe a different window.
+        val edges = playerEdgeInsets()
+
         Box(
             Modifier
                 .fillMaxSize()
@@ -215,6 +222,16 @@ fun LivePlayerOverlay(
                 stringResource(R.string.player_starting),
                 color = Color.White.copy(alpha = 0.7f),
                 style = MaterialTheme.typography.bodyMedium,
+            )
+
+            // ⚠ Shown from the REAL state, never on a timer. Resolving a seek costs
+            // whatever the clip's keyframe spacing costs -- nothing at all on a short GOP,
+            // a few hundred ms on a long one -- and a spinner on a fixed delay would be
+            // lying in both directions at once.
+            if (seeking) CircularProgressIndicator(
+                color = Color.White,
+                strokeWidth = 3.dp,
+                modifier = Modifier.align(Alignment.Center).size(44.dp),
             )
 
             if (note != null) Text(
@@ -238,8 +255,9 @@ fun LivePlayerOverlay(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .safeDrawingPadding()
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                        .background(Color.Black.copy(alpha = 0.40f))
+                        .padding(edges.topBar())
+                        .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     // What this screen exists to show: whether the pipeline is keeping up.
@@ -277,9 +295,12 @@ fun LivePlayerOverlay(
                 Column(
                     Modifier
                         .fillMaxWidth()
-                        .background(Color.Black.copy(alpha = 0.45f))
-                        .safeDrawingPadding()
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                        // The SCRIM reaches the physical edge -- it is what makes white
+                        // controls legible over a bright frame -- and the padding is applied
+                        // INSIDE it, so the bar looks full-bleed while nothing touchable is.
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .padding(edges.bottomBar())
+                        .padding(vertical = 6.dp),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = onPlayPause) {
@@ -322,6 +343,52 @@ fun LivePlayerOverlay(
             }
         }
     }
+}
+
+/** Floors, so an edge that reports nothing still gets a margin a thumb can live with. */
+private val kEdgeMin: Dp = 16.dp
+private val kEdgeBottomMin: Dp = 32.dp
+
+/**
+ * How far the controls must stay from the physical edges of the screen.
+ *
+ * ⚠ `safeDrawingPadding()` ON ITS OWN IS ZERO HERE, and that is the whole bug it replaces.
+ * This player HIDES the system bars, and a hidden bar reports no inset -- so the transport
+ * was laid out flush against the bottom of the panel, underneath the gesture handle, where
+ * it is both hard to see against the video and impossible to drag without the system
+ * claiming the touch. It read as "the seek bar does not show" rather than as a margin bug,
+ * which is exactly how a zero inset fails.
+ *
+ * What survives hiding the bars is the display CUTOUT and the gesture regions, so both are
+ * unioned in; then every edge takes a floor as well, because the union is still zero on a
+ * phone with no cutout and three-button navigation. Landscape is the case that needs all
+ * three: the bar moves to a side, the cutout comes with it, and the player has a button
+ * that puts it there deliberately.
+ */
+@Composable
+private fun playerEdgeInsets(): PlayerEdges {
+    val dir = LocalLayoutDirection.current
+    val p = WindowInsets.safeDrawing
+        .union(WindowInsets.systemGestures)
+        .union(WindowInsets.displayCutout)
+        .asPaddingValues()
+    return PlayerEdges(
+        start = maxOf(p.calculateStartPadding(dir), kEdgeMin),
+        end = maxOf(p.calculateEndPadding(dir), kEdgeMin),
+        top = maxOf(p.calculateTopPadding(), kEdgeMin),
+        bottom = maxOf(p.calculateBottomPadding(), kEdgeBottomMin),
+    )
+}
+
+/**
+ * ⚠ Each bar pads only the edges it actually touches. A single PaddingValues applied to
+ * both would give the TOP row the bottom bar's 32 dp underneath it -- a gap where nothing
+ * is, pushing the readout down over the picture for a navigation bar at the other end of
+ * the screen.
+ */
+private data class PlayerEdges(val start: Dp, val end: Dp, val top: Dp, val bottom: Dp) {
+    fun topBar() = PaddingValues(start = start, end = end, top = top)
+    fun bottomBar() = PaddingValues(start = start, end = end, bottom = bottom)
 }
 
 private fun clock(ms: Int): String {

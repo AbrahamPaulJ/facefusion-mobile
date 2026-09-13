@@ -63,6 +63,13 @@ class LivePlayer {
         val error: String? = null,
         /** The clip ran out. The UI parks the transport at the end rather than looping. */
         val ended: Boolean = false,
+        /**
+         * A seek is being resolved: the picture on screen is the OLD one and the sound is
+         * deliberately silent. Worth saying out loud, because resolving one is not
+         * instantaneous and a still picture with no sound is otherwise indistinguishable
+         * from a hang.
+         */
+        val seeking: Boolean = false,
     )
 
     /** Clip length in ms, from the container. 0 until [start] has opened the file. */
@@ -81,6 +88,33 @@ class LivePlayer {
     private var audio: MediaPlayer? = null
     private var audioOk = false
 
+    /**
+     * A seek has been asked of the audio and has not landed yet.
+     *
+     * ⚠ `MediaPlayer.seekTo` is ASYNCHRONOUS. It returns at once and `currentPosition`
+     * goes on reporting the OLD position until the seek completes -- so for a few tens of
+     * milliseconds after every scrub the clock names a part of the film the pump is no
+     * longer decoding. Believing it there is what made seeking stutter and stall: seek
+     * FORWARD and every freshly decoded frame looks far too early, so the pump sleeps on
+     * each one up to MAX_WAIT_MS; seek BACKWARD and every one looks far too late, so the
+     * pump drops the lot and the picture simply stops.
+     */
+    @Volatile private var audioSeeking = false
+
+    /** The audio track ran out. It stops being a clock at that point; wall time takes over. */
+    @Volatile private var audioEnded = false
+
+    /** The VIDEO ran out. Play means REPLAY from here -- see [play]. */
+    @Volatile private var endReached = false
+
+    /**
+     * Start the sound the moment its seek lands, because playback is meant to be running.
+     *
+     * The sound is NOT started by whoever asked for the seek: it is started by the seek
+     * completing, at the frame the video actually settled on. See [settleAudioAt].
+     */
+    @Volatile private var startAudioWhenSeeked = false
+
     // The clock, when there is no audio track to be one. `baseMs` is the position at the
     // last resume and `baseWall` the wall time it happened at; between them they survive
     // pausing, which a plain start-time cannot.
@@ -93,10 +127,30 @@ class LivePlayer {
      * The audio's own position when there is audio: a sound card runs at its own rate and
      * anything that thinks it knows better produces drift you can hear. Wall time otherwise.
      */
-    private fun clockMs(): Int = when {
-        audioOk -> runCatching { audio?.currentPosition ?: baseMs }.getOrDefault(baseMs)
-        playing -> (baseMs + (SystemClock.elapsedRealtime() - baseWall)).toInt()
-        else -> baseMs
+    private fun clockMs(): Int {
+        audioClockMs()?.let { a ->
+            // Re-base the wall clock off the sound on every reading it is good for, so the
+            // moment it stops being good -- a seek in flight, a short audio track that has
+            // already run out -- the fallback carries on from where the sound actually was
+            // rather than from whenever it was last started.
+            baseMs = a
+            baseWall = SystemClock.elapsedRealtime()
+            return a
+        }
+        return if (playing) (baseMs + (SystemClock.elapsedRealtime() - baseWall)).toInt()
+               else baseMs
+    }
+
+    /**
+     * The audio's position, or null when the audio is not currently a clock.
+     *
+     * The two cases it is not: a seek that has not landed (the position is still the one
+     * before the scrub), and a track that has finished (the position stops advancing while
+     * the video has minutes left). Both used to read as a confident wrong answer.
+     */
+    private fun audioClockMs(): Int? {
+        if (!audioOk || audioSeeking || audioEnded) return null
+        return runCatching { audio?.currentPosition }.getOrNull()
     }
 
     /** Where the transport should say it is, clamped to the clip. */
@@ -115,6 +169,11 @@ class LivePlayer {
         stop()
         stopping = false
         seekTargetMs = -1
+        appliedSeek = -1
+        audioSeeking = false
+        audioEnded = false
+        endReached = false
+        startAudioWhenSeeked = false
         baseMs = 0
         baseWall = SystemClock.elapsedRealtime()
         durationMs = durationOf(path)
@@ -125,16 +184,27 @@ class LivePlayer {
 
     fun play() {
         if (!active) return
+        // ⚠ PLAY AT THE END MEANS REPLAY. Nothing else can be meant by it, and without this
+        // the pump stays parked in the end-of-stream branch -- which only ever woke for a
+        // SEEK -- while the audio starts again underneath it. Sound, frozen picture, and a
+        // transport that says it is playing.
+        if (endReached) seekTo(0)
         baseMs = clockMs()
         baseWall = SystemClock.elapsedRealtime()
         playing = true
-        if (audioOk) runCatching { audio?.start() }
+        if (!audioOk) return
+        // A seek still resolving owns the sound: starting it here would play the OLD
+        // position for as long as the seek takes to land. The completion callback starts
+        // it instead, at the frame the video settled on.
+        if (audioSeeking) startAudioWhenSeeked = true
+        else runCatching { audio?.start() }
     }
 
     fun pause() {
         if (!active) return
         baseMs = clockMs()
         playing = false
+        startAudioWhenSeeked = false
         if (audioOk) runCatching { audio?.pause() }
     }
 
@@ -152,14 +222,57 @@ class LivePlayer {
         val t = ms.coerceIn(0, durationMs.coerceAtLeast(0))
         baseMs = t
         baseWall = SystemClock.elapsedRealtime()
-        if (audioOk) runCatching { audio?.seekTo(t) }
+        endReached = false
+        if (audioOk) {
+            // ⚠ THE SOUND STOPS FIRST, and it does not move yet. Resolving a seek is not
+            // instant: `SEEK_TO_PREVIOUS_SYNC` lands on the keyframe BEFORE the target,
+            // which can be seconds earlier, and every frame from there to the target has
+            // to be decoded to get one that can be shown. Letting the audio play through
+            // that is what made an abrupt seek come back out of sync -- the sound ran on
+            // at 1x for the few hundred ms the video spent catching up, then the video
+            // arrived that far behind and dropped frames until it caught back up.
+            //
+            // So the sound waits for the picture, and [settleAudioAt] starts it again at
+            // the frame that is actually on screen. A scrub is briefly silent, which is
+            // what a scrub sounds like everywhere else.
+            audioSeeking = true
+            audioEnded = false
+            startAudioWhenSeeked = false
+            runCatching { audio?.pause() }
+        }
         seekTargetMs = t
+    }
+
+    /**
+     * The video has landed on [shownPtsMs]. Put the sound there and let it go.
+     *
+     * ⚠ The sound is moved to the frame that is ON SCREEN, not to the number the finger
+     * named. The two differ: the decoder resumes at a keyframe and settles on the first
+     * frame at or after the request, which can be a little past it. Seeking the audio to
+     * the request instead would leave a fixed offset behind every scrub.
+     *
+     * The wall clock is re-based here as well, so the stretch between this and the sound
+     * actually restarting is measured from the right place.
+     */
+    private fun settleAudioAt(shownPtsMs: Int) {
+        baseMs = shownPtsMs
+        baseWall = SystemClock.elapsedRealtime()
+        if (!audioOk) { audioSeeking = false; return }
+        startAudioWhenSeeked = playing
+        runCatching { audio?.seekTo(shownPtsMs) }.onFailure {
+            audioSeeking = false
+            startAudioWhenSeeked = false
+        }
     }
 
     /** Stop the pump and free the audio. Safe to call repeatedly, and from any thread. */
     fun stop() {
         stopping = true
         playing = false
+        audioSeeking = false
+        audioEnded = false
+        endReached = false
+        startAudioWhenSeeked = false
         thread?.let { t -> runCatching { t.join(1500) } }
         thread = null
         runCatching { audio?.stop() }
@@ -237,6 +350,7 @@ class LivePlayer {
             var dropped = 0
             var faces = 0
             var fps = 0.0
+            var swapCostMs = 0.0
             var fpsN = 0
             var fpsT0 = SystemClock.elapsedRealtime()
 
@@ -261,11 +375,28 @@ class LivePlayer {
                 }
 
                 if (sawOutputEOS) {
+                    // ⚠ A SEEK THAT RAN OFF THE END IS FINISHED, not still pending. Leaving
+                    // it pending made this branch and the seek branch at the top of the loop
+                    // hand the iteration back and forth for ever without decoding anything:
+                    // the seek branch skipped itself (already applied), the park below
+                    // refused to park (a seek was outstanding), and the loop spun flat out
+                    // firing `ended` at the UI. Scrubbing near the end of a clip is exactly
+                    // how you land on it, which is what "does not respond" was.
+                    if (seekTargetMs >= 0 && appliedSeek == seekTargetMs) {
+                        seekTargetMs = -1
+                        appliedSeek = -1
+                    }
                     playing = false
+                    endReached = true
+                    // A seek that ran off the end never reaches settleAudioAt, so the
+                    // sound would stay paused and permanently "still seeking".
+                    audioSeeking = false
+                    startAudioWhenSeeked = false
                     if (audioOk) runCatching { audio?.pause() }
                     onShot(Shot(null, durationMs, fps, faces, dropped, ended = true))
                     // Park at the end rather than tearing down: the transport is still
-                    // live, and a seek backwards has to be able to start it again.
+                    // live, and a seek backwards has to be able to start it again. [play]
+                    // turns a resume from here into a seek to 0, which is what wakes this.
                     while (!stopping && seekTargetMs < 0) Thread.sleep(20)
                     continue
                 }
@@ -292,6 +423,7 @@ class LivePlayer {
                 val ptsMs = (info.presentationTimeUs / 1000L).toInt()
                 var render = info.size > 0
                 val target = seekTargetMs
+                var fastForwarding = false
 
                 if (render && target >= 0) {
                     // Fast-forwarding from the keyframe before the seek target. These
@@ -299,26 +431,40 @@ class LivePlayer {
                     // mid-GOP -- but they are never swapped and never shown.
                     if (ptsMs + SEEK_SLACK_MS < target) {
                         render = false
+                        fastForwarding = true
                     } else {
                         // The one the user asked for. Shown whatever the clock says,
                         // because while PAUSED there is no clock to be late against and a
                         // scrub that does not update the picture is not a scrub.
                         seekTargetMs = -1
                         appliedSeek = -1
+                        // ⚠ The sound is released HERE, at the frame actually landed on,
+                        // and not a moment earlier. Everything above this line happened in
+                        // silence on purpose.
+                        settleAudioAt(ptsMs)
                     }
                 } else if (render && playing) {
                     val clock = clockMs()
+                    // ⚠ LEAD TIME: a frame is due when the swap will FINISH on time, not
+                    // when it would start. Swapping costs 30-60 ms, so scheduling on the
+                    // raw timestamp put every picture on screen a whole swap late, which
+                    // then made the next one late enough to drop -- three shown, one
+                    // dropped, an uneven cadence that reads as stutter even though the
+                    // average rate is fine. Leading by what a frame actually costs here
+                    // lands them on time and makes the drops rare instead of rhythmic.
+                    val lead = swapCostMs.toInt().coerceIn(0, MAX_LEAD_MS)
+                    val due = ptsMs - lead
                     if (ptsMs < clock - LATE_MS) {
                         // ⚠ THE DROP, and it happens here rather than after the swap. See
                         // the class doc: this is the entire frame-rate adaptation.
                         render = false
                         dropped++
-                    } else if (ptsMs > clock + EARLY_MS) {
+                    } else if (due > clock + EARLY_MS) {
                         // Ahead of the sound. Wait it out in small steps so a pause, a
                         // seek or a stop is still answered within a frame.
                         var waited = 0
                         while (!stopping && playing && seekTargetMs < 0 &&
-                               ptsMs > clockMs() + EARLY_MS && waited < MAX_WAIT_MS) {
+                               due > clockMs() + EARLY_MS && waited < MAX_WAIT_MS) {
                             Thread.sleep(4)
                             waited += 4
                         }
@@ -326,6 +472,7 @@ class LivePlayer {
                 }
 
                 if (render) {
+                    val frameT0 = SystemClock.elapsedRealtime()
                     val img = decoder.getOutputImage(outIx)
                     if (img == null) {
                         render = false
@@ -355,12 +502,26 @@ class LivePlayer {
                             }
                             onShot(Shot(bmp, ptsMs, fps, faces, dropped))
                         }
+                        // What one frame really costs, end to end, smoothed. Measured
+                        // rather than assumed: it moves with the swapper, pixel boost, the
+                        // enhancer, lip sync and the clip's own resolution, and a constant
+                        // guess would be wrong for every combination but one.
+                        val cost = (SystemClock.elapsedRealtime() - frameT0).toDouble()
+                        swapCostMs = if (swapCostMs <= 0.0) cost
+                                     else swapCostMs * 0.8 + cost * 0.2
                     }
                 }
                 if (!render) {
                     // Position only. The bar has to keep moving through a run of drops or
                     // it reads as a freeze, which is the opposite of what is happening.
-                    onShot(Shot(null, ptsMs, fps, faces, dropped))
+                    //
+                    // ⚠ While fast-forwarding it reports the TARGET, not this frame. These
+                    // timestamps run from the keyframe BEFORE the request up to it, so
+                    // reporting them honestly would drag the thumb visibly backwards and
+                    // then forwards again on every scrub -- describing the decoder, not the
+                    // film. `seeking` is what the UI shows instead.
+                    onShot(Shot(null, if (fastForwarding) target else ptsMs,
+                                fps, faces, dropped, seeking = fastForwarding))
                 }
 
                 if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) sawOutputEOS = true
@@ -407,6 +568,16 @@ class LivePlayer {
         audio = MediaPlayer().apply {
             setDataSource(path)
             setOnErrorListener { _, _, _ -> audioOk = false; true }
+            // The two moments the position stops being the truth. Both fall back to wall
+            // time, which clockMs() keeps re-based off the sound for exactly this.
+            setOnSeekCompleteListener {
+                audioSeeking = false
+                // THE one place the sound restarts after a scrub: the seek having landed
+                // is the only moment at which starting it is in time with the picture.
+                if (startAudioWhenSeeked && playing) runCatching { audio?.start() }
+                startAudioWhenSeeked = false
+            }
+            setOnCompletionListener { audioEnded = true }
             prepare()
         }
         true
@@ -439,6 +610,14 @@ class LivePlayer {
         const val EARLY_MS = 8
         /** A single wait is capped so a stalled clock cannot park the pump for ever. */
         const val MAX_WAIT_MS = 500
+        /**
+         * The most a frame may be scheduled ahead of its timestamp.
+         *
+         * A cap, not a target: the lead is the MEASURED cost of a frame, and this only
+         * stops a pathological one (a first frame that paid for a lazy graph load, say)
+         * from pulling the whole schedule forward behind it.
+         */
+        const val MAX_LEAD_MS = 70
         /** Timestamp rounding, so a seek target is not missed by a fraction of a frame. */
         const val SEEK_SLACK_MS = 2
         /**

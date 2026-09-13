@@ -410,4 +410,22 @@
     <string name="swap_size_hint_source">Клип сохраняет своё разрешение.</string>
     <string name="swap_size_hint_source_dims">Клип сохраняет свой размер, %1$d x %2$d.</string>
     <string name="swap_size_source_at">Как есть (%1$dp)</string>
+    <string name="assign_keep_original">Своё лицо</string>
+    <string name="live_mirror">Зеркалить превью</string>
+    <string name="live_mirror_on">Отражено, как фронтальная камера</string>
+    <string name="live_mirror_off">Как видит камера</string>
+    <string name="live_assign_kept">Этот человек сохраняет своё лицо</string>
+    <string name="swap_assign_on">Ничего не меняется, пока вы не коснётесь человека</string>
+    <string name="swap_assign_off">Каждое лицо берёт выбранный источник</string>
+    <string name="swap_assign_hint">Выберите источник (или «Своё лицо»), затем коснитесь человека ниже. Те, кого вы не коснулись, возьмут источник, выбранный при включении режима.</string>
+    <string name="swap_assign_no_people">В показанном кадре лиц не найдено. Передвиньте ползунок обрезки к кадру с нужными людьми.</string>
+    <string name="swap_assign_person">Человек %1$d</string>
+    <string name="swap_assign_badge">И%1$d</string>
+    <string name="swap_assign_badge_keep">СВОЁ</string>
+    <string name="swap_assign_set">Человек %1$d берёт источник %2$d</string>
+    <string name="swap_assign_kept">Человек %1$d сохраняет своё лицо</string>
+    <string name="swap_assign_cleared">Назначения сброшены</string>
+    <string name="swap_assign_failed">Лицо для человека %1$d не найдено</string>
+    <string name="swap_assign_not_ready">Ещё загружается — попробуйте через мгновение</string>
+    <string name="player_batch_hint">Живой свап воспроизводит один клип. Очистите очередь, чтобы им пользоваться.</string>
 </resources>

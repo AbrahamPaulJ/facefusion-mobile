@@ -429,4 +429,22 @@
     <string name="swap_size_hint_source">片段保持原有解析度。</string>
     <string name="swap_size_hint_source_dims">片段保持原有尺寸 %1$d x %2$d。</string>
     <string name="swap_size_source_at">不變 (%1$dp)</string>
+    <string name="assign_keep_original">保留本人</string>
+    <string name="live_mirror">鏡像預覽</string>
+    <string name="live_mirror_on">已鏡像，如自拍鏡頭</string>
+    <string name="live_mirror_off">依鏡頭所見</string>
+    <string name="live_assign_kept">此人保留本人面孔</string>
+    <string name="swap_assign_on">點選某人之前不會有任何變化</string>
+    <string name="swap_assign_off">每張臉都使用所選來源</string>
+    <string name="swap_assign_hint">先選一個來源（或「保留本人」），再點下方的某個人。未點選的人使用開啟此模式時所選的來源。</string>
+    <string name="swap_assign_no_people">目前影格未偵測到人臉。請拖動裁剪滑桿到有目標人物的影格。</string>
+    <string name="swap_assign_person">人物 %1$d</string>
+    <string name="swap_assign_badge">源%1$d</string>
+    <string name="swap_assign_badge_keep">保留</string>
+    <string name="swap_assign_set">人物 %1$d 使用來源 %2$d</string>
+    <string name="swap_assign_kept">人物 %1$d 保留本人面孔</string>
+    <string name="swap_assign_cleared">已清除指派</string>
+    <string name="swap_assign_failed">找不到人物 %1$d 的人臉</string>
+    <string name="swap_assign_not_ready">仍在載入 — 請稍後再試</string>
+    <string name="player_batch_hint">即時換臉播放只處理單一片段。清空佇列後可用。</string>
 </resources>

@@ -54,10 +54,14 @@ std::vector<float> g_refEmbedding;
  * fully-written request, and it clears it before anything else, so a request is
  * consumed exactly once.
  */
-struct AssignRequest { volatile bool pending = false; float x = 0; float y = 0; int source = -1; };
+struct AssignRequest { volatile bool pending = false; float x = 0; float y = 0;
+                      int source = -1; bool keepOriginal = false; };
 // `consumed` is set on EVERY consumed request (matched or not), so the caller can tell
 // "still in flight" from "consumed and missed" -- the distinction a wall-clock timeout
 // gets wrong when a frame is slow. `have` means it matched.
+// `source` is -1 for "this person keeps their own face" -- the one value the overlay
+// has to read as a choice rather than as an index, and it is why the confirmation label
+// is picked on the SIGN of it rather than by looking the slot up.
 struct AssignResult { volatile bool consumed = false; volatile bool have = false;
                       float box[4]{}; int source = -1; };
 static AssignRequest g_assignReq;
@@ -227,9 +231,72 @@ Java_com_facefusion_mobile_NativePipe_setTrackPeriod(JNIEnv*, jclass, jint frame
 
 JNIEXPORT void JNICALL
 Java_com_facefusion_mobile_NativePipe_requestFaceAssignment(JNIEnv*, jclass,
-                                                            jfloat x, jfloat y, jint source) {
+                                                            jfloat x, jfloat y, jint source,
+                                                            jboolean keepOriginal) {
   g_assignReq.x = (float)x; g_assignReq.y = (float)y; g_assignReq.source = (int)source;
+  g_assignReq.keepOriginal = keepOriginal == JNI_TRUE;
   g_assignReq.pending = true;    // LAST: the consumer reads a fully-written request only
+}
+
+// One SELECTED live person, re-brushed without another tap -- the counterpart of
+// setActiveSource for the choice that is not a slot.
+JNIEXPORT void JNICALL
+Java_com_facefusion_mobile_NativePipe_setSelectedFaceKeepOriginal(JNIEnv*, jclass,
+                                                                  jboolean keep) {
+  if (g_pipe) g_pipe->setSelectedFaceKeepOriginal(keep == JNI_TRUE);
+}
+
+// ---- Swap-screen per-person assignment -----------------------------------
+//
+// The still-frame counterpart of the live tap. No tracker is involved: a preview frame
+// and an output frame are not a sequence, so what is stored is the person's IDENTITY and
+// the returned embedding is that identity handed back to Kotlin -- which needs it because
+// pressing Swap builds a fresh pipeline and everything below would otherwise be gone.
+//
+// Returns 512 floats on success, an EMPTY array on any failure (lastError says which).
+JNIEXPORT jfloatArray JNICALL
+Java_com_facefusion_mobile_NativePipe_assignFaceAt(JNIEnv* env, jclass,
+                                                   jbyteArray jBgr, jint w, jint h,
+                                                   jfloat x, jfloat y, jint source,
+                                                   jboolean keepOriginal) {
+  if (!g_pipe) { g_err = "pipeline not initialised"; return env->NewFloatArray(0); }
+  if (w <= 0 || h <= 0) { g_err = "assignFaceAt: bad frame size"; return env->NewFloatArray(0); }
+  ffcv::Image img(w, h, 3);
+  if (!jBgr || (size_t)env->GetArrayLength(jBgr) != img.data.size()) {
+    g_err = "assignFaceAt: frame is not w*h*3 bytes";
+    return env->NewFloatArray(0);
+  }
+  env->GetByteArrayRegion(jBgr, 0, (jsize)img.data.size(), (jbyte*)img.data.data());
+  float embedding[512] = {0};
+  if (!g_pipe->setFaceSourceAt(img, x, y, (int)source, keepOriginal == JNI_TRUE,
+                               nullptr, embedding)) {
+    g_err = g_pipe->error();
+    return env->NewFloatArray(0);
+  }
+  jfloatArray out = env->NewFloatArray(512);
+  if (out) env->SetFloatArrayRegion(out, 0, 512, embedding);
+  return out;
+}
+
+// Put one remembered identity back on a pipeline that was just built.
+JNIEXPORT jboolean JNICALL
+Java_com_facefusion_mobile_NativePipe_restoreFaceAssignment(JNIEnv* env, jclass,
+                                                            jfloatArray jEmbedding,
+                                                            jint source,
+                                                            jboolean keepOriginal) {
+  if (!g_pipe) { g_err = "pipeline not initialised"; return JNI_FALSE; }
+  if (!jEmbedding || env->GetArrayLength(jEmbedding) != 512) {
+    g_err = "restoreFaceAssignment: embedding is not 512 floats";
+    return JNI_FALSE;
+  }
+  float embedding[512] = {0};
+  env->GetFloatArrayRegion(jEmbedding, 0, 512, embedding);
+  if (!g_pipe->restoreFaceAssignment(embedding, (int)source,
+                                     keepOriginal == JNI_TRUE)) {
+    g_err = g_pipe->error();
+    return JNI_FALSE;
+  }
+  return JNI_TRUE;
 }
 
 // The result of the last CONSUMED request, exactly once: FIVE floats (x0, y0, x1, y1,
@@ -1066,6 +1133,11 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
   // geometry only this function knows. consumed is set whether or not the tap hit a
   // face: a miss must be reported, not left hanging.
   const bool tapPending = g_assignReq.pending;
+  // Copied out BEFORE `pending` is cleared: the UI thread may write the next request the
+  // instant it is, and the tap being resolved has to stay the one that was read.
+  const int tapSource = tapPending ? g_assignReq.source : -1;
+  const float tapX = g_assignReq.x, tapY = g_assignReq.y;
+  const bool tapKeepOriginal = tapPending && g_assignReq.keepOriginal;
   if (tapPending) {
     g_assignReq.pending = false;
     g_assignResult.consumed = true;
@@ -1080,9 +1152,9 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
   float tapBox[4];
   const bool tapped = g_pipe->updateLiveTracking(
       faces,
-      tapPending ? g_assignReq.x * (float)w / (float)dw : 0.f,
-      tapPending ? g_assignReq.y * (float)h / (float)dh : 0.f,
-      tapPending ? (int)g_assignReq.source : -1,
+      tapPending ? tapX * (float)w / (float)dw : 0.f,
+      tapPending ? tapY * (float)h / (float)dh : 0.f,
+      tapSource, tapKeepOriginal,
       tapBox);
   if (tapPending && tapped) {
     g_assignResult.have = true;
@@ -1092,7 +1164,7 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
     g_assignResult.box[1] = tapBox[1] * (float)dh / (float)h;
     g_assignResult.box[2] = tapBox[2] * (float)dw / (float)w;
     g_assignResult.box[3] = tapBox[3] * (float)dh / (float)h;
-    g_assignResult.source = (int)g_assignReq.source;
+    g_assignResult.source = tapKeepOriginal ? -1 : tapSource;
   }
 
   if (!faces.empty()) {

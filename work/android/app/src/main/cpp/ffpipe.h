@@ -224,8 +224,28 @@ class Pipeline {
   int addSource(const ffcv::Image& sourceImage);
   void clearSourceSlots();
   void setActiveSource(int index);
+  /**
+   * Assign the face at (x, y) in [frame] to [sourceIndex] -- or, with [keepOriginal],
+   * to nothing at all, which means the swapper and the enhancer both leave that person
+   * exactly as they were filmed.
+   *
+   * This is the SWAP screen's assignment: it works off a still frame the user is looking
+   * at, so it stores an IDENTITY rather than a tracked box. [outEmbedding], when given,
+   * receives that identity -- the caller needs it because pressing Swap inits a fresh
+   * pipeline, and an assignment that lived only in here would not survive the run it was
+   * made for. Hand it back through [restoreFaceAssignment].
+   *
+   * ⚠ [sourceIndex] is ignored when [keepOriginal] is set, and only then may it be
+   * negative. The two are never packed into one integer: a magic negative index would
+   * have to be un-faked at every reader, and the readers that forgot would index the
+   * slot vector with it.
+   */
   bool setFaceSourceAt(const ffcv::Image& frame, float x, float y, int sourceIndex,
-                       bool disabled, float* outBox);
+                       bool keepOriginal, float* outBox, float* outEmbedding = nullptr);
+
+  /** Put a remembered identity's assignment back on a pipeline that was just built. */
+  bool restoreFaceAssignment(const float* embedding, int sourceIndex, bool keepOriginal);
+
   void clearFaceSourceAssignments();
 
   /**
@@ -241,6 +261,15 @@ class Pipeline {
    * the switch the user asked for: off means nothing about a session changes.
    */
   void setFaceAssignEnabled(bool enabled);
+
+  /**
+   * Re-apply a brush to the person currently SELECTED in Live, if there is one.
+   *
+   * The counterpart of setActiveSource's own re-apply: both brushes -- a source slot and
+   * "keep the original face" -- have to reach an already-selected person immediately, or
+   * one of them is the odd one out that needs the face tapped a second time.
+   */
+  void setSelectedFaceKeepOriginal(bool keep);
 
   /**
    * Record that [f] -- a face of a LIVE frame, embedding included -- belongs to
@@ -259,14 +288,20 @@ class Pipeline {
    * applies it, and fills the per-face source table swapAll() reads. A face with no
    * pin keeps following the active slot.
    *
-   * [tapX]/[tapY] are in RAW frame coordinates; pass tapSource = -1 when there is no
-   * tap. When a tap is given and hits a face, returns true and fills [outTapBox] with
-   * that face's raw box so the caller can draw the confirmation. A tap that misses a
-   * face still runs the tracking -- the per-face table must stay valid -- and returns
-   * false.
+   * [tapX]/[tapY] are in RAW frame coordinates; pass tapSource = -1 and
+   * tapKeepOriginal = false when there is no tap. When a tap is given and hits a face,
+   * returns true and fills [outTapBox] with that face's raw box so the caller can draw
+   * the confirmation. A tap that misses a face still runs the tracking -- the per-face
+   * table must stay valid -- and returns false.
+   *
+   * ⚠ [tapKeepOriginal] is a SEPARATE argument, not a reserved value of [tapSource].
+   * Every "is there a tap" test in the implementation reads tapSource >= 0; smuggling a
+   * second brush in as a magic negative would have quietly turned all of them into "is
+   * there a tap that is not this one".
    */
   bool updateLiveTracking(const std::vector<Face>& faces,
-                          float tapX, float tapY, int tapSource, float* outTapBox);
+                          float tapX, float tapY, int tapSource, bool tapKeepOriginal,
+                          float* outTapBox);
 
   /**
    * The SELECTED person (assign mode): the last one tapped, who follows the source

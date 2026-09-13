@@ -262,12 +262,41 @@ object NativePipe {
     @JvmStatic external fun setFaceAssignEnabled(enabled: Boolean)
 
     /**
+     * Re-brush the person currently SELECTED in Live, with no second tap.
+     *
+     * The counterpart of [setActiveSource]'s own re-apply. Both brushes -- a source slot
+     * and "keep the original face" -- have to reach an already-selected person straight
+     * away, or one of them is the odd one out that needs the face tapped twice.
+     */
+    @JvmStatic external fun setSelectedFaceKeepOriginal(keep: Boolean)
+
+    /**
+     * Assign the face at (x, y) of [bgr] to [source] -- or, with [keepOriginal], to
+     * nothing, which leaves that person exactly as they were filmed.
+     *
+     * The SWAP screen's assignment. It has no tracker to lean on (a preview frame and an
+     * output frame are not a sequence), so what comes back is the person's IDENTITY:
+     * 512 floats, or an EMPTY array when the tap hit no face or the pipeline is cold.
+     *
+     * ⚠ Keep what it returns. Pressing Swap builds a fresh pipeline and every assignment
+     * on the old one goes with it; [restoreFaceAssignment] is how they come back.
+     */
+    @JvmStatic external fun assignFaceAt(bgr: ByteArray, w: Int, h: Int,
+                                         x: Float, y: Float, source: Int,
+                                         keepOriginal: Boolean): FloatArray
+
+    /** Put one identity from [assignFaceAt] back onto a pipeline that was just built. */
+    @JvmStatic external fun restoreFaceAssignment(embedding: FloatArray, source: Int,
+                                                  keepOriginal: Boolean): Boolean
+
+    /**
      * Queue a tap (DISPLAY bitmap coordinates -- the frame [LiveScreen] draws) for the
      * next [liveFrame] to resolve against the PRE-SWAP detections: the embedding stored
      * is the real person's, not the swapped frame on the display. The source chip
      * selected at tap time is the one assigned.
      */
-    @JvmStatic external fun requestFaceAssignment(x: Float, y: Float, source: Int)
+    @JvmStatic external fun requestFaceAssignment(x: Float, y: Float, source: Int,
+                                                  keepOriginal: Boolean)
 
     /**
      * The result of the last consumed request: FIVE floats -- x0, y0, x1, y1 and the
