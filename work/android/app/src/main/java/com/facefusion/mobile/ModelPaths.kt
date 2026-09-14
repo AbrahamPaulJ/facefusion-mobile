@@ -73,6 +73,29 @@ object ModelPaths {
         apply(ctx)
     }
 
+    // ------------------------------------------------------------------ ncnn GPU
+
+    private const val KEY_NCNN_GPU = "ncnn_gpu"
+
+    /**
+     * Whether the ncnn backend may use the GPU: "auto" (the default), "gpu" or "cpu".
+     *
+     * Persisted for the same reason the runtime pin is: a user who has just watched the GPU
+     * path detect faces in a wallpaper needs the answer to survive the restart that changing
+     * it wants. "auto" lets the backend decide by checking itself -- see
+     * [NativePipe.setNcnnGpu].
+     */
+    fun ncnnGpu(ctx: Context): String =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_NCNN_GPU, "auto")
+            ?: "auto"
+
+    /** Pin the ncnn unit. ⚠ The caller must have released the pipeline first. */
+    fun setNcnnGpu(ctx: Context, value: String) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(KEY_NCNN_GPU, value).apply()
+        apply(ctx)
+    }
+
     // -------------------------------------------------------------- rejected tiers
 
     private const val KEY_REJECTED = "rejected_tiers"
@@ -133,6 +156,10 @@ object ModelPaths {
         chainCache = null
         NativePipe.ensureLoaded()
         NativePipe.setForcedBackend(forcedBackend(ctx))
+        // Before any model is opened, so the first open already knows whether it is allowed
+        // to look at the GPU at all. Setting it afterwards would leave the models that the
+        // pipeline opened first on the unit this is meant to move them off.
+        NativePipe.setNcnnGpu(ncnnGpu(ctx))
         // Native has its own copy of the chain and its own presence check, so filtering
         // the Kotlin chain alone would only redirect the DOWNLOADER -- init would still
         // load the rejected tier first, fail its probe, and fall back, paying a full

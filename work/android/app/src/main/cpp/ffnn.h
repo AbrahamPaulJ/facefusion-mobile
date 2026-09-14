@@ -35,6 +35,20 @@
 //
 // So a single global "use the GPU" switch would be wrong for two of six graphs. Placement
 // belongs to the model, not to the session.
+//
+// ---------------------------------------------------------------------------
+// And whether the GPU is RIGHT is a per-DEVICE question, not a per-model one
+// ---------------------------------------------------------------------------
+// Everything above was measured on one Adreno. ncnn's Vulkan is a different implementation
+// on every GPU vendor, and a graph that is correct on an Adreno can be silently wrong on
+// another part -- reported from the field as "it detects a lot and none of them is a face",
+// which is exactly what yoloface's head looks like when its output is noise. The swap then
+// runs on those boxes and produces a video of nothing.
+//
+// So `Default` no longer means "the GPU" unconditionally. It means "the GPU if this GPU
+// agrees with this device's own CPU", checked once, on the first open that asks for it --
+// see `verifyGpu` in ffnn_ncnn.cpp. `Placement::Cpu` is untouched by any of this: the gate
+// and the enhancer are correctness pins and nothing may move them.
 #pragma once
 #include <cstdint>
 #include <string>
@@ -56,6 +70,21 @@ enum class Placement {
   Cpu,      // pin to CPU -- the gate and the enhancer, for the reasons above
   Gpu,      // prefer the GPU
 };
+
+// What the ncnn backend is allowed to do with the GPU.
+//
+// Auto is the shipping default and runs the agreement check above. The other two exist
+// because the check is a heuristic on hardware this project does not own: Force is for
+// measurement, and Off is the user's own answer when a device passes the check and the
+// output is still wrong. Neither can promote a `Placement::Cpu` model onto the GPU.
+enum class GpuPolicy {
+  Auto,
+  Force,
+  Off,
+};
+
+// Set before `init`, or between pipelines. Has no effect on a backend that is not ncnn.
+void setGpuPolicy(GpuPolicy p);
 
 struct InitSpec {
   std::string libDir;     // QNN: where libQnnHtp.so lives.  ncnn: unused.

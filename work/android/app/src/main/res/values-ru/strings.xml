@@ -428,4 +428,12 @@
     <string name="swap_assign_failed">Лицо для человека %1$d не найдено</string>
     <string name="swap_assign_not_ready">Ещё загружается — попробуйте через мгновение</string>
     <string name="player_batch_hint">Живой свап воспроизводит один клип. Очистите очередь, чтобы им пользоваться.</string>
+
+    <!-- ==================================== settings: which unit ncnn runs on -->
+    <string name="set_unit">Графический процессор</string>
+    <string name="set_unit_note">На некоторых телефонах эти модели считаются на GPU неверно: приложение находит лица в стенах и мебели и заменяет их. «Автоматически» один раз сверяет GPU этого телефона с его же CPU и переходит на CPU, если они расходятся. Выберите CPU вручную, если результат всё равно неправильный — это медленнее, но работает всегда.</string>
+    <string name="set_unit_auto">Автоматически</string>
+    <string name="set_unit_gpu">GPU</string>
+    <string name="set_unit_cpu">CPU</string>
+
 </resources>

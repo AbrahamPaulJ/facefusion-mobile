@@ -540,4 +540,12 @@ Turning it off runs your own Swap settings instead. This is experimental: the en
     <string name="swap_assign_failed">No face found for person %1$d</string>
     <string name="swap_assign_not_ready">Still loading — try again in a moment</string>
     <string name="player_batch_hint">Play with live swap runs one clip. Clear the queue to use it.</string>
+
+    <!-- ==================================== settings: which unit ncnn runs on -->
+    <string name="set_unit">Graphics chip</string>
+    <string name="set_unit_note">Some phones compute these models wrong on the GPU: the app then finds faces in walls and furniture and swaps them. Automatic checks the GPU on this phone against its own CPU once, and drops to the CPU if the two disagree. Pick CPU by hand if it still looks wrong: it is slower, and it always works.</string>
+    <string name="set_unit_auto">Automatic</string>
+    <string name="set_unit_gpu">GPU</string>
+    <string name="set_unit_cpu">CPU</string>
+
 </resources>

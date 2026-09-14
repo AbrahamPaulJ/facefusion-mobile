@@ -750,14 +750,43 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame, bool boxesOnly,
     float sc = d[4 * A + i];
     if (sc <= cfg.detectorScore) continue;
     float cx = d[0 * A + i], cy = d[1 * A + i], w = d[2 * A + i], h = d[3 * A + i];
+    // ---- A DETECTOR THAT RETURNED NOISE MUST NOT REACH THE GEOMETRY ----
+    //
+    // Everything downstream -- the 5->68 lift, the affine crop, the paste back -- takes
+    // these numbers as pixel coordinates and turns them into offsets. A NaN reaching an
+    // `(int)` cast is undefined and in practice becomes a very large or negative index; a
+    // box a million pixels wide produces an ROI nothing clamps to anything sane. That is a
+    // heap write out of a face detection, and it will not present as "the detector was
+    // wrong": it presents as an unrelated crash later in the frame.
+    //
+    // Reported from the field on a non-Qualcomm phone whose Vulkan computes this graph
+    // wrongly -- "it detects a lot and none of them is a face" -- followed by a swap that
+    // died inside MediaCodec. The GPU is now checked before it is used (ffnn_ncnn.cpp,
+    // verifyGpu), but that check is a heuristic and this is the floor underneath it: NO
+    // backend gets to hand this loop a number that is not a coordinate.
+    //
+    // Deliberately generous. The detector works in its own SxS letterbox, so a face's
+    // centre is inside it and its box is no bigger than it -- a face running off the edge
+    // of the frame still satisfies both. This throws away nonsense, not faces.
+    if (!std::isfinite(sc) || !std::isfinite(cx) || !std::isfinite(cy) ||
+        !std::isfinite(w) || !std::isfinite(h)) continue;
+    if (!(w > 1.0f && h > 1.0f && w <= (float)S && h <= (float)S)) continue;
+    if (cx < 0.0f || cy < 0.0f || cx > (float)S || cy > (float)S) continue;
+    std::array<float, 10> l{};
+    bool lmOk = true;
+    for (int k = 0; k < 5; ++k) {
+      float lx = d[(5 + 3 * k + 0) * A + i], ly = d[(5 + 3 * k + 1) * A + i];
+      if (!std::isfinite(lx) || !std::isfinite(ly)) { lmOk = false; break; }
+      l[2 * k] = (float)(lx * ratioW);
+      l[2 * k + 1] = (float)(ly * ratioH);
+    }
+    // The landmarks are pushed WITH the box or not at all: `keep` indexes all three vectors
+    // and a box without its five points would shift every later face's landmarks onto the
+    // wrong rectangle.
+    if (!lmOk) continue;
     boxes.push_back({(float)((cx - w / 2) * ratioW), (float)((cy - h / 2) * ratioH),
                      (float)((cx + w / 2) * ratioW), (float)((cy + h / 2) * ratioH)});
     scores.push_back(sc);
-    std::array<float, 10> l{};
-    for (int k = 0; k < 5; ++k) {
-      l[2 * k] = (float)(d[(5 + 3 * k + 0) * A + i] * ratioW);
-      l[2 * k + 1] = (float)(d[(5 + 3 * k + 1) * A + i] * ratioH);
-    }
     lms.push_back(l);
   }
   keep = ffcv::nmsBoxes(boxes, scores, cfg.detectorScore, cfg.nmsThreshold);

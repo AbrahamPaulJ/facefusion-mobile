@@ -145,8 +145,6 @@ class LiveRecorder(
         if (stopped || failed != null) return
         if (!ensure(w, h)) return
         val enc = encoder ?: return
-        val ew = w and 1.inv()
-        val eh = h and 1.inv()
         runCatching {
             drain(false)
             val ix = enc.dequeueInputBuffer(0)
@@ -155,21 +153,10 @@ class LiveRecorder(
             // recording was running -- the recording is the guest, not the host.
             if (ix < 0) return@runCatching
             val ptsUs = (System.nanoTime() - startNs) / 1000
-            val img = enc.getInputImage(ix)
-            if (img == null) {
-                val i420 = NativePipe.bgrToI420(bgr, w, h)
-                enc.getInputBuffer(ix)!!.apply { clear(); put(i420) }
-                enc.queueInputBuffer(ix, 0, i420.size, ptsUs, 0)
-            } else {
-                val p = img.planes
-                NativePipe.bgrToImagePlanes(
-                    bgr, w, h,
-                    p[0].buffer, p[0].rowStride, p[0].pixelStride,
-                    p[1].buffer, p[1].rowStride, p[1].pixelStride,
-                    p[2].buffer, p[2].rowStride, p[2].pixelStride,
-                )
-                enc.queueInputBuffer(ix, 0, p[0].rowStride * eh * 3 / 2, ptsUs, 0)
-            }
+            // The layout, the fallback and the size clamp are in [queueBgrFrame], shared
+            // with VideoSwapper. It rounds the height down to even itself, which is what
+            // `eh` was doing here.
+            queueBgrFrame(enc, ix, bgr, w, h, ptsUs) { onLog("recorder: $it") }
             frames++
         }.onFailure {
             microphone?.close()

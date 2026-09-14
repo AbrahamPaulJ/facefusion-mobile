@@ -660,6 +660,36 @@ Java_com_facefusion_mobile_NativePipe_setForcedBackend(JNIEnv* env, jclass, jstr
   else setenv("FFBACKEND", name.c_str(), 1);
 }
 
+// Whether the ncnn backend may use the GPU: "auto", "gpu" or "cpu".
+//
+// "auto" is the shipping default and makes the backend check its own Vulkan against its own
+// CPU before placing anything on it (ffnn_ncnn.cpp, verifyGpu). The two overrides exist
+// because that check is a heuristic running on hardware nobody here owns: "cpu" is the
+// answer for a device that passes the check and still produces nonsense, "gpu" for one that
+// fails it and is fine.
+//
+// ⚠ The CALLER must release the pipeline first, for the same reason setForcedBackend says
+// so: models already open keep the unit they were opened on.
+JNIEXPORT void JNICALL
+Java_com_facefusion_mobile_NativePipe_setNcnnGpu(JNIEnv* env, jclass, jstring jMode) {
+  std::string mode = jstr(env, jMode);
+  ffnn::setGpuPolicy(mode == "gpu" ? ffnn::GpuPolicy::Force
+                     : mode == "cpu" ? ffnn::GpuPolicy::Off
+                                     : ffnn::GpuPolicy::Auto);
+}
+
+// One line about the runtime that is actually running, for the log box and the bug report.
+//
+// It is the only place the GPU verdict surfaces: "ncnn, Vulkan checked against the CPU" and
+// "ncnn, CPU only -- the detector disagrees with the CPU" are the two answers a report from
+// a non-Qualcomm phone needs to be able to tell apart, and neither is derivable from
+// anything else the app already prints.
+JNIEXPORT jstring JNICALL
+Java_com_facefusion_mobile_NativePipe_runtimeNote(JNIEnv* env, jclass) {
+  ffnn::DeviceInfo d = ffnn::deviceInfo(ffnn::active());
+  return env->NewStringUTF(d.name.c_str());
+}
+
 // Which RUNTIME will this device use, asked before anything is downloaded.
 //
 // "qnn" or "ncnn". The answer decides which MODEL SET to fetch -- a Hexagon part wants

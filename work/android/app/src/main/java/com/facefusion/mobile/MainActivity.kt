@@ -366,6 +366,8 @@ class MainActivity : ComponentActivity() {
 
     /** "" | "qnn" | "ncnn" -- the runtime pinned in Settings, mirrored for composition. */
     private var forcedBackend by mutableStateOf("")
+    /** "auto" | "gpu" | "cpu" -- which UNIT ncnn may use. See [NativePipe.setNcnnGpu]. */
+    private var ncnnGpu by mutableStateOf("auto")
     /**
      * The user's manual light/dark choice, or null to follow the system.
      *
@@ -1233,6 +1235,7 @@ class MainActivity : ComponentActivity() {
         }
         ModelPaths.apply(this)
         forcedBackend = ModelPaths.forcedBackend(this)
+        ncnnGpu = ModelPaths.ncnnGpu(this)
         // Restore the manual theme choice (if any) BEFORE the first composition, so a
         // pinned dark mode does not flash the light scheme on launch.
         darkTheme = ThemePrefs.load(this)
@@ -1705,6 +1708,10 @@ class MainActivity : ComponentActivity() {
                                 onForceBackend =
                                     if (NativePipe.hasNcnnBackend()) ::onForceBackend
                                     else null,
+                                ncnnGpu = ncnnGpu,
+                                onNcnnGpu =
+                                    if (NativePipe.hasNcnnBackend()) ::onNcnnGpu
+                                    else null,
                                 // The manual theme choice (null = follow the system) and
                                 // the switch that makes one. Saved immediately so a restart
                                 // keeps it -- see ThemePrefs.
@@ -1889,6 +1896,25 @@ class MainActivity : ComponentActivity() {
         // other runtime's file format.
         previewOptionsChanged(hard = true)
         appendLog("runtime: " + (if (value.isEmpty()) "automatic" else value))
+    }
+
+    /**
+     * Pin which UNIT the ncnn backend runs on, or "auto" to let it check itself.
+     *
+     * Same order as [onForceBackend] and for the same reason: a model keeps the unit it was
+     * opened on, so the pipeline has to go before the setting changes under it. It does NOT
+     * touch the tier chain or the model set -- both units load the same ncnn files -- so
+     * unlike a runtime change there is nothing to re-download.
+     */
+    private fun onNcnnGpu(value: String) {
+        if (value == ncnnGpu) return
+        NativePipe.release()
+        ModelPaths.setNcnnGpu(this, value)
+        ncnnGpu = value
+        deviceUi = DeviceUi()
+        probeDevice()
+        previewOptionsChanged(hard = true)
+        appendLog("ncnn unit: $value")
     }
 
     // ------------------------------------------------------------------ device
@@ -3723,6 +3749,12 @@ class MainActivity : ComponentActivity() {
                     val ok = NativePipe.init(libDir, libDir, models.absolutePath, opts)
                     noteTierRejection()
                     if (!ok) error("init: ${NativePipe.lastError()}")
+                    // WHICH UNIT, in the box the user can actually read, and only after
+                    // init: the GPU agreement check runs on the first open that asks for the
+                    // GPU, so before this line the note is still the optimistic answer.
+                    // A non-Qualcomm report that does not say this cannot be acted on.
+                    if (ModelPaths.backend(this@MainActivity) == ModelPaths.NCNN_TIER)
+                        appendLog(NativePipe.runtimeNote())
                     appendLog("weight %.2f  blur %.2f  padding %s  boost %s%s"
                         .format(opts.weight, opts.maskBlur,
                                 opts.maskPadding.joinToString("/"), opts.pixelBoostLabel,
@@ -4381,6 +4413,7 @@ class MainActivity : ComponentActivity() {
                     val gpu = NativePipe.probeDeviceInfo(libDir, libDir).contains("gpu=1")
                     say("vulkan: " + (if (gpu) "yes, GPU preferred" else
                                       "NO, everything on the CPU"))
+                    say("ncnn unit pin: $ncnnGpu")
                 }
                 say("tier: $tier")
                 // The fp16 canary is a QNN measurement and brings QNN up to take it. On
@@ -4394,6 +4427,10 @@ class MainActivity : ComponentActivity() {
                     say("INIT FAILED: ${NativePipe.lastError()}"); return@launch
                 }
                 say("$backend init OK")
+                // AFTER init on purpose: the GPU agreement check runs on the first open that
+                // wants the GPU, so before this line the note still says "Vulkan available"
+                // on a device whose Vulkan is about to be refused.
+                if (backend == ModelPaths.NCNN_TIER) say("runtime: ${NativePipe.runtimeNote()}")
                 say("content gate: " +
                     (if (NativePipe.contentGateIsQuantised()) "W8A16 (biased)" else "fp32"))
                 // The app's OWN external files dir first. /sdcard/Download is owned by

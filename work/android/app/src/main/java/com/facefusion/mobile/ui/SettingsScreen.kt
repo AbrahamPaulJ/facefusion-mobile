@@ -142,6 +142,10 @@ fun SettingsScreen(
      * the control entirely rather than drawing one that cannot do anything.
      */
     onForceBackend: ((String) -> Unit)? = null,
+    /** "auto" | "gpu" | "cpu" -- which unit the ncnn backend may use. */
+    ncnnGpu: String = "auto",
+    /** Pin that unit. **null when this build has no ncnn backend**, as [onForceBackend]. */
+    onNcnnGpu: ((String) -> Unit)? = null,
     /**
      * The manual light/dark choice, or null to follow the system.
      *
@@ -468,6 +472,49 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
+                }
+            }
+        }
+
+        // ------------------------------------------------------------------- ncnn unit
+        //
+        // WHICH UNIT, not which runtime. Shown only while ncnn is the runtime, because on a
+        // Hexagon there is no choice to make and a chip row that pins nothing is worse than
+        // no row.
+        //
+        // It exists because of a field report: on a non-Qualcomm phone the GPU path
+        // "detects a lot and none of them is a face" -- yoloface's output as noise, boxes
+        // over a wall and a picture frame, and a swap that then runs on them. The per-model
+        // placement in ffnn.h was measured on ONE Adreno and ncnn's Vulkan is a different
+        // implementation per vendor, so the backend now checks its own GPU against its own
+        // CPU before using it (ffnn_ncnn.cpp, verifyGpu) and Auto is that check.
+        //
+        // ⚠ These chips do NOT override the two correctness pins. The content gate and the
+        // enhancer are on the CPU on every device and no setting may move them: the gate
+        // errs toward allowing on Vulkan, which is the one direction a gate must not err.
+        if (onNcnnGpu != null && device.backend == "ncnn") {
+            Spacer(Modifier.height(6.dp))
+            Caption(stringResource(R.string.set_unit))
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp),
+                       verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        stringResource(R.string.set_unit_note),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("auto" to stringResource(R.string.set_unit_auto),
+                               "gpu" to stringResource(R.string.set_unit_gpu),
+                               "cpu" to stringResource(R.string.set_unit_cpu))
+                            .forEach { (value, label) ->
+                                FilterChip(
+                                    selected = ncnnGpu == value,
+                                    onClick = { onNcnnGpu(value) },
+                                    label = { Text(label) },
+                                )
+                            }
+                    }
                 }
             }
         }

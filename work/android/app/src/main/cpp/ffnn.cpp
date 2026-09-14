@@ -35,6 +35,7 @@ std::vector<std::vector<int>> ncnnInputShapes(Handle);
 const char* ncnnLastError();
 bool ncnnVariantPresent(const std::string&);
 DeviceInfo ncnnDeviceInfo();
+void ncnnSetGpuPolicy(GpuPolicy);
 #endif
 
 namespace {
@@ -178,6 +179,17 @@ const char* lastError() {
     case Backend::Auto: return "no backend started";
   }
   return "unknown backend";
+}
+
+// Settable BEFORE init, which is the order the app uses: the pin is read from preferences
+// at launch and the runtime is chosen afterwards. The ncnn side holds it in a file-scope
+// global that `ncnnInit` does not reset, so it survives the backend coming up.
+void setGpuPolicy(GpuPolicy p) {
+#ifdef FFNN_HAVE_NCNN
+  ncnnSetGpuPolicy(p);
+#else
+  (void)p;
+#endif
 }
 
 DeviceInfo deviceInfo(Backend b) {

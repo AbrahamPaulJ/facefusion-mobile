@@ -735,34 +735,30 @@ class VideoSwapper(
     }
 
     /**
-     * Hand a BGR frame to the encoder through its own input Image.
+     * Hand a BGR frame to the encoder. The layout work is in [queueBgrFrame], shared with
+     * [LiveRecorder]; this is the run's half of it -- when to give up on a frame, and what
+     * to say when the component refuses one.
      *
-     * NOT via getInputBuffer + a packed I420 blob: COLOR_FormatYUV420Flexible does not
-     * imply I420, and this device's AVC encoder is semi-planar.  Writing I420 into it put
-     * luma in the right place and chroma in the wrong one -- a greyscale picture with green
-     * and pink blobs.  getInputImage exposes the real strides, so both layouts work.
+     * ⚠ The refusal used to propagate as whatever MediaCodec threw, which is a stack with
+     * `native_queueInputBuffer` at the top and, for a CodecException, an EMPTY message. The
+     * same failure at `encoder.start()` was given [codecWhy] in 0.9.12 for exactly this
+     * reason and the per-frame path was left as it was; a field report then arrived as four
+     * lines of stack with no number in them.
      */
     private fun feedEncoder(encoder: MediaCodec, bgr: ByteArray, w: Int, h: Int, ptsUs: Long) {
         val ix = encoder.dequeueInputBuffer(100_000)
-        if (ix < 0) return
-        val img = encoder.getInputImage(ix)
-        if (img == null) {
-            // no Image view available: fall back to a packed I420 blob
-            val i420 = NativePipe.bgrToI420(bgr, w, h)
-            encoder.getInputBuffer(ix)!!.apply { clear(); put(i420) }
-            encoder.queueInputBuffer(ix, 0, i420.size, ptsUs.coerceAtLeast(0), 0)
+        if (ix < 0) {
+            // Dropped, and SAID so. Silence here makes a short output look like a decode
+            // problem, and on the ncnn path -- where a frame costs a third of a second --
+            // this is the one place a stalled encoder would be invisible.
+            onLog("encoder took no input for 100 ms: one frame dropped")
             return
         }
-        val p = img.planes
-        val ok = NativePipe.bgrToImagePlanes(
-            bgr, w, h,
-            p[0].buffer, p[0].rowStride, p[0].pixelStride,
-            p[1].buffer, p[1].rowStride, p[1].pixelStride,
-            p[2].buffer, p[2].rowStride, p[2].pixelStride,
-        )
-        if (!ok) onLog("encoder planes were not direct buffers")
-        val size = p[0].rowStride * h * 3 / 2
-        encoder.queueInputBuffer(ix, 0, size, ptsUs.coerceAtLeast(0), 0)
+        runCatching { queueBgrFrame(encoder, ix, bgr, w, h, ptsUs, onLog) }.onFailure { e ->
+            val name = runCatching { encoder.codecInfo.name }.getOrDefault("encoder")
+            error(codecWhy(e, "$name would not take a ${w}x$h frame at " +
+                              "${ptsUs / 1000} ms"))
+        }
     }
 
     /**

@@ -187,6 +187,33 @@ object NativePipe {
      */
     @JvmStatic external fun hasNcnnBackend(): Boolean
 
+    /**
+     * Whether the ncnn backend may use the GPU: `"auto"`, `"gpu"` or `"cpu"`.
+     *
+     * `"auto"` ships, and means the backend runs the detector on BOTH units over one fixed
+     * frame before it places anything on the GPU -- see `verifyGpu` in ffnn_ncnn.cpp. The
+     * per-model placement table was measured on one Adreno, and ncnn's Vulkan is a different
+     * implementation on every vendor's driver: reported from the field as a detector that
+     * "finds a lot and none of them is a face".
+     *
+     * The two overrides exist because the check is a heuristic on hardware this project does
+     * not own. `"cpu"` is for a device that passes it and is still wrong; `"gpu"` for one
+     * that fails it and is fine.
+     *
+     * ⚠ Call [release] FIRST. A model already open keeps the unit it was opened on, so this
+     * changes nothing about a live pipeline.
+     */
+    @JvmStatic external fun setNcnnGpu(mode: String)
+
+    /**
+     * One line naming the runtime that is actually running, for the log and the bug report.
+     *
+     * The only place the GPU verdict surfaces: "Vulkan checked against the CPU" and
+     * "CPU only -- the detector disagrees with the CPU" are the two answers a report from a
+     * non-Qualcomm phone has to be able to tell apart.
+     */
+    @JvmStatic external fun runtimeNote(): String
+
     @JvmStatic external fun probeDeviceInfo(libDir: String, skelDir: String): String
 
     /**

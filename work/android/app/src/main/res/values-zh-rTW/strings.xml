@@ -447,4 +447,12 @@
     <string name="swap_assign_failed">找不到人物 %1$d 的人臉</string>
     <string name="swap_assign_not_ready">仍在載入 — 請稍後再試</string>
     <string name="player_batch_hint">即時換臉播放只處理單一片段。清空佇列後可用。</string>
+
+    <!-- ==================================== settings: which unit ncnn runs on -->
+    <string name="set_unit">圖形晶片</string>
+    <string name="set_unit_note">有些手機在 GPU 上算錯這些模型：應用程式會把牆壁與家具當成人臉並加以替換。「自動」會將本機 GPU 與其自身 CPU 比對一次，若結果不一致就改用 CPU。若仍然不正常，請手動選擇 CPU — 速度較慢，但一定可用。</string>
+    <string name="set_unit_auto">自動</string>
+    <string name="set_unit_gpu">GPU</string>
+    <string name="set_unit_cpu">CPU</string>
+
 </resources>
