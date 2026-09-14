@@ -1233,6 +1233,17 @@ class MainActivity : ComponentActivity() {
             if (want == "" || want == "qnn" || want == "ncnn")
                 ModelPaths.setForcedBackend(this, want)
         }
+        // adb: ... --es unit auto|gpu|cpu   -- which unit ncnn may use, same as the
+        // Settings "Graphics chip" chips.
+        //
+        // Here for the reason the line above is: the pin is the escape hatch for a phone
+        // whose Vulkan computes these graphs wrongly, and an escape hatch that can only be
+        // reached by tapping a chip cannot be part of a scripted run. It is the only way to
+        // exercise the CPU pin on a bench whose own GPU passes the agreement check, and "a
+        // path that cannot be tested is a path that is not verified".
+        intent?.getStringExtra("unit")?.let {
+            if (it == "auto" || it == "gpu" || it == "cpu") ModelPaths.setNcnnGpu(this, it)
+        }
         ModelPaths.apply(this)
         forcedBackend = ModelPaths.forcedBackend(this)
         ncnnGpu = ModelPaths.ncnnGpu(this)
