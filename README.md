@@ -137,6 +137,13 @@ The GPU and CPU path produces the same swap rather than an approximation of it. 
 stay on the CPU whatever the phone has, because on the GPU they come out measurably wrong:
 the content checker and the face enhancer.
 
+Graphics drivers vary, and on some phones the rest of it comes out wrong too -- the clearest
+sign is the app finding faces in walls and furniture. So before it uses the GPU at all, the
+app runs the face detector on both the GPU and the CPU over the same frame and compares the
+two; if they disagree it stays on the CPU and says so on the Settings **Device** panel. You
+can also decide yourself, under **Graphics chip** on that panel: Automatic, GPU or CPU. CPU
+is slower and always works.
+
 ## Remote API
 
 Turn on **Settings → Remote API** and open the address it shows in a browser on your
