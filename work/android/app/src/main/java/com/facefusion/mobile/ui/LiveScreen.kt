@@ -32,6 +32,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.facefusion.mobile.R
+import com.facefusion.mobile.SwapperInfoButton
+import com.facefusion.mobile.SwapperSegments
 import kotlinx.coroutines.delay
 
 /**
@@ -86,6 +88,16 @@ fun LiveScreen(
     onLargestOnlyChange: (Boolean) -> Unit = {},
     swapEnabled: Boolean = true,
     onToggleSwapEnabled: () -> Unit = {},
+    /**
+     * Which swapper the next Start initialises the pipeline with -- the same shared
+     * option the Swap screen edits. A swapper is a different model file, so it cannot
+     * change under a running pump: the segments are locked while running and the
+     * choice takes effect on the next Start.
+     */
+    swapper: String = "hyperswap",
+    onSwapperChange: (String) -> Unit = {},
+    hasHyperswap1b: Boolean = false,
+    hasHyperswap1c: Boolean = false,
     /** Assign-per-person mode: OFF is default behaviour, ON lets each face keep a source. */
     assignMode: Boolean = false,
     /** Whether the brush is "keep the original face" rather than a source slot. */
@@ -423,6 +435,28 @@ fun LiveScreen(
                                     else R.string.live_rec_start),
                      color = if (recording) FfRed else Color.Unspecified)
             }
+        }
+
+        // ---------------------------------------------------------------- swap model
+        //
+        // The same swappers as the Swap screen, on the same shared option, right
+        // under the buttons that start the work. Locked while the pump is running -- a
+        // swapper is a model reload, and the pipeline is initialised once at Start --
+        // and applied on the next Start.
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.live_swapper),
+                     style = MaterialTheme.typography.bodyMedium,
+                     modifier = Modifier.weight(1f))
+                SwapperInfoButton()
+            }
+            SwapperSegments(
+                swapper, hasHyperswap1b, hasHyperswap1c, onSwapperChange,
+                enabled = !running,
+            )
+            if (running)
+                Text(stringResource(R.string.live_swapper_hint),
+                     style = MaterialTheme.typography.bodySmall, fontSize = 11.sp)
         }
 
         // ⚠ The MIRROR only. The lens already has a control -- the chip over the top-left

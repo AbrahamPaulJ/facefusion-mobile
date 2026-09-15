@@ -206,8 +206,8 @@ class PreviewEngine {
      * WHICH SWAPPER is loaded, or null when nothing is.
      *
      * ⚠ The one thing that actually decides what is in memory. It selects a different
-     * context binary -- hyperswap is 256 px and inswapper 128, with different normalisation
-     * -- so changing it is the only option change that still costs a reload.
+     * context binary -- hyperswap 1a/1b are both 256 px -- so changing it is the only
+     * option change that still costs a reload.
      *
      * This used to be the whole `SwapOptions`, on the reasoning that `NativePipe.init`
      * takes the options once and the native side keeps its own copy. The first half is

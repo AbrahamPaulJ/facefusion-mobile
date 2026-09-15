@@ -208,6 +208,11 @@ object ModelPaths {
         "fan2d" to "2dfan4_heatmaps",
         "arcface" to "arcface_w600k_r50_b1",
         "hyperswap" to "hyperswap_1a_256_fp32",
+        // hyperswap_1b: same I/O as 1a, separate weights. QNN resolves
+        // "<logical>_<tier>.bin" generically; ncnn needs the stem here.
+        "hyperswap_1b" to "hyperswap_1b_256_fp32",
+        // hyperswap_1c: same I/O again, separate weights.
+        "hyperswap_1c" to "hyperswap_1c_256_fp32",
         "gpen" to "gpen_ncnn",
         // One graph serves both gate names: "nsfwq2" exists because a QNN tier below v79
         // cannot finalize the fp32 gate, which is a QNN fact and means nothing to ncnn.

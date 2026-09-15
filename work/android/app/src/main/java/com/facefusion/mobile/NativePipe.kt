@@ -107,7 +107,7 @@ object NativePipe {
      *
      * Only meaningful after a successful [init]; false before that, which is the safe
      * direction -- the UI hides the enhancer switch rather than offering one that cannot
-     * work. Same rule `inswapper` follows.
+     * work. Same rule the swapper choice follows.
      */
     @JvmStatic external fun hasEnhancer(): Boolean
 

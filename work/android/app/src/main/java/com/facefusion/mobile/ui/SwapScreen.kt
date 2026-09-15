@@ -179,7 +179,8 @@ fun SwapScreen(
     log: String,
     opts: SwapOptions,
     onOptsChange: (SwapOptions) -> Unit,
-    hasInswapper: Boolean,
+    hasHyperswap1b: Boolean = false,
+    hasHyperswap1c: Boolean = false,
     hasEnhancer: Boolean,
     hasLipSyncer: Boolean,
     /**
@@ -703,10 +704,11 @@ fun SwapScreen(
             enabled = idle,
         )
 
-        // ---- ASSIGN PER PERSON. Video targets only: a still is one frame the user is
-        // already looking at, and the pane IS the result, so there is nothing the mode
-        // could do there that tapping a target face does not already do.
-        if (!imageTarget && hasTarget && sourceThumbs.isNotEmpty()) {
+        // ---- ASSIGN PER PERSON. Video and stills alike: the preview pane swaps
+        // through the warm pipeline either way, and native assignments live on
+        // that pipeline -- so a still honours them exactly like a video frame
+        // does, and the pane IS the result the Save button writes.
+        if (hasTarget && sourceThumbs.isNotEmpty()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(stringResource(R.string.live_assign_title),
@@ -1505,7 +1507,8 @@ fun SwapScreen(
                         else -> {
                             FaceSwapperCard(opts, onOptsChange, openCard == "swapper",
                                             { onToggleCard("swapper") },
-                                            inswapperAvailable = hasInswapper)
+                                            hyperswap1bAvailable = hasHyperswap1b,
+                                            hyperswap1cAvailable = hasHyperswap1c)
                             FaceMaskerCard(opts, onOptsChange, openCard == "masker",
                                            { onToggleCard("masker") })
                             FaceDetectorCard(opts, onOptsChange, openCard == "detector",

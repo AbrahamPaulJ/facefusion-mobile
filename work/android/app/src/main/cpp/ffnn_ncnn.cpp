@@ -59,6 +59,12 @@ const std::map<std::string, Spec>& specs() {
       // source FIRST -- in0 is the 512-d embedding, in1 the image. See the warning above.
       {"hyperswap", {"hyperswap_1a_256_fp32",
                      {{"source", 512, 1, 0}, {"target", 256, 256, 3}}, "out0"}},
+      // hyperswap_1b: same I/O as 1a, separate weights.
+      {"hyperswap_1b", {"hyperswap_1b_256_fp32",
+                     {{"source", 512, 1, 0}, {"target", 256, 256, 3}}, "out0"}},
+      // hyperswap_1c: same I/O again, separate weights.
+      {"hyperswap_1c", {"hyperswap_1c_256_fp32",
+                     {{"source", 512, 1, 0}, {"target", 256, 256, 3}}, "out0"}},
       {"gpen",      {"gpen_ncnn",             {{"input", 256, 256, 3}}, "out0"}},
       // One graph serves both gate names. ncnn has no quantised build -- "nsfwq2" exists
       // because a QNN tier below v79 cannot finalize the fp32 gate, which is a QNN fact.

@@ -6,7 +6,7 @@
 #                                  # faithful proxy for the quantised build (trap #24)
 #   ./convert.sh <name>            # full W8A16 build -> context binary
 #
-# names: arcface | fan2d | yoloface | hyperswap | inswapper | nsfw | gpen | wav2lip
+# names: arcface | fan2d | yoloface | hyperswap | hyperswap_1b | hyperswap_1c | inswapper | nsfw | gpen | wav2lip
 #
 # Every graph here is a conv model, so --preserve_io layout on the image tensors is
 # MANDATORY (trap #7: omitting it measured -0.75 dB with nothing looking broken).
@@ -69,6 +69,23 @@ case "$NAME" in
     # this graph at all.  docs/roadmap.md 1.7.  The fp16-sourced intermediates are
     # archived at ~/ff-build/hyperswap_fp16src.
     ONNX=$FF/work/onnx/hyperswap_1a_256_fp32.onnx
+    DIMS=(--input_dim target 1,3,256,256 --input_dim source 1,512)
+    PRESERVE=(--preserve_io layout target output)
+    ;;
+  hyperswap_1b)
+    # Same I/O and surgeries as hyperswap (1a): target 1,3,256,256 + source 1,512,
+    # output 0, broadcast-Expand delete, fp32 demotion. Separate weights; licence
+    # must be confirmed (1a is ResearchRAIL) before hosting. Build with:
+    #   py -3.10 work/export/prepare_onnx.py hyperswap_1b_fp32
+    ONNX=$FF/work/onnx/hyperswap_1b_256_fp32.onnx
+    DIMS=(--input_dim target 1,3,256,256 --input_dim source 1,512)
+    PRESERVE=(--preserve_io layout target output)
+    ;;
+  hyperswap_1c)
+    # Same I/O and surgeries as 1a/1b. Separate weights; licence
+    # must be confirmed (1a is ResearchRAIL) before hosting. Build with:
+    #   py -3.10 work/export/prepare_onnx.py hyperswap_1c_fp32
+    ONNX=$FF/work/onnx/hyperswap_1c_256_fp32.onnx
     DIMS=(--input_dim target 1,3,256,256 --input_dim source 1,512)
     PRESERVE=(--preserve_io layout target output)
     ;;

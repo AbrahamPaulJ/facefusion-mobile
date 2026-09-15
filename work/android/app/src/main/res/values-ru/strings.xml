@@ -3,7 +3,7 @@
   Russian. Follows the same rules the English table states:
 
    * MODEL AND TIER NAMES and FaceFusion's own option vocabulary stay as they are
-     (hyperswap, inswapper, arcface, gpen_bfr_256, v79, "pixel boost"). They are the words
+     (hyperswap, arcface, gpen_bfr_256, v79, "pixel boost"). They are the words
      upstream's documentation uses, and a translated model name is a name nobody can search
      for and nothing can be compared against.
    * The PROCESSOR chips (face_swapper, face_enhancer, lip_syncer) are identifiers, not
@@ -116,7 +116,8 @@
     <string name="opt_pixel_boost_native">собственный размер модели</string>
     <string name="opt_pixel_boost_cost">в %1$d раз дороже на лицо: нормально для фото, медленно для видео</string>
     <string name="opt_model">Модель</string>
-    <string name="opt_model_hint">hyperswap — 256², inswapper — 128² и медленнее</string>
+    <string name="opt_swapper">hyperswap:</string>
+    <string name="opt_model_hint">1a: стабильная · 1b: качественнее · 1c: лучшая</string>
     <string name="opt_face_masker">Маска лица</string>
     <string name="opt_masker_summary">размытие %1$s   отступ %2$s</string>
     <string name="opt_blur">Размытие</string>

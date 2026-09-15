@@ -111,7 +111,8 @@
     <string name="opt_pixel_boost_native">模型的原生尺寸</string>
     <string name="opt_pixel_boost_cost">每張臉的換臉成本變為 %1$d 倍 ， 處理相片沒問題，處理影片會很慢</string>
     <string name="opt_model">模型</string>
-    <string name="opt_model_hint">hyperswap 為 256²，inswapper 為 128² 且更慢</string>
+    <string name="opt_swapper">hyperswap:</string>
+    <string name="opt_model_hint">1a：穩定 · 1b：畫質更好 · 1c：畫質最佳</string>
 
     <string name="opt_face_masker">遮罩</string>
     <string name="opt_masker_summary">模糊 %1$s   邊界 %2$s</string>

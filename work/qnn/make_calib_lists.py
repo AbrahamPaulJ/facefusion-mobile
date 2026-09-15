@@ -20,6 +20,12 @@ SPECS = {
 	'yoloface':  [('input',  'yoloface',    1 * 3 * 640 * 640)],
 	'hyperswap': [('target', 'swap_target', 1 * 3 * 256 * 256),
 				  ('source', 'swap_source', 1 * 512)],
+	# 1b/1c share 1a's calibration domain (same faces, same crops) but need their
+	# own list files: convert.sh reads calib/<NAME>_list.txt per variant.
+	'hyperswap_1b': [('target', 'swap_target', 1 * 3 * 256 * 256),
+				  ('source', 'swap_source', 1 * 512)],
+	'hyperswap_1c': [('target', 'swap_target', 1 * 3 * 256 * 256),
+				  ('source', 'swap_source', 1 * 512)],
 	'inswapper': [('target', 'swap_target_128', 1 * 3 * 128 * 128),
 				  ('source', 'swap_source_128', 1 * 512)],
 	# The content gate.  Its frames are letterboxed by fit_contain_frame -- centred pad,

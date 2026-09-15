@@ -1,6 +1,8 @@
 package com.facefusion.mobile
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -84,6 +86,7 @@ fun <T> OptionSegments(
     selected: T,
     onSelect: (T) -> Unit,
     hint: String? = null,
+    enabled: Boolean = true,
 ) {
     Column(Modifier.padding(top = 8.dp)) {
         Text(label, style = MaterialTheme.typography.bodyMedium)
@@ -93,12 +96,98 @@ fun <T> OptionSegments(
                     selected = value == selected,
                     onClick = { onSelect(value) },
                     shape = SegmentedButtonDefaults.itemShape(i, options.size),
+                    enabled = enabled,
                 ) { Text(text, maxLines = 1, textAlign = TextAlign.Center, fontSize = 13.sp) }
             }
         }
         if (hint != null)
             Text(hint, style = MaterialTheme.typography.bodySmall, fontSize = 11.sp,
                  modifier = Modifier.padding(top = 2.dp))
+    }
+}
+
+/**
+ * What the user reads for a swapper's logical name. Internal names stay short and
+ * stable (disk, prefs, API); only the display carries the variant.
+ */
+fun swapperDisplay(name: String): String = when (name) {
+    "hyperswap" -> "hyperswap 1a"
+    "hyperswap_1b" -> "hyperswap 1b"
+    "hyperswap_1c" -> "hyperswap 1c"
+    else -> name
+}
+
+/**
+ * Short label for the segmented picker: three long entries do not fit
+ * side by side on a phone and all truncate to the same stub. The full
+ * name stays everywhere space allows (card summary, Settings rows, info dialog).
+ * Deliberately neutral (no "best"/"quality"): rendering varies too much
+ * across faces and conditions for a ranking to be honest.
+ */
+fun swapperShort(name: String): String = when (name) {
+    "hyperswap" -> "1a"
+    "hyperswap_1b" -> "1b"
+    "hyperswap_1c" -> "1c"
+    else -> name
+}
+
+/**
+ * One entry per swapper whose binary is actually on the device: offering
+ * a model the app cannot load turns a missing file into a failed run.
+ * hyperswap_1b/1c share 1a's I/O (256 + 512-d source) with separate weights.
+ */
+fun swapperOptions(hyperswap1bAvailable: Boolean,
+                   hyperswap1cAvailable: Boolean): List<Pair<String, String>> =
+    buildList {
+        add("hyperswap" to swapperShort("hyperswap"))
+        if (hyperswap1bAvailable) add("hyperswap_1b" to swapperShort("hyperswap_1b"))
+        if (hyperswap1cAvailable) add("hyperswap_1c" to swapperShort("hyperswap_1c"))
+    }
+
+/** The swapper picker shared by the Swap card and the Live screen. */
+@Composable
+fun SwapperSegments(
+    swapper: String,
+    hyperswap1bAvailable: Boolean,
+    hyperswap1cAvailable: Boolean,
+    onChange: (String) -> Unit,
+    enabled: Boolean = true,
+) {
+    val models = swapperOptions(hyperswap1bAvailable, hyperswap1cAvailable)
+    if (models.size > 1) {
+        OptionSegments(
+            stringResource(R.string.opt_swapper),
+            models,
+            swapper,
+            onChange,
+            enabled = enabled,
+        )
+    }
+}
+
+/** What the three swapper entries actually are. One copy, used on both screens. */
+@Composable
+fun SwapperInfoButton() {
+    var show by rememberSaveable { mutableStateOf(false) }
+    IconButton(onClick = { show = true }, modifier = Modifier.size(32.dp)) {
+        Icon(
+            Icons.Filled.Info,
+            contentDescription = stringResource(R.string.opt_model_info),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp),
+        )
+    }
+    if (show) {
+        AlertDialog(
+            onDismissRequest = { show = false },
+            title = { Text(stringResource(R.string.swapper_info_title)) },
+            text = { Text(stringResource(R.string.swapper_info_body)) },
+            confirmButton = {
+                TextButton(onClick = { show = false }) {
+                    Text(stringResource(R.string.live_assign_help_gotit))
+                }
+            },
+        )
     }
 }
 
@@ -196,12 +285,14 @@ fun FaceSwapperCard(
     onChange: (SwapOptions) -> Unit,
     expanded: Boolean,
     onToggle: () -> Unit,
-    inswapperAvailable: Boolean,
+    hyperswap1bAvailable: Boolean = false,
+    hyperswap1cAvailable: Boolean = false,
 ) {
     // The value the user is actually here for goes in the summary.
     // The model name and the boost are identifiers; only the word "weight" is a word.
     val summary = stringResource(R.string.opt_swapper_summary,
-                                 "%.2f".format(opts.weight), opts.pixelBoostLabel, opts.swapper)
+                                 "%.2f".format(opts.weight), opts.pixelBoostLabel,
+                                 swapperDisplay(opts.swapper))
     OptionCard(stringResource(R.string.opt_face_swapper), summary, expanded, onToggle) {
         OptionSlider(
             stringResource(R.string.opt_weight), opts.weight,
@@ -222,14 +313,20 @@ fun FaceSwapperCard(
                    else stringResource(R.string.opt_pixel_boost_cost,
                                        opts.invocationsPerFace),
         )
-        if (inswapperAvailable) {
-            OptionSegments(
-                stringResource(R.string.opt_model),
-                listOf("hyperswap" to "hyperswap", "inswapper" to "inswapper"),
-                opts.swapper,
-                { onChange(opts.copy(swapper = it)) },
-                hint = stringResource(R.string.opt_model_hint),
+        // One entry per swapper whose binary is actually on the device: offering
+        // a model the app cannot load turns a missing file into a failed run.
+        // hyperswap_1b/1c share 1a's I/O (256 + 512-d source) with separate weights.
+        SwapperSegments(
+            opts.swapper, hyperswap1bAvailable, hyperswap1cAvailable,
+            { onChange(opts.copy(swapper = it)) },
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                stringResource(R.string.opt_model_info),
+                style = MaterialTheme.typography.bodySmall, fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            SwapperInfoButton()
         }
     }
 }

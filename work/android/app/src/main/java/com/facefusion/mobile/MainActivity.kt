@@ -810,6 +810,61 @@ class MainActivity : ComponentActivity() {
         if (uri != null) setSourceFrom(uri)
     }
 
+    /**
+     * The file a Settings row is waiting for, or null.
+     *
+     * Import is the path for models nobody hosts -- a converted swapper shared over
+     * KDE Connect rather than downloaded -- so the manifest cannot name what is coming
+     * and the row's own [ModelRow.files] is the whole contract: the picked file's name
+     * must be one of them, and it lands under exactly that name.
+     */
+    private var pendingImport: com.facefusion.mobile.ui.ModelRow? = null
+    private val importModelFile =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            val row = pendingImport; pendingImport = null
+            if (uri == null || row == null) return@registerForActivityResult
+            lifecycleScope.launch(Dispatchers.IO) {
+                var name: String? = null
+                runCatching {
+                    contentResolver.query(
+                        uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                        null, null, null)?.use { c ->
+                        if (c.moveToFirst()) name = c.getString(0)
+                    }
+                }
+                val target = name?.substringAfterLast('/')
+                if (target == null || target !in row.files) {
+                    runOnUiThread {
+                        toast(getString(R.string.set_import_bad_name,
+                                        row.files.joinToString(", ")))
+                    }
+                    return@launch
+                }
+                try {
+                    val dir = modelDir()
+                    val tmp = java.io.File(dir, "$target.part")
+                    (contentResolver.openInputStream(uri)
+                        ?: throw java.io.IOException("cannot open"))
+                        .use { input -> tmp.outputStream().use { input.copyTo(it) } }
+                    java.io.File(dir, target).delete()
+                    if (!tmp.renameTo(java.io.File(dir, target)))
+                        throw java.io.IOException("cannot save")
+                    // Length is what ModelDownload.missing and the outdated flag read,
+                    // so a file of the wrong length shows as update-available rather
+                    // than silently passing as the model.
+                    withContext(Dispatchers.Main) {
+                        modelsVersion++
+                        toast(getString(R.string.set_import_done, target))
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        toast(getString(R.string.set_import_failed,
+                                        e.message ?: e.toString()))
+                    }
+                }
+            }
+        }
+
     private val pickLiveSources = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) addLiveSource(uri)
     }
@@ -1172,14 +1227,21 @@ class MainActivity : ComponentActivity() {
     private val tierChain: List<String> get() = ModelPaths.tierChain(this)
 
     /**
-     * Whether the second swapper is on the device at all.
+     * Whether hyperswap_1b's binary is on the device.
      *
-     * `inswapper_128` is converted and one flag away, but it is another 136 MB that
-     * install_app.ps1 only pushes when asked. Offering a model the app cannot load would
-     * turn a missing file into a failed run, so the choice appears only when it is real.
+     * The choice appears only when it is real, and the
+     * required/optional rows in the Settings inventory follow the SELECTED swapper.
+     * Binaries are published per tier on the model repo; nothing is bundled in the APK.
      */
-    private val hasInswapper: Boolean by lazy {
-        ModelPaths.present(modelDir(), tier, "inswapper")
+    private val hasHyperswap1b: Boolean by lazy {
+        ModelPaths.present(modelDir(), tier, "hyperswap_1b")
+    }
+
+    /**
+     * Whether hyperswap_1c's binary is on the device. Same rule as 1b.
+     */
+    private val hasHyperswap1c: Boolean by lazy {
+        ModelPaths.present(modelDir(), tier, "hyperswap_1c")
     }
 
     /**
@@ -1251,7 +1313,11 @@ class MainActivity : ComponentActivity() {
         // pinned dark mode does not flash the light scheme on launch.
         darkTheme = ThemePrefs.load(this)
         modelDir()
-        opts = SwapOptions.load(this)
+        opts = SwapOptions.load(this).let {
+            // inswapper_128 retired: quality too poor. A saved "inswapper" falls back
+            // to hyperswap 1a rather than pointing at a model the UI no longer offers.
+            if (it.swapper == "inswapper") it.copy(swapper = "hyperswap") else it
+        }
         ApiService.restore(this)
 
         // adb: ... --es selftest 1 --es enhance 1 --es lipsync 1   (or `0` to force OFF)
@@ -1523,7 +1589,8 @@ class MainActivity : ComponentActivity() {
                                 log = log,
                                 opts = opts,
                                 onOptsChange = ::applyOpts,
-                                hasInswapper = hasInswapper,
+                                hasHyperswap1b = hasHyperswap1b,
+                                hasHyperswap1c = hasHyperswap1c,
                                 hasEnhancer = hasEnhancer,
                                 hasLipSyncer = hasLipSyncer,
                                 onRequestModel = { label, model ->
@@ -1678,6 +1745,13 @@ class MainActivity : ComponentActivity() {
                                 onLargestOnlyChange = { liveLargestOnly = it; if (liveRunning) NativePipe.setSwapLargestOnly(it) },
                                 swapEnabled = liveSwapEnabled,
                                 onToggleSwapEnabled = { toggleSwapEnabled() },
+                                // Same shared option as the Swap screen; Live initialises
+                                // its pipeline from it at Start, so a change while
+                                // stopped applies to the next run.
+                                swapper = opts.swapper,
+                                onSwapperChange = { applyOpts(opts.copy(swapper = it)) },
+                                hasHyperswap1b = hasHyperswap1b,
+                                hasHyperswap1c = hasHyperswap1c,
                                 assignMode = liveAssignMode,
                                 keepOriginalBrush = liveBrushKeepOriginal,
                                 onKeepOriginal = ::selectLiveKeepOriginal,
@@ -1701,6 +1775,13 @@ class MainActivity : ComponentActivity() {
                                 // name, so the two models that have nothing BUT this button
                                 // could not be downloaded at all.
                                 onDownloadModel = { m -> onDownloadTapped(m.files) },
+                                // Import from a file on the phone: the row's own files
+                                // are the contract, so a KDE Connect share landed in
+                                // Download lands in the models dir under its own name.
+                                onImportModel = { m ->
+                                    pendingImport = m
+                                    importModelFile.launch(arrayOf("*/*"))
+                                },
                                 onDeleteModel = { m ->
                                     // Every file of the row, not just the one it is named
                                     // after: an ncnn model is a param/bin pair.
@@ -2100,12 +2181,14 @@ class MainActivity : ComponentActivity() {
      * of this would be a second chance to forget the save or the redraw.
      */
     private fun applyOpts(o: SwapOptions) {
+        // inswapper_128 retired: never persist it again, even if an old caller passes it.
+        val fixed = if (o.swapper == "inswapper") o.copy(swapper = "hyperswap") else o
         // Only the SWAPPER selects a different model file. Everything else is a per-frame
         // value the loaded pipeline can simply be told about, so it must not send the
         // preview cold -- going cold is what made a slider cost a model reload.
-        val reloads = o.swapper != opts.swapper
-        opts = o
-        o.save(this)
+        val reloads = fixed.swapper != opts.swapper
+        opts = fixed
+        fixed.save(this)
         // init() consumed the old options; the warm pipeline is now showing something the
         // user did not ask for. This REDRAWS -- clearing the pane and leaving it cleared
         // is how "Preparing preview..." became permanent, since nothing was left to ask
@@ -2197,15 +2280,16 @@ class MainActivity : ComponentActivity() {
         // a user everything is fine about a device that then refuses to swap.
         //
         // Which swapper is required depends on the one selected: missing() checks
-        // opts.swapper, so hyperswap is not inherently the required one and inswapper is
-        // not inherently optional -- the SELECTED one is required and the other is the
-        // alternative.
-        val alt = if (opts.swapper == "inswapper") "hyperswap" else "inswapper"
+        // opts.swapper, so no swapper is inherently required -- the SELECTED one is
+        // required and the others are alternatives.
+        val allSwappers = listOf("hyperswap", "hyperswap_1b", "hyperswap_1c")
+        val alts = allSwappers.filter { it != opts.swapper }
         val required = listOf(
             "yoloface" to getString(R.string.model_detector),
             "fan2d" to getString(R.string.model_landmarker),
             "arcface" to getString(R.string.model_recogniser),
-            opts.swapper to getString(R.string.model_swapper),
+            opts.swapper to (getString(R.string.model_swapper) +
+                    " — " + swapperDisplay(opts.swapper)),
         )
         // The content gate is required -- missing() blocks a run without it and
         // ffpipe::init will not come up -- but it is satisfied by EITHER build, so neither
@@ -2226,8 +2310,9 @@ class MainActivity : ComponentActivity() {
             "nsfw" to getString(R.string.model_content_checker),
             "nsfwq2" to getString(R.string.model_content_checker_quantised),
         )
-        val optional = listOf(
-            alt to getString(R.string.model_swapper_alt),
+        val optional = alts.map {
+            it to (getString(R.string.model_swapper) + " — " + swapperDisplay(it))
+        } + listOf(
             // It was absent from BOTH lists, so a 28 MB model that is on the device, that
             // the Advanced panel offers a switch for, and that /health reports as present,
             // was invisible on the one screen whose job is to say what is installed.
@@ -2281,8 +2366,10 @@ class MainActivity : ComponentActivity() {
                             fetching = files.any { it.name in ModelDownload.queued })
         }
         return (required.map { (n, l) -> row(n, l, true) } +
-            gate.map { (n, l) -> row(n, l, !gateOk) }.filter { it.present || it.downloadable } +
-            optional.map { (n, l) -> row(n, l, false) }.filter { it.present || it.downloadable })
+            // Every row is shown, hosted or not: import is the path for files nobody
+            // hosts.
+            gate.map { (n, l) -> row(n, l, !gateOk) } +
+            optional.map { (n, l) -> row(n, l, false) })
             // One row per FILE SET, not per logical name. The two gate names resolve to two
             // different context binaries on QNN and to the SAME `nsfw_2_sim` pair on ncnn --
             // the quantised build exists because a QNN tier below v79 cannot finalize the
