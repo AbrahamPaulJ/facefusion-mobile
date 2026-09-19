@@ -25,6 +25,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.math.hypot
 import kotlin.math.roundToInt
 import androidx.compose.ui.res.stringResource
 
@@ -92,6 +93,18 @@ class MainActivity : ComponentActivity() {
     /** The brush: which source the NEXT tapped person gets, or their own face back. */
     private var swapBrushKeepOriginal by mutableStateOf(false)
     private var swapSelectedPerson by mutableIntStateOf(-1)
+    /**
+     * The detected people shown by Assign per person, captured ONCE per target.
+     *
+     * These deliberately do not follow [originalFrame]. A video preview changes that
+     * bitmap for every seek/playback step; rebuilding the row from it made the detector's
+     * score order become the user's Person 1/2 identity, so two people could exchange
+     * places without a tap. The saved frame is also the exact frame used when a person is
+     * assigned, so the displayed thumbnail, box and identity all describe one picture.
+     */
+    private var swapPersonSnapshot by mutableStateOf<Bitmap?>(null)
+    private var swapPersonBoxes by mutableStateOf<FloatArray?>(null)
+    private var swapPersonSnapshotTarget by mutableIntStateOf(-1)
     private var swapPersonThumbs by mutableStateOf<List<Bitmap>>(emptyList())
     /** person index -> source slot, or [KEEP_ORIGINAL]. */
     private var swapPersonAssignments by mutableStateOf<Map<Int, Int>>(emptyMap())
@@ -308,6 +321,14 @@ class MainActivity : ComponentActivity() {
     private var liveMirrorOverride by mutableStateOf<Boolean?>(null)
     private val liveMirror: Boolean get() = liveMirrorOverride ?: liveFrontCamera
 
+    private fun toggleLiveMirror() {
+        val next = !liveMirror
+        liveMirrorOverride = next
+        // The preview and encoder follow the same answer. Native reads this per frame,
+        // so changing it during recording takes effect on the next encoded frame.
+        live.mirrorRecording = next
+    }
+
     /** Live's brush: the counterpart of [swapBrushKeepOriginal] on the other screen. */
     private var liveBrushKeepOriginal by mutableStateOf(false)
 
@@ -346,6 +367,15 @@ class MainActivity : ComponentActivity() {
      * person follows the source chip.
      */
     private var liveSelectionBox by mutableStateOf<FloatArray?>(null)
+    /** Fixed, pre-swap camera thumbnails shown by Live's Assign per person row. */
+    private var livePersonThumbs by mutableStateOf<List<Bitmap>>(emptyList())
+    /** Snapshot boxes and current boxes are both in the Live display bitmap's coordinates. */
+    private var livePersonSnapshotBoxes by mutableStateOf<FloatArray?>(null)
+    private var liveFaceBoxes by mutableStateOf<FloatArray?>(null)
+    /** Number of faces represented by the current photo row, including uncroppable boxes. */
+    private var livePersonSnapshotFaceCount by mutableIntStateOf(0)
+    private var liveSelectedPerson by mutableIntStateOf(-1)
+    private var liveFaceSnapshotPending = false
     /**
      * A tap is in flight: the next liveFrame consumes it and the shot callback takes the
      * result. Pending until taken; a consumed-but-empty result is a miss, never guessed.
@@ -661,12 +691,20 @@ class MainActivity : ComponentActivity() {
     /** Forget every per-person choice and turn the mode off, natively as well as here. */
     private fun resetSwapAssign() {
         swapAssignMode = false
+        resetSwapPersonState()
+        swapBrushKeepOriginal = false
+        NativePipe.setFaceAssignEnabled(false)
+    }
+
+    /** Forget the target-specific people without changing whether the mode is enabled. */
+    private fun resetSwapPersonState() {
         swapSelectedPerson = -1
+        swapPersonSnapshot = null
+        swapPersonBoxes = null
+        swapPersonSnapshotTarget = -1
         swapPersonThumbs = emptyList()
         swapPersonAssignments = emptyMap()
         swapPersonIdentity = emptyMap()
-        swapBrushKeepOriginal = false
-        NativePipe.setFaceAssignEnabled(false)
         NativePipe.clearFaceSourceAssignments()
     }
 
@@ -713,8 +751,11 @@ class MainActivity : ComponentActivity() {
             status = getString(R.string.swap_assign_not_ready)
             return
         }
-        val frame = originalFrame ?: return
-        val box = faceBoxes?.asList()?.chunked(5)?.getOrNull(person) ?: return
+        // Use the frozen detection photo, not the latest video preview frame. The row and
+        // its boxes are target-specific; using the moving frame here reintroduced the same
+        // Person N -> another face problem that the static thumbnails are meant to remove.
+        val frame = swapPersonSnapshot ?: return
+        val box = swapPersonBoxes?.asList()?.chunked(5)?.getOrNull(person) ?: return
         val soft = frame.asArgb8888() ?: return
         val px = IntArray(soft.width * soft.height)
         soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
@@ -755,11 +796,8 @@ class MainActivity : ComponentActivity() {
 
     private fun toggleSwapAssign() {
         swapAssignMode = !swapAssignMode
-        swapSelectedPerson = -1
-        swapPersonAssignments = emptyMap()
-        swapPersonIdentity = emptyMap()
+        resetSwapPersonState()
         swapBrushKeepOriginal = false
-        NativePipe.clearFaceSourceAssignments()
         NativePipe.setFaceAssignEnabled(swapAssignMode)
         if (swapAssignMode) {
             // ⚠ The two target selectors are MUTUALLY EXCLUSIVE, and the reference wins
@@ -1499,16 +1537,20 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     faceBoxes = if (showFaceBoxes) found else null
-                    // Assign per person needs a FACE to point at, so the same detection
-                    // that draws the boxes also cuts the row of people. Same pass, same
-                    // frame, same order -- person N here is box N there, which is what
-                    // lets a tap in the row name a face without a second detector run.
-                    swapPersonThumbs =
-                        if (swapAssignMode && showFaceBoxes && found != null)
-                            found.asList().chunked(5).mapNotNull { b ->
-                                if (b.size < 4) null else cropPersonThumb(frame, b)
-                            }
-                        else emptyList()
+                    // Assign per person uses a PHOTO snapshot, not the moving preview.
+                    // The detector may still refresh faceBoxes for the optional overlay,
+                    // but the row and its assignment coordinates are created only once per
+                    // target. This removes thumbnail churn and prevents detector score
+                    // order from silently changing what Person 1/2 means.
+                    if (swapAssignMode && showFaceBoxes && found != null &&
+                        swapPersonSnapshotTarget != targetVersion) {
+                        swapPersonSnapshot = frame
+                        swapPersonBoxes = found.copyOf()
+                        swapPersonThumbs = found.asList().chunked(5).mapNotNull { b ->
+                            if (b.size < 4) null else cropPersonThumb(frame, b)
+                        }
+                        swapPersonSnapshotTarget = targetVersion
+                    }
                     faceBoxFrame = frame
                 }
 
@@ -1727,13 +1769,18 @@ class MainActivity : ComponentActivity() {
                                 faces = liveFaces,
                                 useMySettings = liveUseMySettings,
                                 onUseMySettings = { liveUseMySettings = it },
+                                detectionOpts = opts.copy(largestOnly = liveLargestOnly),
+                                onDetectionOptsChange = { changed ->
+                                    liveLargestOnly = changed.largestOnly
+                                    applyOpts(changed)
+                                },
                                 note = liveNote,
                                 modelsReady = !modelsMissing,
                                 onDownload = { onDownloadTapped() },
                                 frontCamera = liveFrontCamera,
                                 onSwitchCamera = ::switchLiveCamera,
                                 mirror = liveMirror,
-                                onToggleMirror = { liveMirrorOverride = !liveMirror },
+                                onToggleMirror = ::toggleLiveMirror,
                                 recording = liveRecording,
                                 microphone = liveMicrophone,
                                 finalizing = liveFinalizing,
@@ -1753,6 +1800,9 @@ class MainActivity : ComponentActivity() {
                                 hasHyperswap1b = hasHyperswap1b,
                                 hasHyperswap1c = hasHyperswap1c,
                                 assignMode = liveAssignMode,
+                                personThumbs = livePersonThumbs,
+                                selectedPerson = liveSelectedPerson,
+                                onSelectPerson = ::selectLivePerson,
                                 keepOriginalBrush = liveBrushKeepOriginal,
                                 onKeepOriginal = ::selectLiveKeepOriginal,
                                 onToggleAssignMode = ::toggleLiveAssign,
@@ -2723,6 +2773,7 @@ class MainActivity : ComponentActivity() {
     }.getOrNull()
 
     private fun loadTarget(uri: Uri) {
+        resetSwapPersonState()
         dropReferenceFace()
         if (contentResolver.getType(uri)?.startsWith("image/") == true) {
             loadTargetImage(uri)
@@ -2817,6 +2868,7 @@ class MainActivity : ComponentActivity() {
      * BitmapFactory for the new path.
      */
     private fun loadTargetImage(uri: Uri) {
+        resetSwapPersonState()
         dropReferenceFace()
         preparing = true
         targetName = displayName(uri)
@@ -3192,6 +3244,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun clearTarget() {
+        resetSwapPersonState()
         dropReferenceFace()
         // The queue is a list of TARGETS and item 0 was this one. Keeping the rest after
         // the visible clip goes away would leave a run that starts on a clip nothing on
@@ -3432,6 +3485,14 @@ class MainActivity : ComponentActivity() {
             NativePipe.setSwapLargestOnly(false)
         }
         NativePipe.setFaceAssignEnabled(liveAssignMode)
+        live.faceBoxesEnabled = liveAssignMode
+        if (!liveAssignMode) live.cancelFaceSnapshot()
+        livePersonThumbs = emptyList()
+        livePersonSnapshotBoxes = null
+        liveFaceBoxes = null
+        livePersonSnapshotFaceCount = 0
+        liveSelectedPerson = -1
+        liveFaceSnapshotPending = false
         liveAssignBox = null
         liveBrushKeepOriginal = false
         liveNote = if (liveAssignMode) getString(R.string.live_assign_hint)
@@ -3443,7 +3504,60 @@ class MainActivity : ComponentActivity() {
         liveAssignBox = null
         liveAssignCount = 0
         liveBrushKeepOriginal = false
+        liveSelectedPerson = -1
         liveNote = getString(R.string.live_assign_cleared)
+    }
+
+    /** Select a detected person from Live's fixed photo row, tracking them to the next frame. */
+    private fun selectLivePerson(person: Int) {
+        if (!liveRunning || !liveAssignMode) return
+        val reference = livePersonSnapshotBoxes?.asList()?.chunked(5)?.getOrNull(person)
+            ?: return
+        val current = liveFaceBoxes?.asList()?.chunked(5).orEmpty()
+        if (current.isEmpty()) {
+            liveNote = getString(R.string.live_assign_missed)
+            return
+        }
+        val rcx = (reference[0] + reference[2]) * 0.5f
+        val rcy = (reference[1] + reference[3]) * 0.5f
+        val rw = (reference[2] - reference[0]).coerceAtLeast(1f)
+        val rh = (reference[3] - reference[1]).coerceAtLeast(1f)
+        val best = current.minByOrNull { box ->
+            val cx = (box[0] + box[2]) * 0.5f
+            val cy = (box[1] + box[3]) * 0.5f
+            val cw = (box[2] - box[0]).coerceAtLeast(1f)
+            val ch = (box[3] - box[1]).coerceAtLeast(1f)
+            val distance = hypot(cx - rcx, cy - rcy) / maxOf(rw, rh)
+            // IoU helps when two people are close and their centres are similar.
+            val ix0 = maxOf(reference[0], box[0])
+            val iy0 = maxOf(reference[1], box[1])
+            val ix1 = minOf(reference[2], box[2])
+            val iy1 = minOf(reference[3], box[3])
+            val intersection = maxOf(0f, ix1 - ix0) * maxOf(0f, iy1 - iy0)
+            val union = rw * rh + cw * ch - intersection
+            distance + (1f - if (union > 0f) intersection / union else 0f) * 0.4f
+        }
+        if (best == null) return
+        val distance = hypot(
+            (best[0] + best[2]) * 0.5f - rcx,
+            (best[1] + best[3]) * 0.5f - rcy,
+        ) / maxOf(rw, rh)
+        if (distance > 3f) {
+            liveNote = getString(R.string.live_assign_missed)
+            return
+        }
+        liveSelectedPerson = person
+        assignLiveFace((best[0] + best[2]) * 0.5f,
+                       (best[1] + best[3]) * 0.5f)
+    }
+
+    private fun clearLiveFacePreview() {
+        livePersonThumbs = emptyList()
+        livePersonSnapshotBoxes = null
+        liveFaceBoxes = null
+        livePersonSnapshotFaceCount = 0
+        liveSelectedPerson = -1
+        liveFaceSnapshotPending = false
     }
 
     /**
@@ -3584,6 +3698,9 @@ class MainActivity : ComponentActivity() {
                 NativePipe.release(); PipeGuard.release(); return@launch
             }
             liveRunning = true
+            live.mirrorRecording = liveMirror
+            live.faceBoxesEnabled = liveAssignMode
+            clearLiveFacePreview()
             // THE GATE, on the live path. The source is already checked where it is picked
             // (see the source_image branch above), so what is left is the camera itself --
             // and a camera is the one input the user can change without touching the app.
@@ -3612,6 +3729,41 @@ class MainActivity : ComponentActivity() {
                     liveFrame = shot.bitmap
                     liveFaces = shot.faces
                     liveFps = shot.fps
+                }
+                if (liveAssignMode && liveRunning) {
+                    liveFaceBoxes = shot.faceBoxes
+                    // First get a cheap boxes-only result, then request one original camera
+                    // frame. This keeps full-resolution pre-swap pixels out of every Live
+                    // frame and guarantees that the thumbnails are real faces, not output.
+                    val detectedCount = shot.faceBoxes?.size?.div(5) ?: 0
+                    // A person can enter the camera after Assign mode was enabled.
+                    // Refresh only when the count grows; the normal frame path still
+                    // never creates thumbnails, and existing native assignments remain.
+                    if (detectedCount < livePersonSnapshotFaceCount)
+                        livePersonSnapshotFaceCount = detectedCount
+                    if (detectedCount > livePersonSnapshotFaceCount &&
+                        !liveFaceSnapshotPending) {
+                        liveFaceSnapshotPending = true
+                        live.requestFaceSnapshot()
+                    }
+                    val raw = shot.originalBgr
+                    val display = shot.bitmap
+                    val boxes = shot.faceBoxes
+                    if (raw != null && display != null && boxes?.isNotEmpty() == true) {
+                        val argb = NativePipe.bgrToArgb(
+                            raw, shot.originalW, shot.originalH,
+                            display.width, display.height,
+                        )
+                        val original = Bitmap.createBitmap(
+                            argb, display.width, display.height, Bitmap.Config.ARGB_8888)
+                        livePersonSnapshotBoxes = boxes
+                        livePersonSnapshotFaceCount = boxes.size / 5
+                        liveSelectedPerson = -1
+                        livePersonThumbs = boxes.asList().chunked(5).mapNotNull {
+                            cropPersonThumb(original, it)
+                        }
+                        liveFaceSnapshotPending = false
+                    }
                 }
                 // A pending assignment tap resolves on the frame after it was queued;
                 // this callback runs on the analyzer thread that liveFrame just ran on,
@@ -3661,6 +3813,9 @@ class MainActivity : ComponentActivity() {
         NativePipe.setTrackPeriod(0)
         // Assignments die with the pipeline the engine is about to release; the UI state
         // around them goes with them so a stale box or count cannot outlive the session.
+        live.faceBoxesEnabled = false
+        live.cancelFaceSnapshot()
+        clearLiveFacePreview()
         assignTapPending = false
         liveAssignBox = null; liveAssignCount = 0; liveSelectionBox = null
         liveFrame = null; liveFps = 0.0; liveFaces = 0

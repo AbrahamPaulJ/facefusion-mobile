@@ -88,6 +88,37 @@ fun SourceRow(
     }
 }
 
+/** Fixed camera photographs used to choose a Live person without tapping the feed. */
+@Composable
+fun DetectedFaceRow(
+    thumbs: List<Bitmap>,
+    selected: Int,
+    onSelect: (Int) -> Unit,
+    enabled: Boolean = true,
+) {
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        thumbs.forEachIndexed { index, thumb ->
+            val label = stringResource(R.string.swap_assign_person, index + 1)
+            Tile(
+                label = label,
+                selected = index == selected,
+                enabled = enabled,
+                onClick = { onSelect(index) },
+            ) {
+                Image(
+                    thumb.asImageBitmap(),
+                    contentDescription = label,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            }
+        }
+    }
+}
+
 /** One 62 dp square with a caption under it, selected or not. */
 @Composable
 private fun Tile(

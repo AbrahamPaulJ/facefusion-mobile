@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -32,6 +33,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.facefusion.mobile.R
+import com.facefusion.mobile.FaceDetectorCard
+import com.facefusion.mobile.SwapOptions
 import com.facefusion.mobile.SwapperInfoButton
 import com.facefusion.mobile.SwapperSegments
 import kotlinx.coroutines.delay
@@ -65,6 +68,9 @@ fun LiveScreen(
     faces: Int,
     useMySettings: Boolean,
     onUseMySettings: (Boolean) -> Unit,
+    /** The shared detector settings, edited before the next Live start. */
+    detectionOpts: SwapOptions = SwapOptions(),
+    onDetectionOptsChange: (SwapOptions) -> Unit = {},
     note: String?,
     modelsReady: Boolean,
     /** Start the model download. Live is reachable before any model exists. */
@@ -100,6 +106,10 @@ fun LiveScreen(
     hasHyperswap1c: Boolean = false,
     /** Assign-per-person mode: OFF is default behaviour, ON lets each face keep a source. */
     assignMode: Boolean = false,
+    /** Fixed photographs of the people found when Assign per person was enabled. */
+    personThumbs: List<Bitmap> = emptyList(),
+    selectedPerson: Int = -1,
+    onSelectPerson: (Int) -> Unit = {},
     /** Whether the brush is "keep the original face" rather than a source slot. */
     keepOriginalBrush: Boolean = false,
     onKeepOriginal: () -> Unit = {},
@@ -191,6 +201,19 @@ fun LiveScreen(
             onKeepOriginal = if (assignMode) onKeepOriginal else null,
             enabled = !finalizing,
         )
+        if (assignMode && personThumbs.isNotEmpty()) {
+            Text(
+                stringResource(R.string.live_detected_faces),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            DetectedFaceRow(
+                thumbs = personThumbs,
+                selected = selectedPerson,
+                onSelect = onSelectPerson,
+                enabled = running && !recording && !finalizing,
+            )
+        }
 
         // ---------------------------------------------------------------- the feed
         //
@@ -614,6 +637,53 @@ fun LiveScreen(
                 dismissButton = {
                     TextButton({ confirmSlow = false }) {
                         Text(stringResource(R.string.common_cancel))
+                    }
+                },
+            )
+        }
+
+        // Detector tuning is deliberately a separate, visible action: it is useful when
+        // the feed is stopped, but hiding it behind the source or swap controls made it
+        // hard to discover. The pipeline reads these values at start, so do not pretend
+        // that changing them during a run takes effect immediately.
+        var showDetectionSettings by rememberSaveable { mutableStateOf(false) }
+        OutlinedButton(
+            onClick = { showDetectionSettings = true },
+            enabled = !running && !recording && !finalizing,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(Icons.Filled.Settings,
+                 contentDescription = stringResource(R.string.live_detection_settings),
+                 modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.live_detection_settings))
+        }
+
+        if (showDetectionSettings) {
+            AlertDialog(
+                onDismissRequest = { showDetectionSettings = false },
+                title = { Text(stringResource(R.string.live_detection_settings)) },
+                text = {
+                    Column(
+                        Modifier.verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FaceDetectorCard(
+                            opts = detectionOpts,
+                            onChange = onDetectionOptsChange,
+                            expanded = true,
+                            onToggle = {},
+                        )
+                        Text(
+                            stringResource(R.string.live_detection_settings_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontSize = 11.sp,
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showDetectionSettings = false }) {
+                        Text(stringResource(R.string.swap_close))
                     }
                 },
             )

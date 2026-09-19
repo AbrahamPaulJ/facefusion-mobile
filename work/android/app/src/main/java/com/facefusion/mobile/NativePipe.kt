@@ -434,6 +434,10 @@ object NativePipe {
      * ⚠ Single-pump: the native frame buffer is a static. One caller at a time, which is
      * what STRATEGY_KEEP_ONLY_LATEST already guarantees.
      *
+     * [originalBgrOut] is optional and receives the PRE-SWAP camera frame for a one-shot
+     * assignment thumbnail. [faceBoxesOut] is optional and receives the current boxes in
+     * display-bitmap coordinates, five floats per face: x0, y0, x1, y1, score.
+     *
      * [gateThreshold] runs the content gate on the CAMERA frame, before anything swaps it,
      * and refuses above that score. NaN skips the check -- NOT a negative number, since gate
      * scores are themselves often negative -- which is how a caller says
@@ -452,14 +456,17 @@ object NativePipe {
         w: Int, h: Int,
         bmp: android.graphics.Bitmap, dstW: Int, dstH: Int,
         gateThreshold: Float,
+        mirrorRecording: Boolean,
         /**
          * Where to copy the FULL-RESOLUTION swapped frame as BGR, or null.
          *
          * Non-null only while a recording is running (roadmap 13b). It must be exactly
          * w*h*3 bytes; a wrong size is ignored rather than partly filled, because half a
          * frame would be recorded as a torn picture instead of reported as a bug.
-         */
+        */
         bgrOut: ByteArray?,
+        originalBgrOut: ByteArray?,
+        faceBoxesOut: FloatArray?,
     ): Int
 
     @JvmStatic external fun lastError(): String

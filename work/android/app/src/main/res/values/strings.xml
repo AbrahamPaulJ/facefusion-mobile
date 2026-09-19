@@ -484,6 +484,8 @@
 
 Turning it off runs your own Swap settings instead. This is experimental: the enhancer at 1024 can take the feed into single-figure frame rates, and lip sync has no audio to follow live.</string>
     <string name="live_fast_confirm_ok">Turn it off</string>
+    <string name="live_detection_settings">Detection settings</string>
+    <string name="live_detection_settings_hint">Changes apply the next time Live starts. Fast mode keeps tracking at its own performance preset; turn Fast mode off to use your selected tracking interval.</string>
     <string name="common_cancel">Cancel</string>
     <string name="common_delete">Delete</string>
     <string name="common_expand">Expand</string>
@@ -517,6 +519,7 @@ Turning it off runs your own Swap settings instead. This is experimental: the en
     <string name="live_source_label">Source %1$d</string>
     <string name="nav_live">Live</string>
     <string name="live_assign_title">Assign per person</string>
+    <string name="live_detected_faces">Detected faces</string>
     <string name="live_assign_off">Each face takes the selected source</string>
     <string name="live_assign_on">Nothing changes until you tap a face</string>
     <string name="live_assign_hint">Assign per person: select a source, then tap a face. Untapped faces keep their source.</string>
