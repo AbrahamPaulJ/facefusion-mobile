@@ -6,7 +6,7 @@
 #                                  # faithful proxy for the quantised build (trap #24)
 #   ./convert.sh <name>            # full W8A16 build -> context binary
 #
-# names: arcface | fan2d | yoloface | hyperswap | inswapper | nsfw | gpen | wav2lip
+# names: arcface | fan2d | yoloface | hyperswap | inswapper | gpen | wav2lip
 #
 # Every graph here is a conv model, so --preserve_io layout on the image tensors is
 # MANDATORY (trap #7: omitting it measured -0.75 dB with nothing looking broken).
@@ -72,13 +72,6 @@ case "$NAME" in
     DIMS=(--input_dim target 1,3,256,256 --input_dim source 1,512)
     PRESERVE=(--preserve_io layout target output)
     ;;
-  nsfw)
-    # The content gate.  A ViT-Small: the whole surgery is constant folding, which also
-    # removes the Expand and every Slice (prepare_onnx.py:do_nsfw).
-    ONNX=$FF/work/onnx/nsfw_2_sim.onnx
-    DIMS=(--input_dim input 1,3,384,384)
-    PRESERVE=(--preserve_io layout input)
-    ;;
   gpen)
     # The face enhancer, after prepare_onnx.py:do_gpen made every modulated conv kernel
     # static -- 20 of its 45 convs took a COMPUTED kernel as exported, which HTP cannot map,
@@ -118,25 +111,8 @@ esac
 # float and W8A16 builds must not share an output dir: the float run was overwriting
 # ${NAME}_net.json, so an encoding scan silently read bitwidth-0 tensors.
 #
-# nsfw INVERTS that: fp32 is its SHIPPING build and W8A16 is the experiment, so it is the
-# float build that gets the bare name and the quantised one that is suffixed.  Measured
-# 2026-08-24: W8A16 shifts the gate's decision statistic +0.075 mean / +0.153 max, 16 of 16
-# held-out frames toward flagging, against a 0.25 threshold, while the fp32 context tracks
-# the host at -0.012.  The gate is SAMPLED (~11 calls per video, not per frame), so
-# quantising it buys 7.3 MB and 10 ms and costs false refusals (docs/roadmap.md 2).
 NAME_SUFFIX=""
-if [ "$NAME" = "nsfw" ]; then
-  # "q2", not "q": the quantised gate's encodings are calibrated for the INPUT RANGE the
-  # app feeds it, and that range changed on 2026-08-30 from [0,1] to [-1,1] (the range
-  # facefusion actually uses). An app on the new range with a `nsfwq_` built for the old
-  # one is silently wrong -- the input lands outside the calibrated interval and clamps.
-  # A new FILENAME makes that incompatibility impossible to hit by accident: an app that
-  # wants `nsfwq2_` simply does not find `nsfwq_`, reports the gate missing, and offers
-  # the download. Renaming is the cheapest way to turn a silent mismatch into a prompt.
-  [ "$MODE" != "--float" ] && [ "$MODE" != "--layout" ] && NAME_SUFFIX="q2"
-else
-  [ "$MODE" = "--float" ] && NAME_SUFFIX="f"
-fi
+[ "$MODE" = "--float" ] && NAME_SUFFIX="f"
 [ "${WBW:-8}" != "8" ] && NAME_SUFFIX="${NAME_SUFFIX}w${WBW}"
 [ "${ABW:-16}" != "16" ] && NAME_SUFFIX="${NAME_SUFFIX}a${ABW}"
 [ "${QOPT:-pc}" != "pc" ] && NAME_SUFFIX="${NAME_SUFFIX}${QOPT}"

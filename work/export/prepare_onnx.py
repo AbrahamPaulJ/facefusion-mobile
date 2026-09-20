@@ -579,51 +579,6 @@ def do_yoloface_slicefix():
 	return save(m, 'yoloface_8n_slicefix')
 
 
-# ---------------------------------------------------------------------- nsfw
-
-def do_nsfw():
-	"""`nsfw_2`, the content gate.  The whole surgery is constant folding.
-
-	It is a ViT-Small: 12 blocks, one patch-embedding Conv, one Gemm head, output [1, 2].
-	The raw graph carries the usual ViT cls-token scaffolding -- Shape -> Slice -> Equal ->
-	Where -> ConstantOfShape -> Expand -- which reads the batch dimension at runtime.  The
-	input is already static at [1, 3, 384, 384], so all of it folds:
-
-	    636 nodes / 24 op types  ->  380 nodes / 15 op types
-
-	and with it goes the `Expand` that trap #4 says QNN rejects, plus every `Slice`, which
-	is the op that blocks the detector under 2.28.  Nothing has to be rewritten by hand.
-
-	⚠ Unlike the other five, this task runs onnxsim ITSELF and writes `_sim` directly.  For
-	the others the simplify pass is a separate manual step; folding is the entire surgery
-	here, so splitting it in two would leave a `nsfw_2.onnx` in work/onnx/ that nothing
-	consumes and that no verification covers.
-
-	All 152 initialisers are already fp32 -- checked, because this is exactly what
-	`hyperswap` hid (docs/roadmap.md 1.7).
-	"""
-	import onnxsim
-
-	m = load('nsfw_2')
-	fp16 = sum(1 for t in m.graph.initializer if t.data_type == 10)
-	print('  fp16 initialisers: %d (want 0 -- see hyperswap)' % fp16)
-
-	before = len(m.graph.node)
-	s, ok = onnxsim.simplify(m, overwrite_input_shapes={'input': [1, 3, 384, 384]})
-	if not ok:
-		sys.exit('  onnxsim reported failure')
-	print('  simplified %d -> %d nodes' % (before, len(s.graph.node)))
-
-	for op in ('Expand', 'Slice', 'Shape', 'Where', 'ConstantOfShape', 'Cast'):
-		left = sum(1 for n in s.graph.node if n.op_type == op)
-		if left:
-			print('  WARNING: %d %s survived the fold' % (left, op))
-
-	s = shape_inference.infer_shapes(strip_value_info(s), strict_mode=False)
-	checker.check_model(s)
-	return save(s, 'nsfw_2_sim')
-
-
 SHAPE_OPERANDS = {
 	# op          -> the input positions that carry shape, not data
 	'Reshape':    (1,),
@@ -1515,7 +1470,8 @@ def do_edtalk():
 	Screened and rejected once on an op census of the RAW graph -- 4772 nodes, 2 `If`,
 	65 `ConstantOfShape` -- which was the wrong screen.  onnxsim with the three input
 	shapes pinned folds it to 1170 nodes and BOTH `If` nodes away, which is the same step
-	that was the entire surgery for `nsfw_2`.  What is left needs two correctness fixes:
+	that was the same constant-folding surgery used by another graph. What is left needs
+	two correctness fixes:
 
 	1. ⚠ **onnxsim 0.4.36 mis-lowers one node, and the graph it writes is WRONG.**  Inside
 	   the `If` branch it folds is a `Reshape(conv_out, [-1, 0])` -- torch's `view(-1, 0)`
@@ -1539,7 +1495,7 @@ def do_edtalk():
 	   `Shape -> Slice -> Squeeze -> Unsqueeze -> Concat -> ConstantOfShape -> EyeLike`
 	   chain is a 26x26 identity matrix, read out of onnxruntime rather than inferred --
 	   shape inference cannot size it (`unk__471`).  Folding it to an initializer is the
-	   same move `do_nsfw` makes wholesale, and it takes the last unconvertible op out.
+	   same move makes wholesale, and it takes the last unconvertible op out.
 
 	Both are exact -- the code checks it, `worst_snr`/`worst` at the bottom read 0.0 / 347 dB
 	with the two surgeries below disabled. Then two reassociating surgeries that are NOT
@@ -1705,7 +1661,6 @@ TASKS = {
 	# reads `hyperswap_1a_256_fp32.onnx`, so `all` has to produce it or a clean rebuild
 	# stops at a missing file.
 	'hyperswap_fp32': do_hyperswap_fp32,
-	'nsfw': do_nsfw,
 	'gpen': do_gpen,
 	'yoloface_slicefix': do_yoloface_slicefix,
 	'inswapper': do_inswapper,

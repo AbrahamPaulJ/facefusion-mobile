@@ -34,8 +34,8 @@ def run(path):
         elif n.op_type in ('Gemm','MatMul'):
             # input[1] is an INITIALIZER for a weight matmul and an ACTIVATION for the two
             # matmuls inside attention (q@k^T, attn@v).  Looking only in `init` silently
-            # dropped both of those from the total: nsfw_2 came out 3.15 GMAC against a
-            # true 4.68, a 33% under-count that showed up only as `[unresolved: 24]`.
+            # dropped both of those from the total: an attention graph can be substantially
+            # under-counted, which showed up only as `[unresolved: 24]`.
             # 24 == 12 transformer blocks x 2.  Any attention graph hit this.
             w = init.get(n.input[1]) or sh.get(n.input[1]); o = sh.get(n.output[0])
             if not (w and o): unresolved.append((n.op_type, n.name)); continue

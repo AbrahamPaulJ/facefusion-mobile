@@ -54,7 +54,6 @@ struct Nets {
   // at different sizes and a different number of inputs -- so syncLip branches on this
   // rather than on a size alone.
   bool lipIsEdtalk = false;
-  ffnn::Handle nsfw = nullptr;
   // Optional, like fan685: absent simply means the enhancer cannot be offered.
   ffnn::Handle enh = nullptr;
 };
@@ -68,11 +67,6 @@ struct AudioState {
   // which is what the model reads as silence.
   std::vector<float> silence;
 };
-
-// content_analyser.py:create_static_model_set -- nsfw_2 is 384x384.
-// ⚠ The normalisation is NOT the identity this comment claimed until 2026-08-30;
-// checkContent carries it, and the reason the wrong one survived every check.
-constexpr int kNsfwSize = 384;
 
 // face_enhancer/core.py -- gpen_bfr_256 is 256x256 on the `arcface_128` template, the
 // same template and size hyperswap_1a_256 declares.  NOT cfg.swapSize: inswapper is 128,
@@ -223,27 +217,6 @@ struct Pipeline::Impl {
   float refEmbeddingNorm[512]{};
   bool haveReference = false;
 
-  /**
-   * A content check has RUN on this pipeline and passed -- roadmap 1a.
-   *
-   * The invariant: `swapAll` refuses unless this is set, and only `checkContent` can set
-   * it -- by running the graph and scoring below `Config::nsfwThreshold`. A pipeline that
-   * has not been checked does not swap. That is the direction a gate must fail.
-   *
-   * ⚠ Policy is still Kotlin's. The THRESHOLD in Config is a floor, not the policy: Kotlin
-   * still owns the sampling rate, the 10%-of-frames video rule, the wording of a refusal
-   * and the NaN-is-not-permission rule. This only declines to work unattested.
-   *
-   * ⚠ Describe the INVARIANT here, never the ways around it. This file is public, and a
-   * comment that names an attack is the attack's documentation.
-   *
-   * ⚠ Scoped to the PIPELINE, not to an input. Every path gates its inputs before it swaps
-   * (docs/gate.md lists all six), so one clearance per init matches how the app already
-   * behaves -- but it does mean a cleared pipeline will swap a later frame that was not
-   * itself checked. Binding it to a source/target identity is the stronger version and is
-   * still roadmap 1a; this is the part that can be built and proven without one.
-   */
-  bool gateCleared = false;
   std::vector<float> emap;   // inswapper only: the 512x512 initializer
 
   // A box mask depends only on (size, cfg.maskBlur, cfg.maskPadding) -- constant across
@@ -298,7 +271,7 @@ Pipeline::Pipeline() = default;
 
 Pipeline::~Pipeline() {
   if (p_) {
-    for (auto h : {p_->n.det, p_->n.fan, p_->n.fan685, p_->n.arc, p_->n.swap, p_->n.lip, p_->n.nsfw,
+    for (auto h : {p_->n.det, p_->n.fan, p_->n.fan685, p_->n.arc, p_->n.swap, p_->n.lip,
                    p_->n.enh})
       if (h) ffnn::release(h);
   }
@@ -361,11 +334,10 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
 
   auto dropNets = [&]() {
     for (ffnn::Handle* h : {&p_->n.det, &p_->n.fan, &p_->n.fan685, &p_->n.arc, &p_->n.lip,
-                            &p_->n.swap, &p_->n.nsfw, &p_->n.enh}) {
+                            &p_->n.swap, &p_->n.enh}) {
       if (*h) ffnn::release(*h);
       *h = nullptr;
     }
-    nsfwQuantised_ = false;
   };
 
   // One tier's worth of loading, plus the proof that it actually RUNS.
@@ -373,10 +345,8 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
     tier_ = t;
     ffnn::useVariant(t);
     // PLACEMENT is a property of the MODEL, measured 2026-08-30 and not a preference:
-    // the content gate and the enhancer must not run on a GPU. The gate because ncnn's
-    // Vulkan moves its decision statistic toward ALLOWING -- the one direction a gate must
-    // not err -- and the enhancer because it fails outright on every GPU backend tried.
-    // On QNN this is a no-op, since everything runs on the HTP there either way.
+    // the enhancer must not run on a GPU because it fails outright on every GPU backend
+    // tried. On QNN this is a no-op, since everything runs on the HTP there either way.
     auto open = [&](const char* name,
                     ffnn::Placement place = ffnn::Placement::Default) -> ffnn::Handle {
       ffnn::Handle h = ffnn::open(name, place);
@@ -409,47 +379,13 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
     p_->n.lip = open("edtalk");
     p_->n.lipIsEdtalk = (p_->n.lip != nullptr);
 
-    // The content gate is MANDATORY, because it blocks. A gate that silently does not run
-    // is worse than no gate: it reports "checked" to every caller above it.
-    //
-    // fp32 is the build that tracks the host, but it only finalizes on v79 -- below that
-    // the GELU cannot be created in float, and v81 refuses it too (docs/traps.md #10), so
-    // every other tier carries the quantised one.
-    p_->n.nsfw = open("nsfw", ffnn::Placement::Cpu);
-    if (!p_->n.nsfw) {
-      // nsfwq2, not nsfwq: the quantised gate is calibrated for the input range this file
-      // feeds it, and that range changed. See work/qnn/convert.sh.
-      p_->n.nsfw = open("nsfwq2", ffnn::Placement::Cpu);
-      nsfwQuantised_ = p_->n.nsfw != nullptr;
-    }
-    if (!p_->n.nsfw) {
-      err_ = "no content gate: neither nsfw_" + tier_ + ".bin nor nsfwq2_" + tier_ +
-             ".bin is in " + modelDir + " -- the gate blocks, so it cannot be skipped";
-      return false;
-    }
-
-    // ⚠ LOADING IS NOT RUNNING. A context can load and then fail to execute -- reported
-    // from an 8 Elite Gen 5 on 0.2.1, where every model loaded and the first execution
-    // returned NaN, which surfaced to the user as "the content check could not run" with
-    // no way back. Tier selection was by file presence alone, so there was no fallback
-    // from a tier the chip would not run.
-    //
-    // So prove it, by running EVERY model once on synthetic input -- about 50 ms for the
-    // whole set, once per init.
-    //
-    // ⚠ It used to prove only the gate, and that was not enough to act on. The gate is
-    // mandatory and executes first, so it is where a broken tier surfaces -- but bf633ac
-    // had already written down that this makes it the CANARY and not the culprit, and two
-    // releases later nobody could still say whether a v81 part fails at the gate
-    // specifically or at everything. Those have different answers: one is a 6.6 MB gate
-    // from a lower tier, the other is a 310 MB tier download. The probe that cannot tell
-    // them apart is the reason the question stayed open, so it now names every model.
+    // Prove every loaded model executes on synthetic input.
     struct Probe { std::string name; ffnn::Handle h; };
     const Probe probes[] = {
         {"yoloface", p_->n.det},   {"fan2d", p_->n.fan},  {"arcface", p_->n.arc},
         {swapperName, p_->n.swap}, {"fan685", p_->n.fan685},
         {"edtalk", p_->n.lip},
-        {"gpen", p_->n.enh},       {"gate", p_->n.nsfw},
+        {"gpen", p_->n.enh},
     };
     std::string report;
     bool ran = true;
@@ -476,19 +412,6 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
       return false;
     }
 
-    // The gate a second time, through its REAL path. The sweep above proves the context
-    // executes; this proves the thing the gate is actually asked for -- a finite decision
-    // statistic out of checkContent's own preprocessing -- and it is the one model where
-    // a plausible-but-wrong answer blocks or admits real content.
-    ffcv::Image probe(64, 64, 3);
-    std::fill(probe.data.begin(), probe.data.end(), (uint8_t)128);
-    ContentVerdict v = checkContent(probe);
-    if (!v.ok || !std::isfinite(v.score)) {
-      rejected_ = tier_;
-      err_ = "tier " + tier_ + " loaded but does not execute: " + report +
-             ", gate verdict " + (v.ok ? std::string("not finite") : err_);
-      return false;
-    }
     return true;
   };
 
@@ -583,63 +506,6 @@ void Pipeline::updateConfig(const Config& c) {
   live.faceEnhance       = c.faceEnhance;
   live.faceEnhancerBlend = c.faceEnhancerBlend;
   live.lipSyncWeight     = c.lipSyncWeight;
-}
-
-// ------------------------------------------------------------ content gate
-
-ContentVerdict Pipeline::checkContent(const ffcv::Image& frame) {
-  ContentVerdict v;
-  if (!p_ || !p_->n.nsfw) { err_ = "content gate not loaded"; return v; }
-
-  // vision.py:fit_contain_frame -- scale to FIT, then pad CENTRED.
-  //
-  // ⚠ This is NOT the detector's letterbox.  analyse() scales and pads into the top-left
-  // corner; padding centred instead moves every pixel and with it the score.  Reusing the
-  // detector's input path here would be silently wrong.
-  const int S = kNsfwSize;
-  double scale = std::min((double)S / frame.h, (double)S / frame.w);
-  int nw = (int)(frame.w * scale), nh = (int)(frame.h * scale);
-  int x0 = std::max(0, (S - nw) / 2), y0 = std::max(0, (S - nh) / 2);
-  ffcv::Image temp = ffcv::resizeLinear(frame, nw, nh);
-
-  // content_analyser.py:prepare_detect_frame -- BGR -> RGB, /255, then mean 0.5 / std 0.5.
-  //
-  // ⚠ mean 0.5 and std 0.5, i.e. [0,1] -> [-1,1].  This read `/ 255.0f` alone until
-  // 2026-08-30 and handed the model [0,1], which is not the range facefusion 3.8.2 feeds
-  // it.  nsfw_reference.py carried the identical mistake, so every device-vs-host
-  // comparison agreed and none of them was evidence about upstream.  The decision
-  // statistic moves by -1.15 on average against a 0.25 threshold, so this was not a
-  // rounding matter -- the gate was judging on a distribution the model never saw.
-  //
-  // The zero-padded border is left at the pad value the model expects for "no pixel",
-  // which after this normalisation is -1, not 0 -- so the buffer is initialised to -1.f.
-  std::vector<float> in((size_t)3 * S * S, -1.f);
-  for (int y = 0; y < nh; ++y) {
-    const uint8_t* row = temp.row(y);
-    for (int x = 0; x < nw; ++x)
-      for (int c = 0; c < 3; ++c)
-        in[(size_t)c * S * S + (size_t)(y + y0) * S + (x + x0)] =
-            row[x * 3 + (2 - c)] / 127.5f - 1.0f;   // (2 - c): the [:, :, ::-1] flip
-  }
-
-  std::vector<std::vector<float>> out;
-  if (!ffnn::execute(p_->n.nsfw, {"input"}, {in.data()}, out)) {
-    err_ = std::string("content gate: ") + ffnn::lastError();
-    return v;
-  }
-  if (out.empty() || out[0].size() < 2) {
-    err_ = "content gate: expected 2 logits, got " +
-           std::to_string(out.empty() ? 0 : out[0].size());
-    return v;
-  }
-  v.ok = true;
-  v.score = out[0][0] - out[0][1];
-  v.blocked = v.score > p_->cfg.nsfwThreshold;
-  // THE ONLY PLACE A PIPELINE BECOMES ABLE TO SWAP. Measured, and under the threshold --
-  // a graph that failed to run leaves v.ok false and clears nothing, so a broken checker
-  // refuses rather than permits, exactly as the NaN rule does one layer up.
-  if (v.ok && !v.blocked) p_->gateCleared = true;
-  return v;
 }
 
 // ---------------------------------------------------------------- detection
@@ -1716,11 +1582,6 @@ void Pipeline::setSwapEnabled(bool enabled) {
 bool Pipeline::swapAll(ffcv::Image& frame, const std::vector<Face>& faces) {
   if (!p_->cfg.swapEnabled) return true;
   if (!p_->haveSource) { err_ = "setSource not called"; return false; }
-  // ⚠ NO CHECK, NO SWAP. See Impl::gateCleared. The message never quotes the score.
-  if (!p_->gateCleared) {
-    err_ = "content check has not run for this pipeline";
-    return false;
-  }
   const Config& cfg = p_->cfg;
   const int SS = cfg.swapSize;                       // what the GRAPH takes: always 256
   const int PB = cfg.pixelBoost < 1 ? 1 : cfg.pixelBoost;

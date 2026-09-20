@@ -22,9 +22,6 @@ SPECS = {
 				  ('source', 'swap_source', 1 * 512)],
 	'inswapper': [('target', 'swap_target_128', 1 * 3 * 128 * 128),
 				  ('source', 'swap_source_128', 1 * 512)],
-	# The content gate.  Its frames are letterboxed by fit_contain_frame -- centred pad,
-	# NOT the detector's corner pad -- so they come from their own capture.
-	'nsfw':      [('input',  'nsfw',        1 * 3 * 384 * 384)],
 	# The face enhancer. Its calibration is the SWAPPER'S OUTPUT crop, captured downstream
 	# of the swapper in run_reference.swap_face -- gpen never sees a target crop, only a
 	# face hyperswap has already written, so `swap_target` would be the wrong distribution.
@@ -54,7 +51,7 @@ def build(name, limit=0, required=True):
 
 	Bare `make_calib_lists.py` walks every spec, and `inswapper` has no calibration on this
 	machine -- so the unconditional exit killed the run at inswapper and silently never
-	reached `nsfw` or `gpen`, which come after it in SPECS order.  A set asked for BY NAME
+	reached later optional sets in SPECS order.  A set asked for BY NAME
 	still exits: there the absence is the answer to the question.
 	"""
 	spec = SPECS[name]

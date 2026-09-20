@@ -9,11 +9,10 @@ import java.nio.ByteBuffer
 /**
  * Sampled frames straight out of the decoder, as BGR.
  *
- * A second opinion for the content gate, for files [android.media.MediaMetadataRetriever]
- * will not give frames for. The retriever is a convenience wrapper and returns null for
- * timestamps that MediaCodec decodes without complaint; this is the same
- * MediaExtractor + MediaCodec path [VideoSwapper] uses for the swap itself, so anything the
- * swapper can process, the gate can now sample.
+ * A decoder fallback for files [android.media.MediaMetadataRetriever] will not give frames
+ * for. The retriever is a convenience wrapper and returns null for timestamps that
+ * MediaCodec decodes without complaint; this is the same MediaExtractor + MediaCodec path
+ * [VideoSwapper] uses for the swap itself.
  *
  * ⚠ It is a fallback, NOT a rescue. If the codec cannot configure the stream at all -- the
  * clip in work/assets is `video/mp4v-es` at 1366x2160, which is far outside that profile's

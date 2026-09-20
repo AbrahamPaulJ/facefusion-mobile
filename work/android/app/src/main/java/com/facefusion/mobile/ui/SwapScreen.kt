@@ -899,8 +899,7 @@ fun SwapScreen(
                 bitmap = preview.swapped,
                 placeholder = when {
                     modelsMissing -> ""
-                    // Already a finished, localized sentence from the Activity -- notably
-                    // the content gate's refusal, which must not be rebuilt here.
+                    // Already a finished, localized sentence from the Activity.
                     preview.note != null -> preview.note
                     preview.busy && !preview.warm ->
                         stringResource(R.string.swap_loading_models)

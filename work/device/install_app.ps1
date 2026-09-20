@@ -37,7 +37,7 @@ if (-not $serial) {
                ForEach-Object { ($_ -split '\s+')[0] } | Select-Object -First 1)
 }
 if (-not $serial) { Write-Output "no adb device; connect one or set FF_ADB_SERIAL"; exit 1 }
-# Must match build.gradle.kts, which derives the id from whether ContentGate.kt exists.
+# Must match build.gradle.kts.
 $pkg    = if ($Dev) { "com.facefusion.mobile.dev" } else { "com.facefusion.mobile" }
 # FULLY QUALIFIED, and NOT "$pkg/.MainActivity".  A leading dot is resolved against the
 # applicationId, which -Dev changes; the CLASS is in the namespace, which it does not.
@@ -135,23 +135,18 @@ if (-not $NoModels) {
     Write-Output "models dir: $owner"
 
     if ($Dev) {
-        # Seed from the gated app, which is almost always already on the phone with a tier
+        # Seed from the primary app, which is almost always already on the phone with a tier
         # downloaded.  -n so an existing dev copy is never overwritten, and every file is
         # hash-checked by the loop below regardless: this is an optimisation, not trust.
         $src = "/sdcard/Android/data/com.facefusion.mobile/files/models"
         $n = ((& $adb -s $serial shell "ls $src/*.bin 2>/dev/null | wc -l") -join "").Trim()
         if ($n -match '^[0-9]+$' -and [int]$n -gt 0) {
-            Write-Output "seeding from the gated app ($n files, on-device copy)"
+            Write-Output "seeding from the primary app ($n files, on-device copy)"
             & $adb -s $serial shell "cp -n $src/*.bin $files/models/ 2>/dev/null"
         }
     }
 
-    # The gate context ships on BOTH lines and is mandatory on both: it blocks on main, and
-    # even with -Dev `ffpipe::init` opens it with the rest and fails hard when it is absent.
-    # fp32 `nsfw` is the shipping build but only finalizes on v79; below that the quantised
-    # `nsfwq` is the only one that exists, so push whichever this tier has.
     $models = @("yoloface", "fan2d", "arcface", $Swapper)
-    if (Test-Path "$ff\work\device\nsfw_$Tier.bin") { $models += "nsfw" } else { $models += "nsfwq" }
 
     foreach ($m in $models) {
         $p = "$ff\work\device\${m}_$Tier.bin"

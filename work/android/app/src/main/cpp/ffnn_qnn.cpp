@@ -22,12 +22,8 @@ std::vector<std::string> g_chain;
 // just returned false, or it is empty and the runner's error is the live one.
 //
 // Without that clear, the pipeline could not report why a tier failed to EXECUTE, because
-// loading always poisoned it first. `ffpipe::init` tries `nsfw` before `nsfwq2`, and on
-// every tier except v79 the fp32 gate does not exist -- by design, it does not build there
-// -- so the miss is expected, unavoidable and happens on the way to a SUCCESSFUL open.
-// It left "load .../nsfw_v81.bin: open .../nsfw_v81.bin" here for the rest of the process.
-// When the gate then failed `graphExecute`, ffpipe printed that stale line instead, and an
-// 8 Elite Gen 5 owner was told a file was missing while looking at it in the inventory.
+// loading always poisoned it first. The loader now reports only errors for required graphs,
+// so optional model failures do not obscure a successful pipeline initialization.
 // Two releases went to a device nobody here owns without the error code that would have
 // explained them.
 std::string g_err;

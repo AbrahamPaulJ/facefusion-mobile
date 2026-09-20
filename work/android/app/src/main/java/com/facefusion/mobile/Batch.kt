@@ -53,9 +53,7 @@ data class BatchItem(
 /**
  * Where one queued target got to.
  *
- * ⚠ [Refused] is deliberately NOT [Failed]. The content gate blocking a clip is the app
- * working, and a batch of twelve in which one is refused has eleven successes and one
- * correct refusal — not a failure to investigate. They are shown differently and counted
- * separately for that reason.
+ * ⚠ [Refused] is deliberately NOT [Failed]. A clip can be skipped without making the
+ * batch itself a failure, and the two states are shown separately for that reason.
  */
 enum class BatchState { Waiting, Running, Done, Refused, Failed, Skipped }

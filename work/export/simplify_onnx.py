@@ -4,7 +4,7 @@ This step existed nowhere in the repo.  `prepare_onnx.py` writes the SURGERY out
 (`arcface_w600k_r50_b1.onnx`, `2dfan4_heatmaps.onnx`, `yoloface_8n_b1.onnx`), and
 `convert.sh` reads `..._sim.onnx` -- so a clean rebuild from the documented commands
 stopped at `ERROR: no .../arcface_w600k_r50_b1_sim.onnx`, with nothing to say what made
-it.  Three of the six graphs run onnxsim inside their own task (`nsfw`, `gpen`, and
+it.  Two graphs run onnxsim inside their own task (`gpen` and
 `hyperswap`'s fp32 demotion); these three did not, and the gap was invisible until every
 intermediate was deleted at once.
 

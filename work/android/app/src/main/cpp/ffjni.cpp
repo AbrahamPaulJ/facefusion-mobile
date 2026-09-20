@@ -155,8 +155,8 @@ Java_com_facefusion_mobile_NativePipe_initEx(JNIEnv* env, jclass, jstring jLib, 
   // PUSHED, not passed. There are four paths into init -- the preview, runSwap, the
   // self-test and the API -- and a per-call-site argument is a list you can be absent
   // from: the fifth one added later would compile, run, and quietly reload the tier this
-  // device has already proved it cannot execute. Same reasoning the content gate is
-  // written down with, for the same reason.
+  // device has already proved it cannot execute. Keeping this list centralized prevents
+  // callers from forgetting the fallback decision.
   cfg.skipVariants = g_skipTiers;
 
   bool ok = g_pipe->init(jstr(env, jLib), jstr(env, jSkel), jstr(env, jModels), swapper, cfg);
@@ -376,28 +376,6 @@ Java_com_facefusion_mobile_NativePipe_setSkipTiers(JNIEnv* env, jclass, jstring 
 JNIEXPORT void JNICALL
 Java_com_facefusion_mobile_NativePipe_release(JNIEnv*, jclass) { g_pipe.reset(); }
 
-// The content gate on one BGR frame.  Returns upstream's decision statistic,
-// `logit[0] - logit[1]`, or NaN if the graph did not run.
-//
-// A raw score rather than a boolean: the threshold is a policy constant that belongs with
-// the policy, and the caller needs the number to log how much margin there was.  NaN for
-// failure because there is no in-band float that could be mistaken for a real score --
-// returning `false` on error would silently ALLOW everything the moment the gate broke.
-JNIEXPORT jfloat JNICALL
-Java_com_facefusion_mobile_NativePipe_contentScore(JNIEnv* env, jclass, jbyteArray jBgr,
-                                                   jint w, jint h) {
-  if (!g_pipe) { g_err = "pipeline not initialised"; return NAN; }
-  ffcv::Image img(w, h, 3);
-  if ((size_t)env->GetArrayLength(jBgr) != img.data.size()) {
-    g_err = "contentScore: frame is not w*h*3 bytes";
-    return NAN;
-  }
-  env->GetByteArrayRegion(jBgr, 0, (jsize)img.data.size(), (jbyte*)img.data.data());
-  ffpipe::ContentVerdict v = g_pipe->checkContent(img);
-  if (!v.ok) { g_err = g_pipe->error(); return NAN; }
-  return v.score;
-}
-
 // Which faces are in this frame, as boxes -- five floats each: x0, y0, x1, y1, score.
 //
 // A flat float[] rather than an object array: five numbers per face crossing JNI once beats
@@ -484,11 +462,6 @@ Java_com_facefusion_mobile_NativePipe_hasReferenceFace(JNIEnv*, jclass) {
   // change releases it), and answering "no" then would drop a selection that is still set.
   return (!g_refEmbedding.empty() || (g_pipe && g_pipe->hasReferenceFace()))
              ? JNI_TRUE : JNI_FALSE;
-}
-
-JNIEXPORT jboolean JNICALL
-Java_com_facefusion_mobile_NativePipe_contentGateIsQuantised(JNIEnv*, jclass) {
-  return (g_pipe && g_pipe->contentGateIsQuantised()) ? JNI_TRUE : JNI_FALSE;
 }
 
 // Whether gpen_<tier>.bin was present at init. Drives whether the switch is OFFERED, so it
@@ -1087,7 +1060,7 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
                                                 jobject jV, jint vRow, jint vPix,
                                                 jint w, jint h,
                                                 jobject jBitmap, jint dstW, jint dstH,
-                                                jfloat gateThreshold, jbyteArray jBgrOut) {
+                                                jbyteArray jBgrOut) {
   if (!g_pipe) { g_err = "pipeline not initialised"; return -1; }
   if (w <= 0 || h <= 0) { g_err = "liveFrame: empty frame"; return -1; }
 
@@ -1125,29 +1098,6 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
       p[1] = clamp8((c - 100 * Uv - 208 * Vv + 128) >> 8);   // G
       p[2] = clamp8((c + 409 * Vv + 128) >> 8);              // R
     }
-  }
-
-  // THE GATE, on the frame the camera produced and BEFORE anything swaps it.
-  //
-  // NaN means this frame is not a sample -- the caller decides which frames are, because
-  // the sampling rate is policy and policy is Kotlin's (see ContentGate). The NUMBER is
-  // Kotlin's too: it is passed in, never compiled in here, so there is exactly one
-  // definition of the threshold in the app.
-  //
-  // ⚠ NaN is the sentinel and NOT a negative value, which is what this first read. Gate
-  // scores are routinely negative -- a source frame logs around -2.4 -- so "negative means
-  // do not check" would silently disable the gate for any threshold below zero, which is
-  // exactly the threshold someone lowers it to when TESTING that the gate still blocks. A
-  // gate must never fail open, least of all while being verified.
-  //
-  // ⚠ Written as !(score <= t) rather than (score > t) on purpose: a NaN score -- the gate
-  // graph failed to run -- fails BOTH comparisons, and only this spelling refuses on it.
-  // `ok` is true for ALLOW alone, so a measurement that did not happen is a refusal, never
-  // a pass. Same rule as ContentGate.judge.
-  if (!std::isnan((float)gateThreshold)) {
-    ffpipe::ContentVerdict v = g_pipe->checkContent(frame);
-    if (!v.ok) { g_err = g_pipe->error(); return -3; }
-    if (!(v.score <= gateThreshold)) return -2;
   }
 
   // Assign mode analyses with noTrack: the tracker's reconstructed boxes are a speed

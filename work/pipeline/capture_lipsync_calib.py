@@ -161,7 +161,7 @@ def main():
 	if not windows:
 		sys.exit('no mel windows -- audio too short for %g fps' % args.fps)
 
-	# Split by PARITY, the rule gpen and nsfw already use: the held-out set is the odd
+	# Split by PARITY: the held-out set is the odd
 	# frames, so it is disjoint from calibration rather than merely the tail of the same
 	# sequence. Consecutive video frames are correlated and this is still a friendly test,
 	# but it is at least not the set that trained the encodings.

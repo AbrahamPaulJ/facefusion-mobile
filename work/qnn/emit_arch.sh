@@ -47,7 +47,7 @@ emit() {
   local name=$1 arch=$2 vtcm=$3
   local src=$HOME/ff-build/${name}${BUILD_TAG}
   # $name is the BUILD DIRECTORY, which is not always the graph name: a variant build like
-  # `nsfwq` or `hyperswap_fp16src` carries the suffix in its directory while the graph
+  # `hyperswap_fp16src` carries the suffix in its directory while the graph
   # inside it -- the lib, and the `graph_names` the context declares -- keeps the bare name.
   # Deriving the graph from the lib that is actually there fixes both at once.  Hard-coding
   # lib${name}.so silently SKIPPED every variant, and hard-coding graph_names[$name] would
@@ -110,7 +110,7 @@ PY
 }
 
 if [ "${1:-}" = "all" ]; then
-  GRAPHS="yoloface fan2d arcface hyperswap nsfw"
+  GRAPHS="yoloface fan2d arcface hyperswap"
   echo "=== QAIRT $QSDK: every graph, every tier ==="
   for t in $TIERS; do
     echo "-- dsp_arch ${t%%:*}, vtcm ${t##*:} MB"
@@ -120,7 +120,7 @@ else
   ARCH=${1:?usage: emit_arch.sh <arch> <vtcm_mb> [graphs...]   |   emit_arch.sh all}
   VTCM=${2:?usage: emit_arch.sh <arch> <vtcm_mb> [graphs...]}
   shift 2
-  GRAPHS=${*:-"yoloface fan2d arcface hyperswap nsfw"}
+  GRAPHS=${*:-"yoloface fan2d arcface hyperswap"}
   echo "=== QAIRT $QSDK: dsp_arch $ARCH, vtcm ${VTCM} MB ==="
   for g in $GRAPHS; do emit "$g" "$ARCH" "$VTCM"; done
 fi

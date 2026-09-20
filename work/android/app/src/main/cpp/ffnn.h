@@ -25,10 +25,6 @@
 // ---------------------------------------------------------------------------
 // Measured 2026-08-30, and this is not a preference:
 //
-//   * The CONTENT GATE must not run on the GPU. ncnn's Vulkan moves its decision statistic
-//     by -0.106 mean / -0.175 max, AWAY from flagging, against a 0.25 threshold -- it errs
-//     toward allowing, which is the one direction a gate must not err. On MNN's GPU paths it
-//     is also the slowest model measured. It runs ~11 times per video, so CPU costs nothing.
 //   * The ENHANCER cannot run on the GPU at all. gpen fails on ncnn Vulkan (10.86 dB, wrong
 //     even with every fp16 path disabled), MNN OpenCL (segfault) and MNN Vulkan (segfault).
 //     Three independent implementations, one StyleGAN generator.
@@ -104,8 +100,7 @@ Backend active();
 
 using Handle = void*;
 
-// Open a model BY LOGICAL NAME -- "yoloface", "fan2d", "arcface", "hyperswap",
-// "inswapper", "gpen", "nsfw". The backend resolves the filename, including the arch tier
+// Open a model BY LOGICAL NAME. The backend resolves the filename, including the arch tier
 // where that concept exists. Returns nullptr and sets lastError() when it cannot.
 Handle open(const std::string& logicalName, Placement p = Placement::Default);
 void release(Handle h);

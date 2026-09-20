@@ -256,7 +256,6 @@
     <string name="status_cancelled">Отменено</string>
     <string name="status_loading_models">Загрузка моделей…</string>
     <string name="status_reading_source">Чтение исходного лица…</string>
-    <string name="status_content_check">проверка контента…</string>
     <string name="status_swapping">Замена…</string>
     <string name="status_done">Готово - %1$d КБ</string>
     <string name="status_failed">Ошибка: %1$s</string>
@@ -282,15 +281,6 @@
     <string name="status_cannot_read_source">Не удалось прочитать исходное изображение</string>
     <string name="share_swapped_image">Поделиться изображением</string>
     <string name="share_swapped_video">Поделиться видео</string>
-
-    <string name="gate_subject_source_image">исходном изображении</string>
-    <string name="gate_subject_target_image">целевом изображении</string>
-    <string name="gate_subject_target_video">целевом видео</string>
-    <string name="gate_subject_this_frame">этом кадре</string>
-    <string name="gate_blocked">Откровенный контент не допускается в %1$s</string>
-    <string name="gate_error">Проверку контента не удалось выполнить на %1$s, поэтому обработка невозможна</string>
-    <string name="gate_error_detail">%1$s (%2$s)</string>
-    <string name="gate_blocked_generic">Откровенный контент не допускается</string>
 
     <string name="live_title">Live</string>
     <string name="live_models_missing">Модели не установлены</string>

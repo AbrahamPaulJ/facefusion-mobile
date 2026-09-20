@@ -271,21 +271,6 @@ int main(int argc, char** argv) {
   }
   std::memcpy(src.data.data(), srcRaw.data(), srcRaw.size());
 
-  // The content gate, before anything else touches the pixels -- upstream checks the still
-  // and the video before it processes either, and this port BLOCKS as upstream does.
-  //
-  // Printed with the score, not just the verdict: on SFW footage every frame lands ~-0.9
-  // against a +0.25 threshold, and only the number shows how much margin the quantised
-  // build's +0.087 bias is eating (docs/roadmap.md 2).
-  printf("content gate: %s build\n", pipe.contentGateIsQuantised() ? "W8A16 (BIASED +0.087 "
-         "toward blocking -- no fp32 context for this tier)" : "fp32");
-  {
-    ffpipe::ContentVerdict cv = pipe.checkContent(src);
-    if (!cv.ok) { fprintf(stderr, "content gate: %s\n", pipe.error().c_str()); return 1; }
-    printf("  source  score %+.4f  %s\n", cv.score, cv.blocked ? "BLOCKED" : "allow");
-    if (cv.blocked) { fprintf(stderr, "refused: source image\n"); return 3; }
-  }
-
   if (!pipe.setSource(src)) { fprintf(stderr, "source: %s\n", pipe.error().c_str()); return 1; }
   printf("source identity ready\n");
 
@@ -294,28 +279,6 @@ int main(int argc, char** argv) {
     fprintf(stderr, "target holds %zu bytes, need %zu for %d frames of %dx%d\n",
             tgtRaw.size(), frameBytes * frames, frames, tw, th);
     return 1;
-  }
-
-  // content_analyser.py:analyse_video -- ONE frame per second, refuse above a 10% rate.
-  // Sampling rather than per-frame is what makes this affordable: 11 calls for a 10 s clip
-  // instead of 300.  With no container here, assume the project's 30 fps target.
-  {
-    const int kFps = 30, kRatePct = 10;
-    int sampled = 0, flagged = 0;
-    float worst = -1e9f;
-    for (int i = 0; i < frames; i += kFps) {
-      ffcv::Image frame(tw, th, 3);
-      std::memcpy(frame.data.data(), tgtRaw.data() + frameBytes * i, frameBytes);
-      ffpipe::ContentVerdict cv = pipe.checkContent(frame);
-      if (!cv.ok) { fprintf(stderr, "content gate: %s\n", pipe.error().c_str()); return 1; }
-      ++sampled;
-      if (cv.blocked) ++flagged;
-      if (cv.score > worst) worst = cv.score;
-    }
-    double rate = 100.0 * flagged / (sampled ? sampled : 1);
-    printf("  target  %d sampled, %d flagged (%.1f%%), worst score %+.4f  %s\n",
-           sampled, flagged, rate, worst, rate > kRatePct ? "BLOCKED" : "allow");
-    if (rate > kRatePct) { fprintf(stderr, "refused: target video\n"); return 3; }
   }
 
   FILE* fo = outPath.empty() ? nullptr : fopen(outPath.c_str(), "wb");

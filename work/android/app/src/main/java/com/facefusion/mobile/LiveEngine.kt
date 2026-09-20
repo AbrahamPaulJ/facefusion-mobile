@@ -11,8 +11,7 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /**
- * The front camera, swapped, on screen. On both build lines: the gated one samples the
- * camera through [gateThreshold], which is what made shipping it possible.
+ * The front camera, swapped, on screen.
  *
  * Preview ONLY: no encoder, no muxer, no audio. What it costs is therefore what the
  * pipeline costs, which is the point of having it -- 26.6 fps on a 720p file with tracking
@@ -42,51 +41,9 @@ import java.util.concurrent.Executors
  */
 class LiveEngine {
 
-    /**
-     * What the content check said about a frame.
-     *
-     * Deliberately an enum and not a message: `ContentGate.kt` does not exist on the dev
-     * line, so anything in this class that named it would fail to compile there. This class
-     * forwards a NUMBER down and reports a VERDICT up; the sentence is [MainActivity]'s.
-     */
-    enum class Gate { None, Blocked, Failed }
-
     /** One frame's worth of result, handed to the UI. */
     data class Shot(val bitmap: Bitmap?, val faces: Int, val fps: Double, val error: String?,
-                    val gate: Gate = Gate.None)
-
-    /**
-     * Score above which a sampled frame is refused, and how often to sample.
-     *
-     * NaN disables the check, which is the dev line's configuration and the reason this
-     * class needs no #ifdef: the gated build sets a real threshold, the ungated one leaves
-     * it alone.
-     *
-     * ⚠ NaN, not a negative number. Gate scores are routinely negative, so a negative
-     * sentinel would disable the gate for exactly the low threshold someone sets while
-     * TESTING that it still blocks.
-     *
-     * ⚠ The gate is what makes a live camera swap shippable on the gated build at all. It
-     * is the FIFTH processing path in the app; see the list in ContentGate's doc.
-     */
-    @Volatile var gateThreshold: Float = Float.NaN
-    /**
-     * One check per this many MILLISECONDS of wall time.
-     *
-     * ⚠ Time, not frames, and the difference is the whole point. The first version sampled
-     * every 30 FRAMES, which is ~1.2 checks/second on the NPU and looks fine -- but the
-     * guarantee it actually makes is "one check per 30 frames", and on the ncnn backend a
-     * frame costs ~240-540 ms instead of ~40. The same constant would have left 8 to 16
-     * SECONDS of unchecked camera between samples on exactly the devices that are slowest,
-     * which is a gate that quietly weakens as the hardware gets worse.
-     *
-     * One second matches what checkVideo already promises for a file (analyse_video's
-     * SAMPLE_INTERVAL_US), so the app now makes ONE promise about unchecked footage
-     * regardless of path or backend. The cost is bounded the same way: 5.05 ms once a
-     * second on the NPU is 0.5% of a frame's budget.
-     */
-    private val kGateIntervalMs = 1000L
-    private var lastGateMs = 0L
+                    )
 
     /**
      * Which lens [start] binds. Read at BIND time, so changing it does nothing to a pump
@@ -107,8 +64,7 @@ class LiveEngine {
      *
      * Owned by the caller, which starts and stops it; this class only feeds it. That split
      * is deliberate: where the file goes, what it is called and when it is saved are all
-     * MainActivity's business, and this class has stayed free of them for the same reason
-     * it takes a gate THRESHOLD rather than knowing what a gate is.
+     * MainActivity's business.
      *
      * ⚠ Fed from the analyzer thread, in line with the pump. See LiveRecorder.frame for
      * why it drops a frame rather than blocking: the recording is the guest here, and a
@@ -175,7 +131,6 @@ class LiveEngine {
         if (running) return
         running = true
         windowStart = System.nanoTime(); windowFrames = 0
-        lastGateMs = 0L   // so this session gates its own first frame
         val e = Executors.newSingleThreadExecutor()
         exec = e
         val future = ProcessCameraProvider.getInstance(ctx)
@@ -342,23 +297,16 @@ class LiveEngine {
             // ONE call: planes in, swapped preview written into bmp's own pixels. The four
             // it replaced spent 23 of Live's 62 ms/frame moving bytes across JNI -- see
             // liveFrame in ffjni.cpp for what each of them was copying.
-            // Sample on the first frame of a session and every kGateIntervalMs after.
-            // lastGateMs is zeroed in start(), so the first frame always samples: a session
-            // that will be refused should be refused before it has shown anything.
             // Read ONCE per frame. It is volatile and the caller may clear it at any
             // moment; testing it twice could hand liveFrame a buffer and then find no
             // recorder to give the result to, or the reverse.
             val rec = recorder
-            val nowMs = System.currentTimeMillis()
-            val gateNow = !gateThreshold.isNaN() && (nowMs - lastGateMs >= kGateIntervalMs)
-            if (gateNow) lastGateMs = nowMs
             val t = System.nanoTime()
             val faces = NativePipe.liveFrame(
                 p[0].buffer, p[0].rowStride,
                 p[1].buffer, p[1].rowStride, p[1].pixelStride,
                 p[2].buffer, p[2].rowStride, p[2].pixelStride,
                 w, h, bmp, dw, dh,
-                if (gateNow) gateThreshold else Float.NaN,
                 // Only while recording: null costs the native side one branch.
                 if (rec != null) {
                     val need = w * h * 3
@@ -368,24 +316,11 @@ class LiveEngine {
                 } else null,
             )
             msPump += (System.nanoTime() - t) / 1e6
-            // -2 refused, -3 could not measure. Both STOP the pump rather than skipping a
-            // frame: the next frame of a live feed is the same scene, so continuing would
-            // be a refusal that refuses nothing. Stopping also releases the camera, which
-            // is the honest signal that the feature declined to run.
-            if (faces == -2 || faces == -3) {
-                running = false
-                onShot(Shot(null, 0, fps, null,
-                            if (faces == -2) Gate.Blocked else Gate.Failed))
-                return
-            }
             if (faces < 0) {
                 onShot(Shot(null, 0, fps, NativePipe.lastError()))
                 return
             }
 
-            // AFTER the error checks, so a refused or failed frame is never recorded. The
-            // gate stops the pump on a refusal, and the file must not contain the frame
-            // that caused it.
             if (rec != null) recBuf?.let { rec.frame(it, w, h) }
 
             if (++nStat == 30) {

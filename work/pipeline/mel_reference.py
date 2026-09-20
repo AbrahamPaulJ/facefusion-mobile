@@ -3,7 +3,7 @@
 Ported line for line from `facefusion/audio.py` and
 `facefusion/processors/modules/lip_syncer/core.py` (3.8.2).  Every constant here is
 upstream's.  This file is what `ffaudio.cpp` is measured against, exactly as
-`run_reference.py` is for the swap chain and `nsfw_reference.py` is for the gate.
+`run_reference.py` is for the swap chain.
 
 The STFT convention is the whole risk in this file, so it is asserted rather than
 assumed.  `selftest` checks a hand-rolled rfft against `scipy.signal.stft` on random

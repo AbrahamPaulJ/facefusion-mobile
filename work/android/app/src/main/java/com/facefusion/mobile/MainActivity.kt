@@ -59,9 +59,7 @@ class MainActivity : ComponentActivity() {
      * `setSourceFrom` quietly pushed into the other one -- already one list with two
      * names, and the drift between them was only invisible because Swap used just the
      * first entry. Adding a THIRD list for the Swap screen's own multi-source row was the
-     * obvious next step and the wrong one: the gate's whole guarantee is that there is
-     * exactly one way a face becomes a source, and that is only checkable while there is
-     * exactly one place they live.
+     * obvious next step and the wrong one: there is exactly one way a face becomes a source.
      *
      * The two screens differ only in which slot each is pointing at, which is what
      * [swapSourceIndex] and [liveSourceIndex] are.
@@ -163,16 +161,13 @@ class MainActivity : ComponentActivity() {
     private var statusText by mutableStateOf("")
 
     /**
-     * Whether [status] is a FAILURE, as opposed to progress or a refusal.
+     * Whether [status] is a FAILURE, as opposed to progress.
      *
      * Kept beside the text instead of being recovered from it. SwapScreen used to decide
      * this with `status.startsWith("Failed")`, which reads a sentence written for the user
      * -- so the moment that sentence is translated, the bug-report button disappears in
      * every language except English.
      *
-     * A content refusal is deliberately NOT an error: nothing malfunctioned, and offering
-     * to file a bug about a working gate is noise. That matches what the prefix test did,
-     * since the gate's own sentence never began with "Failed".
      */
     private var statusIsError by mutableStateOf(false)
 
@@ -529,10 +524,8 @@ class MainActivity : ComponentActivity() {
      * The ONE place a URI becomes the source face.
      *
      * Extracted so the gallery picker and the camera capture cannot drift apart. They must
-     * not: the content gate runs on the source in refreshSwapped, and it gets there because
-     * previewOptionsChanged() is called here. A second path that set sourceUri and forgot
-     * this call would be an ungated source -- which is the failure mode the gate's path
-     * list exists to prevent, arriving by way of a convenience button.
+     * not: previewOptionsChanged() is called here. A second path that set sourceUri and
+     * forgot this call would leave the preview stale.
      */
     private fun setSourceFrom(uri: Uri) {
         val at = addToSources(uri) ?: return
@@ -592,9 +585,8 @@ class MainActivity : ComponentActivity() {
         previewOptionsChanged()
     }
 
-    /** Every source face, decoded once: the bitmaps to CHECK and the bytes to register. */
+    /** Every source face, decoded once for registration. */
     private class PreparedSources(
-        val bitmaps: List<Bitmap>,
         val slots: List<PreviewEngine.SourceSlot>,
     )
 
@@ -602,8 +594,7 @@ class MainActivity : ComponentActivity() {
      * Decode every source in [sources] and convert it for the pipeline. Null if any of
      * them cannot be read -- a partial list would register faces at the wrong slots.
      *
-     * Decoding is not processing, so this needs no pipeline and carries no check. The
-     * check is [gateSources], which runs against the bitmaps this returns.
+     * Decoding is not processing, so this needs no pipeline.
      */
     private fun prepareSources(): PreparedSources? {
         if (sources.isEmpty()) return null
@@ -616,31 +607,7 @@ class MainActivity : ComponentActivity() {
                 item.uri, NativePipe.argbToBgr(px, soft.width, soft.height),
                 soft.width, soft.height)
         }
-        return PreparedSources(bitmaps, slots)
-    }
-
-    /**
-     * THE SOURCE CHECK, over the WHOLE list. Null to allow, a finished sentence to refuse.
-     *
-     * ⚠ Every slot, never only the active one. Any face in this list is one tap away from
-     * being the one that gets swapped in -- on either screen, and mid-run on both -- so
-     * checking the first and registering the rest would leave the others processed and
-     * unexamined. That is also why the list is shared: one list is one loop.
-     *
-     * ⚠ `ok` is ALLOW alone. A check that could not run refuses, the same as one that
-     * refused, so a broken graph is never a way through.
-     */
-    private fun gateSources(bitmaps: List<Bitmap>, tag: String): String? {
-        for ((i, bmp) in bitmaps.withIndex()) {
-            val v = ContentGate.checkImage(bmp)
-            // The reason, not only the number. A faulted check reads "NaN" and stops
-            // there, and the detail is then the whole story.
-            appendLog("$tag source ${i + 1} score %+.3f".format(v.score) +
-                      (if (v.detail.isNotBlank()) "  [" + v.detail + "]" else ""))
-            if (!v.ok) return ContentGate.message(
-                this, R.string.gate_subject_source_image, v)
-        }
-        return null
+        return PreparedSources(slots)
     }
 
     /** Register a prepared list into the pipeline that is loaded now. Null on success. */
@@ -673,10 +640,7 @@ class MainActivity : ComponentActivity() {
     /**
      * The Swap screen's source row: point at a face that is ALREADY a slot.
      *
-     * ⚠ It adds nothing, which is why it needs no check of its own: every slot in the
-     * list was gated on the way into the pipeline that holds it (see the gate hook in
-     * refreshSwapped, which covers all of them, not just the first). Changing which
-     * gated slot is active processes nothing new.
+     * It adds nothing: changing which slot is active processes no new input.
      */
     private fun selectSwapSource(index: Int) {
         if (index !in sources.indices) return
@@ -816,15 +780,7 @@ class MainActivity : ComponentActivity() {
 
     private fun pickLiveSource() = pickLiveSources.launch("image/*")
 
-    /**
-     * The Live screen's "+": another face, mid-session if need be.
-     *
-     * ⚠ GATED HERE when the pump is running, and that is not belt and braces -- it is the
-     * only check this path has. [startLive] gates the whole list on the way up, which
-     * covers every source that existed THEN; a face added afterwards reaches `addSource`
-     * and becomes swappable one tap later without ever passing that loop. Not running,
-     * nothing is registered yet and startLive's loop is still the check.
-     */
+    /** The Live screen's "+": another face, mid-session if need be. */
     private fun addLiveSource(uri: Uri) {
         val already = sources.indexOfFirst { it.uri == uri }
         if (already >= 0) { selectLiveSource(already); return }
@@ -844,17 +800,14 @@ class MainActivity : ComponentActivity() {
             val px = IntArray(soft.width * soft.height)
             soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
             val bgr = NativePipe.argbToBgr(px, soft.width, soft.height)
-            val refusal = withContext(Dispatchers.Default) {
-                val v = ContentGate.checkImage(bmp)
-                if (!v.ok) ContentGate.message(
-                    this@MainActivity, R.string.gate_subject_source_image, v)
+            val error = withContext(Dispatchers.Default) {
                 // The native slots must stay aligned with this list, so the new face is
                 // registered at the index the row will show it at.
-                else if (NativePipe.addSource(bgr, soft.width, soft.height) < 0)
+                if (NativePipe.addSource(bgr, soft.width, soft.height) < 0)
                     getString(R.string.status_no_face)
                 else null
             }
-            if (refusal != null) { liveNote = refusal; return@launch }
+            if (error != null) { liveNote = error; return@launch }
             sources = sources + SourceItem(uri, bmp)
             selectLiveSource(sources.lastIndex)
         }
@@ -1096,7 +1049,7 @@ class MainActivity : ComponentActivity() {
      *
      * Reported as "freezes and crashes on SOME photos" on an 8 Elite Gen 5. Nothing here
      * limited the decode, and a flagship shoots 50 MP (8160x6144) or 200 MP. At 50 MP one
-     * photo asks for, in order: a 200 MB ARGB_8888 bitmap, a 200 MB `copy` for the gate, a
+     * photo asks for, in order: a 200 MB ARGB_8888 bitmap, a
      * 200 MB IntArray for getPixels, and a 150 MB BGR buffer. ~750 MB against an app heap
      * that is typically 256-512 MB, so it dies -- and thrashes the collector on the way,
      * which is the freeze that precedes it. A 12 MP shot needs ~48 MB and lives, which is
@@ -1226,7 +1179,7 @@ class MainActivity : ComponentActivity() {
         // own.
         //
         // Safe to leave in a shipping build for the reason the `api` extra is not: this
-        // picks between two runtimes that both run the same gated pipeline. It cannot open
+        // picks between two runtimes. It cannot open
         // a port, and it cannot reach anything the Settings screen does not already offer.
         intent?.getStringExtra("backend")?.let {
             val want = if (it == "auto") "" else it
@@ -1351,7 +1304,7 @@ class MainActivity : ComponentActivity() {
                         else if (!modelsMissing)
                             toast(getString(R.string.toast_models_ready))
                         pendingDownload = null
-                        // Finish the tap that started this. Gated on the FILE, not on the
+                        // Finish the tap that started this on the FILE, not on the
                         // download reporting success: turning a stage on for a model that
                         // is not there produces a run that fails later, somewhere that
                         // cannot explain why.
@@ -1466,9 +1419,7 @@ class MainActivity : ComponentActivity() {
                         if (screen == Screen.Live && it != Screen.Live) stopLive()
                         screen = it
                     },
-                    // Shown on BOTH lines now. It was dev-only for one reason -- the live
-                    // path had no content gate -- and that reason is gone: the camera is
-                    // sampled in LiveEngine and the source is checked where it is picked.
+                    // Shown on both lines.
                     showLive = true,
                 ) { pad ->
                     Box(Modifier.padding(pad)) {
@@ -2207,25 +2158,6 @@ class MainActivity : ComponentActivity() {
             "arcface" to getString(R.string.model_recogniser),
             opts.swapper to getString(R.string.model_swapper),
         )
-        // The content gate is required -- missing() blocks a run without it and
-        // ffpipe::init will not come up -- but it is satisfied by EITHER build, so neither
-        // file is required ON ITS OWN. fp32 `nsfw_` only finalizes on v79 and up; below
-        // that the quantised `nsfwq_` is the only one that exists. So the PAIR is what is
-        // required, and a row is only worth flagging when NEITHER is on the device --
-        // otherwise a v79 phone, which correctly has just `nsfw_`, would be told the
-        // `nsfwq_` it must never download is missing and required.
-        //
-        // ⚠ "v79 and up" was wrong and is now measured: the fp32 gate does NOT build for
-        // v81. qnn-context-binary-generator refuses it with "no properties registered for
-        // q::QNN_Gelu", so v81 ships `nsfwq_` like the tiers BELOW v79 do. fp32 is a v79
-        // fact, not a floor -- which is exactly why this row tests the PAIR and never the
-        // arch (docs/traps.md #10).
-        val gateOk = ModelPaths.present(modelDir(), t, "nsfw") ||
-                     ModelPaths.present(modelDir(), t, "nsfwq2")
-        val gate = listOf(
-            "nsfw" to getString(R.string.model_content_checker),
-            "nsfwq2" to getString(R.string.model_content_checker_quantised),
-        )
         val optional = listOf(
             alt to getString(R.string.model_swapper_alt),
             // It was absent from BOTH lists, so a 28 MB model that is on the device, that
@@ -2245,13 +2177,7 @@ class MainActivity : ComponentActivity() {
             "edtalk" to getString(R.string.model_lip_syncer_256),
             "fan685" to getString(R.string.model_landmark_refiner),
         )
-        // What can be fetched is whatever the MANIFEST publishes for this tier -- asked
-        // once over the network, not guessed here. The guess it replaces had the gate wrong
-        // in both directions: a v79 phone would have been offered `nsfwq`, which its tier
-        // does not carry and which would therefore never arrive, while a deleted `nsfw` row
-        // disappeared from the list entirely, because only gpen was allowed to show itself
-        // while absent. Offline the set is empty and no row offers a download, which is
-        // correct -- there is nothing to download from.
+        // What can be fetched is whatever the manifest publishes for this tier.
         fun row(name: String, label: String, req: Boolean): ModelRow {
             // Filenames come from ModelPaths, never from a pattern here: ncnn needs a
             // param/bin PAIR named after the ONNX graph, QNN one context binary with the
@@ -2281,13 +2207,7 @@ class MainActivity : ComponentActivity() {
                             fetching = files.any { it.name in ModelDownload.queued })
         }
         return (required.map { (n, l) -> row(n, l, true) } +
-            gate.map { (n, l) -> row(n, l, !gateOk) }.filter { it.present || it.downloadable } +
             optional.map { (n, l) -> row(n, l, false) }.filter { it.present || it.downloadable })
-            // One row per FILE SET, not per logical name. The two gate names resolve to two
-            // different context binaries on QNN and to the SAME `nsfw_2_sim` pair on ncnn --
-            // the quantised build exists because a QNN tier below v79 cannot finalize the
-            // fp32 gate, which is a QNN fact and means nothing here. Without this the ncnn
-            // inventory lists "Content checker" twice, both describing one file.
             .distinctBy { it.fileName }
     }
 
@@ -2356,7 +2276,7 @@ class MainActivity : ComponentActivity() {
         if (hard && !previewBusy) previews.invalidate()
         // Cold only when the pipeline really has to be rebuilt. `reloads` is false for a
         // per-frame option, whose new value refreshSwapped pushes to the warm pipeline --
-        // going cold there would re-decode the source and re-run the gate to change a float.
+        // going cold there would re-decode the source just to change a float.
         if (hard || reloads) previewWarm = false
         swappedFrame = null
         previewNote = null
@@ -2508,10 +2428,6 @@ class MainActivity : ComponentActivity() {
                         slots = prepared.slots,
                         activeSource = swapSourceIndex,
                         assignEnabled = swapAssignMode,
-                        // The same check runSwap makes, over the same list. Without it the
-                        // preview is a complete second processing path with no check on
-                        // it, and the check becomes avoidable by never pressing Swap.
-                        gate = { gateSources(prepared.bitmaps, "preview") },
                     )
                     // Before the error branch, because a rejection is worth recording even
                     // when the fallback then succeeded and there is no error to report.
@@ -2532,17 +2448,6 @@ class MainActivity : ComponentActivity() {
                     // pipeline and do not survive one being built, so a mode that is on
                     // would come back empty and silently swap everybody.
                     restoreSwapAssignments()
-                }
-
-                // Every previewed frame, not just the source. The source is checked once,
-                // when the pipeline warms; the target is checked here because the trim
-                // handle can reach any frame in the clip and this pane displays it.
-                ContentGate.checkImage(frame).let { v ->
-                    if (!v.ok) {
-                        previewNote = ContentGate.message(this@MainActivity, R.string.gate_subject_this_frame, v)
-                        swappedFrame = null
-                        return@launch
-                    }
                 }
 
                 val out = previews.swap(frame, previewAtMs, voiceFile?.absolutePath)
@@ -3062,7 +2967,7 @@ class MainActivity : ComponentActivity() {
      *
      * A finished video deliberately survives this. The trash icon sits on the TARGET pane
      * and says "Remove target"; taking an unsaved result with it means one mistap destroys
-     * minutes of NPU time with no undo. The output pane and its Save/Share row are gated on
+     * minutes of NPU time with no undo. The output pane and its Save/Share row use
      * `outputFile`, not on the target, so they stay usable with nothing loaded.
      *
      * The file is still not leaked: it goes when a new target is picked, when the next run
@@ -3128,10 +3033,8 @@ class MainActivity : ComponentActivity() {
      *
      * A still target used to have a branch in here, reached by the Swap button. It is gone
      * with the button: the swapped PANE is already that image -- full resolution, same
-     * pipeline, same options, and gated on both the source and the frame in
-     * [refreshSwapped] -- so a run could only spend a model reload to produce a second copy
-     * of what was on screen. An unreachable branch that processes pixels is exactly the
-     * kind of thing a content-gate audit has to keep re-proving, so it is not left behind.
+     * pipeline, and same options -- so a run could only spend a model reload to produce a
+     * second copy of what was on screen.
      */
     /**
      * Start or stop the live feed.
@@ -3307,7 +3210,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun toggleLiveRecording() {
-        if (liveRecording) { finishLiveRecording(discard = false); return }
+        if (liveRecording) { finishLiveRecording(); return }
         if (!liveRunning || liveFinalizing) return
         if (liveMicrophone) {
             if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) !=
@@ -3380,13 +3283,8 @@ class MainActivity : ComponentActivity() {
     /**
      * Close the recording and say where it went.
      *
-     * ⚠ `discard` is TRUE on a gate refusal, and the file is deleted. A refused run
-     * produces no output anywhere else in this app -- runSwap throws before it writes one
-     * -- and a recording is not an exception just because some of its frames were checked
-     * before the refusal happened. Live samples once a second, so the seconds either side
-     * of the frame that was refused were never checked at all.
      */
-    private fun finishLiveRecording(discard: Boolean) {
+    private fun finishLiveRecording() {
         val rec = liveRecorder ?: return
         live.recorder = null
         liveRecorder = null
@@ -3396,10 +3294,7 @@ class MainActivity : ComponentActivity() {
             // Finish even when the activity is destroyed, so codecs and the microphone close.
             val out = withContext(Dispatchers.IO) { rec.stop() }
             liveFinalizing = false
-            if (discard) {
-                out?.delete()
-                return@launch
-            }
+
             val err = rec.error
             when {
                 err != null -> status = getString(R.string.status_failed, err)
@@ -3462,15 +3357,9 @@ class MainActivity : ComponentActivity() {
                 // aligned with the chips. The first version registered only the ACTIVE
                 // one, which made `setActiveSource(i)` point at the wrong slot -- or at
                 // nowhere at all -- as soon as the list held more than one face.
-                // Each one is gated too: a face the user can switch to mid-run must not
-                // be the one input the gate never saw.
                 for ((i, ls) in sources.withIndex()) {
                     val bmp = decodeOriented(ls.uri)
                         ?: return@withContext "cannot read source ${i + 1}"
-                    val verdict = ContentGate.checkImage(bmp)
-                    if (!verdict.ok)
-                        return@withContext ContentGate.message(
-                            this@MainActivity, R.string.gate_subject_source_image, verdict)
                     val soft = bmp.asArgb8888()
                     val px = IntArray(soft.width * soft.height)
                     soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
@@ -3497,30 +3386,10 @@ class MainActivity : ComponentActivity() {
                 NativePipe.release(); PipeGuard.release(); return@launch
             }
             liveRunning = true
-            // THE GATE, on the live path. The source is already checked where it is picked
-            // (see the source_image branch above), so what is left is the camera itself --
-            // and a camera is the one input the user can change without touching the app.
-            //
-            // The threshold is set HERE rather than inside LiveEngine because the dev line
-            // deletes ContentGate.kt: the engine takes a number and knows nothing about the
-            // gate, so this single assignment is the whole of what dev has to remove.
-            live.gateThreshold = ContentGate.THRESHOLD
             live.start(this@MainActivity, this@MainActivity) { shot ->
                 // The analyzer thread hands the result straight to Compose state, which is
                 // safe for snapshot state and avoids a per-frame main-thread post.
                 if (shot.error != null) liveNote = shot.error
-                // A refusal, or a check that could not run -- which is also a refusal: `ok`
-                // is ALLOW alone, here as everywhere else. The engine has already stopped
-                // its pump; this releases the pipeline and the camera, and says why.
-                if (shot.gate != LiveEngine.Gate.None) {
-                    liveNote = getString(
-                        if (shot.gate == LiveEngine.Gate.Blocked) R.string.gate_blocked
-                        else R.string.gate_error,
-                        getString(R.string.gate_subject_this_frame))
-                    // The recording goes with it. See finishLiveRecording: a refused
-                    // run leaves no output anywhere else in this app.
-                    runOnUiThread { finishLiveRecording(discard = true); stopLive() }
-                }
                 if (shot.bitmap != null) {
                     liveFrame = shot.bitmap
                     liveFaces = shot.faces
@@ -3569,7 +3438,7 @@ class MainActivity : ComponentActivity() {
         // it has been finished, and LiveRecorder.stopped is what makes that harmless. An
         // earlier comment here claimed the ordering was the protection; it is not, and a
         // late frame would have built a second encoder over the same file.
-        finishLiveRecording(discard = false)
+        finishLiveRecording()
         liveRunning = false
         NativePipe.setTrackPeriod(0)
         // Assignments die with the pipeline the engine is about to release; the UI state
@@ -3599,18 +3468,6 @@ class MainActivity : ComponentActivity() {
      * hand the pump a thread of its own. The differences are that the frames come from a
      * file instead of a camera and that the options are the user's OWN -- there is no
      * forced preset, because the whole point is to watch what the real run would produce.
-     *
-     * ⚠ THE SEVENTH GATED PATH, and the check below is what let it off the dev line. It
-     * shows swapped frames, so it is a processing path like any other and it carries the
-     * same two checks `runSwap` does in the same order -- source, then target, both after
-     * init and both before `setSource` reads a face. It was dev-only until this existed,
-     * exactly as the Live camera was dev-only until 0.6.3 gave it one; a feature behind
-     * `BuildConfig.DEV_BUILD` is ungated BY CONSTRUCTION, and the only way off that flag
-     * is onto this list.
-     *
-     * ⚠ The exposure is the same SET OF FRAMES `runSwap` has -- one file, played through
-     * from a position the user can move -- so `checkVideo`, which samples across the whole
-     * clip, is the same answer for both and neither is the weaker door.
      */
     private fun startPlayer() {
         if (sources.isEmpty()) return
@@ -3639,24 +3496,6 @@ class MainActivity : ComponentActivity() {
                 NativePipe.setTrackPeriod(opts.trackPeriod)
                 val prepared = prepareSources()
                     ?: return@withContext "cannot decode source image"
-
-                // THE GATE, before a single frame is decoded or drawn. Init first because
-                // the check is a graph and needs the models; `setSource` after, because it
-                // already detects, aligns and embeds -- the refusal has to land in the gap
-                // between the two. Same ordering, same subjects and same fail-closed `ok`
-                // as runSwap.
-                if (NativePipe.contentGateIsQuantised())
-                    appendLog("content gate: W8A16 build, biased " +
-                              "+${ContentGate.QUANTISED_BIAS} toward refusing")
-                gateSources(prepared.bitmaps, "player")?.let { return@withContext it }
-                ContentGate.checkVideo(tgt).let {
-                    // `detail` is an ARGUMENT, never interpolated into the format string:
-                    // it reads "0/11 flagged (0.0%)" and that trailing `%)` parses as a
-                    // conversion. See runSwap -- it cost a whole run once.
-                    appendLog("player target content: %s, worst %+.3f".format(it.detail, it.score))
-                    if (!it.ok) return@withContext ContentGate.message(
-                        this@MainActivity, R.string.gate_subject_target_video, it)
-                }
 
                 registerSources(prepared)?.let { return@withContext it }
                 restoreSwapAssignments()
@@ -3745,12 +3584,6 @@ class MainActivity : ComponentActivity() {
                     val missing = listOf("yoloface", "fan2d", "arcface", opts.swapper)
                         .filterNot { ModelPaths.present(models, tier, it) }
                         .toMutableList()
-                    // The gate is mandatory because it blocks. Either build satisfies it:
-                    // fp32 (`nsfw_`) only finalizes on v79, so every other tier carries the
-                    // quantised `nsfwq2_` -- and ncnn has neither distinction.
-                    if (!ModelPaths.present(models, tier, "nsfw") &&
-                        !ModelPaths.present(models, tier, "nsfwq2"))
-                        missing += "nsfw"
                     if (missing.isNotEmpty())
                         error("cannot read ${missing.joinToString()} for tier $tier in " +
                               "${models.absolutePath} -- run work/device/install_app.ps1")
@@ -3773,27 +3606,6 @@ class MainActivity : ComponentActivity() {
 
                     status = getString(R.string.status_reading_source)
                     val prepared = prepareSources() ?: error("cannot decode source image")
-
-                    // The content gate, BEFORE anything is processed or previewed. It
-                    // blocks, as upstream does, so a refusal ends the run here -- there is
-                    // no partial output and nothing reaches the preview surface.
-                    status = getString(R.string.status_content_check)
-                    if (NativePipe.contentGateIsQuantised())
-                        appendLog("content gate: W8A16 build, biased " +
-                                  "+${ContentGate.QUANTISED_BIAS} toward refusing")
-                    gateSources(prepared.bitmaps, "run")?.let { throw ContentGate.Refused(it) }
-                    // The target, sampled across the clip.
-                    ContentGate.checkVideo(tgt).let {
-                        // `detail` is an ARGUMENT, never interpolated into the format
-                        // string: it reads "0/11 flagged (0.0%)", and that trailing `%)`
-                        // is parsed as a conversion -- UnknownFormatConversionException,
-                        // which killed the whole swap after the gate had already passed.
-                        appendLog("target content: %s, worst %+.3f".format(it.detail, it.score))
-                        if (!it.ok)
-                            throw ContentGate.Refused(
-                                ContentGate.message(this@MainActivity,
-                                                    R.string.gate_subject_target_video, it))
-                    }
 
                     registerSources(prepared)?.let { error(it) }
                     // ⚠ This init built a fresh pipeline, so every per-person choice the
@@ -3880,16 +3692,9 @@ class MainActivity : ComponentActivity() {
                 // so every later seek takes the normal warm path.
                 refreshSwapped(force = true)
             }.onFailure {
-                // A refusal is already a finished sentence aimed at the user, and it is not
-                // a fault: prefixing it with "Failed:" and dumping a stack trace would
-                // present a working safety check as a crash.
                 if (it.message == "cancelled") {
                     // Asked for, not gone wrong: no "Failed:", no stack trace.
                     status = getString(R.string.status_cancelled)
-                } else if (it is ContentGate.Refused) {
-                    // The gate's own finished sentence, already localized. NOT an
-                    // error: nothing malfunctioned, so this offers no bug report.
-                    status = it.message ?: getString(R.string.gate_blocked_generic)
                 } else {
                     failStatus(getString(R.string.status_failed, it.message ?: ""))
                     appendLog(it.stackTraceToString().take(700))
@@ -3903,15 +3708,6 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Every queued target, one after another, on one loaded pipeline -- roadmap 14.
-     *
-     * ⚠ THIS IS A SIXTH GATED PROCESSING PATH. `docs/gate.md` enumerates them and this is
-     * now on that list. Every item is checked with the SAME `ContentGate.checkVideo` a
-     * single run makes, and a refused clip is marked refused while the queue CONTINUES --
-     * one refusal is not a reason to abandon eleven other clips.
-     *
-     * The source is gated ONCE, at the top: it is the same image for every item, so
-     * checking it twelve times would be twelve identical answers. It was already checked
-     * when it was picked, too (setSourceFrom).
      *
      * What is hoisted out of the loop is what does not vary: the model check, init, and
      * setSource. That is the entire performance argument for one-source-many-targets -- a
@@ -3985,13 +3781,6 @@ class MainActivity : ComponentActivity() {
 
                     status = getString(R.string.status_reading_source)
                     val bmp = decodeOriented(src) ?: error("cannot decode source image")
-                    status = getString(R.string.status_content_check)
-                    ContentGate.checkImage(bmp).let {
-                        appendLog("source content score %+.3f".format(it.score))
-                        if (!it.ok) throw ContentGate.Refused(
-                            ContentGate.message(this@MainActivity,
-                                                R.string.gate_subject_source_image, it))
-                    }
                     val soft = bmp.asArgb8888()
                     val px = IntArray(soft.width * soft.height)
                     soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
@@ -4004,14 +3793,11 @@ class MainActivity : ComponentActivity() {
             }
             if (setup.isFailure) {
                 val e = setup.exceptionOrNull()
-                status = if (e is ContentGate.Refused)
-                             e.message ?: getString(R.string.gate_blocked_generic)
-                         else getString(R.string.status_failed, e?.message ?: "")
+                status = getString(R.string.status_failed, e?.message ?: "")
                 return@launch
             }
 
             var done = 0
-            var refused = 0
             var failed = 0
             for ((i, item) in batchQueue.withIndex()) {
                 // ⚠ BOTH cancel sources. The button in the app and the one in the
@@ -4046,15 +3832,6 @@ class MainActivity : ComponentActivity() {
                                 else if (item.uri.scheme == "file") File(item.uri.path!!)
                                 else copyToCache(item.uri, "batch_" + (i + 1) + ".mp4")
                                     ?: error("cannot read " + item.name)
-
-                        // ⚠ THE GATE, PER ITEM. The same call a single run makes.
-                        ContentGate.checkVideo(f).let {
-                            appendLog(item.name + ": " + it.detail +
-                                      ", worst %+.3f".format(it.score))
-                            if (!it.ok) throw ContentGate.Refused(
-                                ContentGate.message(this@MainActivity,
-                                                    R.string.gate_subject_target_video, it))
-                        }
 
                         val out = File(outputDir(),
                                        "swapped_" + System.currentTimeMillis() +
@@ -4124,10 +3901,6 @@ class MainActivity : ComponentActivity() {
                         { e ->
                             when {
                                 e.message == "cancelled" -> it.copy(state = BatchState.Skipped)
-                                e is ContentGate.Refused -> {
-                                    refused++
-                                    it.copy(state = BatchState.Refused, detail = e.message)
-                                }
                                 else -> {
                                     failed++
                                     it.copy(state = BatchState.Failed, detail = e.message)
@@ -4150,9 +3923,9 @@ class MainActivity : ComponentActivity() {
                     runCatching { File(cacheDir, "batch_" + (i + 1) + ".mp4").delete() }
             }
 
-            status = getString(R.string.status_batch_done, done, refused + failed)
-            appendLog("batch: %d done, %d refused, %d failed, %.1f s total"
-                .format(done, refused, failed, (System.currentTimeMillis() - t0) / 1000.0))
+            status = getString(R.string.status_batch_done, done, failed)
+            appendLog("batch: %d done, %d failed, %.1f s total"
+                .format(done, failed, (System.currentTimeMillis() - t0) / 1000.0))
             outputPartial = cancelRequested
             } finally {
                 NativePipe.release()
@@ -4286,9 +4059,7 @@ class MainActivity : ComponentActivity() {
      *
      * There is no run behind a still and so no output file to copy: the bitmap on screen is
      * the result, produced by the same pipeline at the image's own resolution, and it is
-     * what goes to Pictures. Both the source and this exact frame were gated in
-     * [refreshSwapped] before it was ever drawn, so saving what is displayed cannot save
-     * anything the gate has not already passed.
+     * what goes to Pictures.
      */
     private fun saveSwappedStill() {
         val bmp = swappedFrame ?: return
@@ -4442,8 +4213,6 @@ class MainActivity : ComponentActivity() {
                 // wants the GPU, so before this line the note still says "Vulkan available"
                 // on a device whose Vulkan is about to be refused.
                 if (backend == ModelPaths.NCNN_TIER) say("runtime: ${NativePipe.runtimeNote()}")
-                say("content gate: " +
-                    (if (NativePipe.contentGateIsQuantised()) "W8A16 (biased)" else "fp32"))
                 // The app's OWN external files dir first. /sdcard/Download is owned by
                 // whichever app adb pushed through, mode 660, so this app cannot read it
                 // and File.exists() answers false with no hint why -- the real app never
@@ -4456,26 +4225,6 @@ class MainActivity : ComponentActivity() {
                 val tgtFile = asset("ff_target.mp4")
                 val voiceFile = voiceName?.let(::asset)?.takeIf { it.canRead() }
                 if (voiceName != null && voiceFile == null) say("voice: cannot read $voiceName")
-                // Gate whatever assets are present, and say so per asset: this is the only
-                // way the JNI path gets exercised over adb, and a gate that is never run
-                // is a gate nobody knows is broken.
-                // ⚠ These BLOCK. They used to print the verdict and carry on, which is
-                // worse than not checking at all: the log said "gate source: BLOCK" and
-                // then a swapped selftest.mp4 appeared next to it. A gate that reports
-                // without refusing is decoration.
-                if (srcFile.exists()) {
-                    val b = decodeOriented(srcFile)
-                    if (b != null) ContentGate.checkImage(b).let {
-                        say("gate source: %s score %+.4f %s"
-                            .format(it.verdict, it.score, it.detail))
-                        if (!it.ok) { say("SELFTEST REFUSED: source"); return@launch }
-                    }
-                }
-                if (tgtFile.exists()) ContentGate.checkVideo(tgtFile).let {
-                    say("gate target: %s worst %+.4f %s"
-                        .format(it.verdict, it.score, it.detail))
-                    if (!it.ok) { say("SELFTEST REFUSED: target"); return@launch }
-                }
                 if (!srcFile.exists() || !tgtFile.exists()) {
                     say("SELFTEST PARTIAL: DSP reachable, no test assets"); return@launch
                 }

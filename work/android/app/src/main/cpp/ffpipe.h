@@ -99,9 +99,6 @@ struct Config {
   // model sees it. See syncLip in ffpipe.cpp for where each is applied.
   float lipSyncWeight = 0.5f;
 
-  // content_analyser.py:detect_with_nsfw_2 -- `logit[0] - logit[1] > 0.25` flags a frame.
-  float nsfwThreshold = 0.25f;
-
   // Tiers this DEVICE has already proved it cannot run, so init does not spend a load on
   // them again. Set by the caller from what a previous init reported through
   // `rejectedVariant()`; empty on a device that has never rejected one.
@@ -111,17 +108,6 @@ struct Config {
   // whole app. The caller is also expected to forget these on an app UPDATE -- the next
   // build may be exactly the one that fixes the tier.
   std::vector<std::string> skipVariants;
-};
-
-// The content gate's answer for ONE frame.
-//
-// ⚠ `score` is upstream's decision statistic, `logit[0] - logit[1]`, and is comparable
-// straight across host and device -- which is the only reason the quantisation bias below
-// is measurable at all.
-struct ContentVerdict {
-  bool ok = false;        // the graph ran; false means `error()` says why
-  bool blocked = false;   // score > Config::nsfwThreshold
-  float score = 0.f;
 };
 
 class Pipeline {
@@ -139,8 +125,8 @@ class Pipeline {
   /**
    * Change the per-frame tunables on a pipeline that is ALREADY LOADED.
    *
-   * ⚠ Every field this copies is read inside `analyse`/`swapAll`/`checkContent`, once per
-   * frame — none of them is consumed at init. So a weight, a mask blur, a detector
+   * ⚠ Every field this copies is read inside `analyse`/`swapAll`, once per frame — none of
+   * them is consumed at init. So a weight, a mask blur, a detector
    * threshold, a pixel boost, and the face enhancer's on/off are all just numbers the next
    * frame will read, and changing one never needed a model reloaded. `gpen` in particular
    * is opened whether or not `faceEnhance` is set, because the flag decides whether the
@@ -171,24 +157,6 @@ class Pipeline {
    * rejection without having to fail first.
    */
   const std::string& rejectedVariant() const { return rejected_; }
-
-  /**
-   * Upstream's content gate on ONE frame (content_analyser.py:detect_with_nsfw_2).
-   *
-   * This port gates on `nsfw_2` alone; upstream votes 2-of-3 across three models totalling
-   * 461 MB.  A deliberate divergence -- see docs/roadmap.md 2.
-   *
-   * The caller applies the policy.  For a still that is one call; for a video it is one
-   * sampled frame per second, refused above a 10% flagged rate.  Sampling is upstream's,
-   * and it is what makes a 5 ms graph cost ~56 ms for a whole clip instead of 1.5 s.
-   */
-  ContentVerdict checkContent(const ffcv::Image& frame);
-
-  // True when the gate is quantised, i.e. this tier had no fp32 context.  The W8A16 build
-  // shifts `score` by +0.087 mean / +0.153 max TOWARD blocking, against a 0.25 threshold,
-  // so a caller that cares about false refusals has to know.  No compensation is applied
-  // here: the correction is an unmeasured constant and does not belong in the runner.
-  bool contentGateIsQuantised() const { return nsfwQuantised_; }
 
   // Whether gpen_<tier>.bin was found at init.  The UI offers the enhancer switch
   // only when this is true -- the same rule inswapper follows, and for the same
@@ -462,7 +430,6 @@ class Pipeline {
   std::string err_;
   std::string tier_;
   std::string rejected_;
-  bool nsfwQuantised_ = false;
 };
 
 }  // namespace ffpipe

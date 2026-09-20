@@ -58,7 +58,6 @@ want yoloface_8n_b1_sim        && convert yoloface_8n_b1_sim
 want 2dfan4_heatmaps_sim       && convert 2dfan4_heatmaps_sim
 want arcface_w600k_r50_b1_sim  && convert arcface_w600k_r50_b1_sim
 want hyperswap_1a_256_fp32     && convert hyperswap_1a_256_fp32
-want nsfw_2_sim                && convert nsfw_2_sim
 want gpen_bfr_256_sim          && convert gpen_bfr_256_sim
 
 echo "=== done ==="

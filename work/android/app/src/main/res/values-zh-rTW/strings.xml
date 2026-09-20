@@ -12,8 +12,6 @@
   Left in English, as in values/strings.xml: model and tier names, filenames, and units
   (MB, fps, ms, VTCM, SoC, fp16, GPU, CPU, NPU, Vulkan).
 
-  ⚠ gate_blocked and gate_error MUST stay distinguishable. The first is a refusal; the
-  second is a fault in our own code, and wording it like a refusal blames the user for it.
 -->
 <resources>
 
@@ -279,17 +277,6 @@
     <string name="status_cannot_read_source">無法讀取來源圖片</string>
     <string name="share_swapped_image">分享換臉圖片</string>
     <string name="share_swapped_video">分享換臉影片</string>
-
-    <string name="gate_subject_source_image">來源圖片</string>
-    <string name="gate_subject_target_image">目標圖片</string>
-    <string name="gate_subject_target_video">目標影片</string>
-    <string name="gate_subject_this_frame">這一格</string>
-    <!-- 拒絕。必須讀起來就是拒絕。 -->
-    <string name="gate_blocked">%1$s中含有不允許的成人內容</string>
-    <!-- 故障，不是拒絕：檢查沒能執行，因此它既沒有允許也沒有拒絕任何內容。 -->
-    <string name="gate_error">無法對%1$s執行內容檢查，因此無法處理</string>
-    <string name="gate_error_detail">%1$s（%2$s）</string>
-    <string name="gate_blocked_generic">不允許處理成人內容</string>
 
 
     <!-- ==================== 新增：即時、拍攝、每個處理器的設定 ==================== -->

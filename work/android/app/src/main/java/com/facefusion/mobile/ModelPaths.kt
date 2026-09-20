@@ -209,10 +209,6 @@ object ModelPaths {
         "arcface" to "arcface_w600k_r50_b1",
         "hyperswap" to "hyperswap_1a_256_fp32",
         "gpen" to "gpen_ncnn",
-        // One graph serves both gate names: "nsfwq2" exists because a QNN tier below v79
-        // cannot finalize the fp32 gate, which is a QNN fact and means nothing to ncnn.
-        "nsfw" to "nsfw_2_sim",
-        "nsfwq2" to "nsfw_2_sim",
     )
 
     /** Every QNN arch tier the app knows how to name. Not what this chip can LOAD. */
@@ -288,21 +284,9 @@ object ModelPaths {
         return f.isNotEmpty() && f.all { File(d, it).canRead() }
     }
 
-    /**
-     * Which required files are absent for [tier], by display name.
-     *
-     * The gate counts as required because it BLOCKS: without it there is nothing to refuse
-     * with, and a run that cannot check is a run that must not happen. Either build
-     * satisfies it, fp32 (`nsfw_`) or the quantised `nsfwq2_` the lower tiers carry.
-     * (`nsfwq2_`, not `nsfwq_`: the old name is calibrated for an input range this
-     * app no longer produces -- see work/qnn/convert.sh.)
-     */
     fun missing(ctx: Context, tier: String, swapper: String): List<String> {
         val d = dir(ctx)
-        val absent = listOf("yoloface", "fan2d", "arcface", swapper)
+        return listOf("yoloface", "fan2d", "arcface", swapper)
             .filter { !present(d, tier, it) }
-            .toMutableList()
-        if (!present(d, tier, "nsfw") && !present(d, tier, "nsfwq2")) absent += "nsfw"
-        return absent
     }
 }

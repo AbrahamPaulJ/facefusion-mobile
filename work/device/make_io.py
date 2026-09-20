@@ -30,11 +30,7 @@ SPECS = {
 	'hyperswap': dict(onnx='onnx/hyperswap_1a_256_sim.onnx',
 					  inputs=[('target', 'calib/swap_target', (1, 3, 256, 256)),
 							  ('source', 'calib/swap_source', (1, 512))]),
-	# The held-out set is the ODD stride phase, so it is DISJOINT from calibration rather
-	# than merely the tail of the same sequence (nsfw_reference.py:frames).
-	'nsfw':      dict(onnx='onnx/nsfw_2_sim.onnx',
-					  inputs=[('input', 'calib/nsfw_heldout', (1, 3, 384, 384))]),
-	# Same disjoint-phase rule as nsfw: gpen's held-out crops are the ODD frames of the
+	# The held-out crops are the ODD frames of the
 	# capture, calibration the even ones. Consecutive video frames are correlated, so even
 	# this is a friendly test -- but it is at least not the set that trained the encodings.
 	'gpen':      dict(onnx='onnx/gpen_bfr_256_sim.onnx',
@@ -42,7 +38,7 @@ SPECS = {
 	# The lip syncer. Its two inputs are BUILT rather than captured -- the mouth crop the
 	# app will feed does not exist until roadmap 9 step 5 -- so this verifies the
 	# CONVERSION and says nothing about where the mouth lands. make_lipsync_calib.py.
-	# The HELD-OUT half, on gpen and nsfw's rule: the odd capture frames, disjoint from
+	# The HELD-OUT half uses the odd capture frames, disjoint from
 	# the six the encodings were fitted on. Measuring deploy SNR on the calibration set
 	# flatters it.
 	'wav2lip':   dict(onnx='onnx/wav2lip_gan_96_b1_sim.onnx',

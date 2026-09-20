@@ -11,7 +11,6 @@ a launcher, so any client that can exec the binary replaces the UI. That is the 
 
 | | |
 |---|---|
-| **The content gate's policy is Kotlin** | `NativePipe.contentScore` is native, but the thresholds, the video sampling and the refusal live in `ContentGate.kt`. A native server would reimplement them, and the first thing it got wrong would be a processing path with no gate on it, reachable over the network. |
 | **The video path is Android's** | `VideoSwapper` is MediaExtractor + MediaCodec + MediaMuxer. There is no encoder in this tree to reimplement it against. |
 | **The models are the app's** | They live in the app's external files dir, downloaded and SHA256-verified by the app, and a shell-owned copy of them is unreadable to it (see the `modelDir()` comment). |
 
@@ -58,7 +57,7 @@ can quietly open the port to the network.
 | | | |
 |---|---|---|
 | `GET /health` | — | JSON: tier, missing models, whether a source is set, who holds the NPU |
-| `POST /source` | image bytes | Sets the face to swap **from**. Gated, then embedded. Kept until replaced. |
+| `POST /source` | image bytes | Sets the face to swap **from**. Embedded and kept until replaced. |
 | `POST /swap` | image bytes | `image/png` of that image with the face swapped in |
 | `POST /swap_video` | mp4 bytes | `video/mp4`, the whole clip. Blocks; capped at 512 MB. |
 
@@ -83,7 +82,6 @@ curl --data-binary "@photo.jpg" "http://127.0.0.1:8760/swap?boost=2&enhancer=1" 
 
 | | |
 |---|---|
-| `403` | the content gate refused. The body carries the sentence and the verdict. |
 | `409` | no source set yet — `POST /source` first |
 | `422` | no face in that frame. The buffer is returned untouched by `processFrame`, so this is an explicit answer rather than an unswapped image with a 200 on it. |
 | `500` | something threw. The body names the exception TYPE as well as its message, because MediaCodec's carries an empty one and arrived as `{"error":""}` |

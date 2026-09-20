@@ -489,9 +489,8 @@ fun SettingsScreen(
         // implementation per vendor, so the backend now checks its own GPU against its own
         // CPU before using it (ffnn_ncnn.cpp, verifyGpu) and Auto is that check.
         //
-        // ⚠ These chips do NOT override the two correctness pins. The content gate and the
-        // enhancer are on the CPU on every device and no setting may move them: the gate
-        // errs toward allowing on Vulkan, which is the one direction a gate must not err.
+        // ⚠ The enhancer is a correctness pin and remains on the CPU on every device; no
+        // setting may move it.
         if (onNcnnGpu != null && device.backend == "ncnn") {
             Spacer(Modifier.height(6.dp))
             Caption(stringResource(R.string.set_unit))

@@ -14,13 +14,9 @@
    * THE LOG BOX AND THE BUG REPORT. They exist to be read by whoever fixes the bug. A
      translated stack of tier-fallback messages in a report is worse for everyone, including
      the person who filed it.
-   * THE LAUNCHER LABEL. It is a Gradle manifest placeholder derived from whether
-     ContentGate.kt exists, which is what keeps `main` and `dev` installable side by side.
-     It is a brand name.
+   * THE LAUNCHER LABEL. It is a Gradle manifest placeholder and a brand name.
    * THE HTTP API's responses. `ApiServer` answers a machine, and a script that matches on
-     an error string must not have it change with the phone's locale. The API asks
-     ContentGate for its message through an English-forced Context, so the sentences still
-     live here once rather than twice.
+     an error string must not have it change with the phone's locale.
 
   The web UI at assets/webui.html is a SECOND, independent table: it is read on a different
   machine by someone who may not be holding the phone, so it follows the browser's
@@ -232,8 +228,6 @@
     <string name="model_recogniser">Face recogniser</string>
     <string name="model_swapper">Face swapper</string>
     <string name="model_swapper_alt">Face swapper (alternative)</string>
-    <string name="model_content_checker">Content checker</string>
-    <string name="model_content_checker_quantised">Content checker (quantised)</string>
     <string name="model_enhancer">Face enhancer</string>
     <string name="model_lip_syncer">Lip syncer</string>
     <string name="model_lip_syncer_256">Lip syncer 256</string>
@@ -253,7 +247,7 @@
     <string name="set_runtime_cpu">CPU</string>
     <string name="set_runtime_none">none started</string>
     <string name="set_unknown_dash">-</string>
-    <string name="set_ncnn_note">This device has no Qualcomm NPU, so the swap runs on the GPU and CPU: expect roughly 13x the time per frame. The face enhancer and the content checker always run on the CPU here; on the GPU they are measurably wrong, not merely slower.</string>
+    <string name="set_ncnn_note">This device has no Qualcomm NPU, so the swap runs on the GPU and CPU: expect roughly 13x the time per frame. The face enhancer always runs on the CPU here; on the GPU it is measurably wrong, not merely slower.</string>
     <string name="set_htp_unmeasured">The HTP could not be measured. The app falls back to the most permissive build, so this is not necessarily a failure to run.</string>
     <string name="set_hexagon_arch">Hexagon arch</string>
     <string name="set_vtcm">VTCM</string>
@@ -334,7 +328,6 @@
     <string name="status_cancelled">Cancelled</string>
     <string name="status_loading_models">Loading models…</string>
     <string name="status_reading_source">Reading source face…</string>
-    <string name="status_content_check">content check…</string>
     <string name="status_swapping">Swapping…</string>
     <!-- %1$d is the output size in kilobytes -->
     <string name="status_done">Done - %1$d KB</string>
@@ -379,22 +372,6 @@
     <string name="status_cannot_read_source">Could not read the source image</string>
     <string name="share_swapped_image">Share swapped image</string>
     <string name="share_swapped_video">Share swapped video</string>
-
-    <!-- ==================================================== content gate
-         The one place where a soft translation changes what the app appears to promise.
-         BLOCK is a refusal and must read as one; ERROR must NOT read as a refusal, because
-         a check that could not run has neither permitted nor refused anything, and saying
-         "not allowed" there blames the user for our own failure. -->
-    <string name="gate_subject_source_image">the source image</string>
-    <string name="gate_subject_target_image">the target image</string>
-    <string name="gate_subject_target_video">the target video</string>
-    <string name="gate_subject_this_frame">this frame</string>
-    <!-- %1$s is one of the gate_subject_* strings above -->
-    <string name="gate_blocked">Explicit content not allowed in %1$s</string>
-    <string name="gate_error">The content check could not run on %1$s, so it cannot be processed</string>
-    <!-- %1$s is the gate_error sentence, %2$s a technical reason that is not translated -->
-    <string name="gate_error_detail">%1$s (%2$s)</string>
-    <string name="gate_blocked_generic">Explicit content not allowed</string>
 
 
     <!-- ==================== Live ====================

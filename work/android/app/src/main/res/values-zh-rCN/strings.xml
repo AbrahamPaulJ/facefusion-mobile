@@ -9,8 +9,6 @@
    * Units and technical tokens — MB, fps, ms, VTCM, SoC, fp16, GPU, CPU, NPU, Vulkan.
    * 文件名 — never translated anywhere.
 
-  ⚠ gate_blocked and gate_error MUST stay distinguishable. The first is a refusal; the
-  second is a fault in our own code, and wording it like a refusal blames the user for it.
 -->
 <resources>
 
@@ -276,17 +274,6 @@
     <string name="status_cannot_read_source">无法读取源图片</string>
     <string name="share_swapped_image">分享换脸图片</string>
     <string name="share_swapped_video">分享换脸视频</string>
-
-    <string name="gate_subject_source_image">源图片</string>
-    <string name="gate_subject_target_image">目标图片</string>
-    <string name="gate_subject_target_video">目标视频</string>
-    <string name="gate_subject_this_frame">这一帧</string>
-    <!-- 拒绝。必须读起来就是拒绝。 -->
-    <string name="gate_blocked">%1$s中含有不允许的成人内容</string>
-    <!-- 故障，不是拒绝：检查没能运行，因此它既没有允许也没有拒绝任何内容。 -->
-    <string name="gate_error">无法对%1$s执行内容检查，因此无法处理</string>
-    <string name="gate_error_detail">%1$s（%2$s）</string>
-    <string name="gate_blocked_generic">不允许处理成人内容</string>
 
 
     <!-- ==================== 新增：实时、拍摄、每个处理器的设置 ==================== -->

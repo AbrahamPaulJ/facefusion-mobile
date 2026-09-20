@@ -60,10 +60,6 @@ const std::map<std::string, Spec>& specs() {
       {"hyperswap", {"hyperswap_1a_256_fp32",
                      {{"source", 512, 1, 0}, {"target", 256, 256, 3}}, "out0"}},
       {"gpen",      {"gpen_ncnn",             {{"input", 256, 256, 3}}, "out0"}},
-      // One graph serves both gate names. ncnn has no quantised build -- "nsfwq2" exists
-      // because a QNN tier below v79 cannot finalize the fp32 gate, which is a QNN fact.
-      {"nsfw",      {"nsfw_2_sim",            {{"input", 384, 384, 3}}, "out0"}},
-      {"nsfwq2",    {"nsfw_2_sim",            {{"input", 384, 384, 3}}, "out0"}},
       // fan685 is deliberately absent: it is not converted for ncnn, and the pipeline
       // already treats a missing landmark refiner as optional.
   };
@@ -257,8 +253,8 @@ Handle ncnnOpen(const std::string& logicalName, Placement p) {
   std::unique_ptr<Model> m(new Model());
   m->spec = &it->second;
 
-  // Placement, honoured rather than noted. Cpu is not a hint: the content gate and the
-  // enhancer are pinned there because the GPU gets them WRONG, not because it is slower.
+  // Placement, honoured rather than noted. Cpu is not a hint: the enhancer is pinned there
+  // because the GPU gets it WRONG, not because it is slower.
   //
   // ⚠ Default means CPU. That is deliberate but it is also easy to misread: the first
   // end-to-end ncnn run measured 354 ms/frame and was reported as "the ncnn path", when

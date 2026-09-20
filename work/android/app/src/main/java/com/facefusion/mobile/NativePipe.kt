@@ -44,10 +44,9 @@ object NativePipe {
     /**
      * Tiers to skip at the next [init], comma-separated; "" clears.
      *
-     * ⚠ Pushed rather than passed for the same reason the content gate enumerates its
-     * paths: there are four callers of [init] and a per-call argument is a list something
-     * can be left out of. Set it once, from [ModelPaths.apply], and no future path can
-     * forget it.
+     * ⚠ Pushed rather than passed because there are four callers of [init] and a per-call
+     * argument is a list something can be left out of. Set it once, from [ModelPaths.apply],
+     * and no future path can forget it.
      */
     /**
      * Frames between real face detections; 0 detects every frame.
@@ -217,16 +216,6 @@ object NativePipe {
     @JvmStatic external fun probeDeviceInfo(libDir: String, skelDir: String): String
 
     /**
-     * Upstream's content-gate statistic for one BGR frame: `logit[0] - logit[1]`, flagged
-     * above [ContentGate.THRESHOLD].  Returns **NaN** when the graph did not run.
-     *
-     * ⚠ NaN, not `false`: an error that read as "allow" would open the gate exactly when
-     * it broke.  Every comparison against a threshold is false for NaN, so callers must
-     * test `isNaN()` explicitly -- see [ContentGate].
-     */
-    @JvmStatic external fun contentScore(bgr: ByteArray, w: Int, h: Int): Float
-
-    /**
      * The faces in one BGR frame, as boxes: **five floats each** -- x0, y0, x1, y1, score,
      * in the frame's own pixel coordinates.
      *
@@ -266,9 +255,6 @@ object NativePipe {
 
     /** Whether a reference face is set. Survives an options change; init clears it. */
     @JvmStatic external fun hasReferenceFace(): Boolean
-
-    /** True when this tier had no fp32 gate context; see [ContentGate.QUANTISED_BIAS]. */
-    @JvmStatic external fun contentGateIsQuantised(): Boolean
 
     @JvmStatic external fun setSource(bgr: ByteArray, w: Int, h: Int): Boolean
     @JvmStatic external fun addSource(bgr: ByteArray, w: Int, h: Int): Int
@@ -434,16 +420,7 @@ object NativePipe {
      * ⚠ Single-pump: the native frame buffer is a static. One caller at a time, which is
      * what STRATEGY_KEEP_ONLY_LATEST already guarantees.
      *
-     * [gateThreshold] runs the content gate on the CAMERA frame, before anything swaps it,
-     * and refuses above that score. NaN skips the check -- NOT a negative number, since gate
-     * scores are themselves often negative -- which is how a caller says
-     * "this frame is not a sample": both the sampling rate and the threshold itself are
-     * policy, and policy lives in Kotlin -- nothing about the gate is compiled into the
-     * native side but the comparison.
-     *
-     * @return faces swapped; -1 with [lastError] set on a fault, **-2 when the gate
-     *         refused this frame**, **-3 when the gate could not be measured** -- which is
-     *         also a refusal, never a pass.
+     * @return faces swapped; -1 with [lastError] set on a fault.
      */
     @JvmStatic external fun liveFrame(
         y: java.nio.ByteBuffer, yRow: Int,
@@ -451,7 +428,6 @@ object NativePipe {
         v: java.nio.ByteBuffer, vRow: Int, vPix: Int,
         w: Int, h: Int,
         bmp: android.graphics.Bitmap, dstW: Int, dstH: Int,
-        gateThreshold: Float,
         /**
          * Where to copy the FULL-RESOLUTION swapped frame as BGR, or null.
          *

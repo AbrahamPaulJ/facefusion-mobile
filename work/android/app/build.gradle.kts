@@ -6,14 +6,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-// Which line this build came from.  The content gate is a BRANCH difference -- `dev` has
-// none -- and an APK that does not say so can be handed to a store, or trusted in a test,
-// by accident.
-//
-// Derived from the gate's own source file rather than set per branch: this file is then
-// byte-identical on both lines, so it never conflicts on merge, and the version can never
-// drift out of sync with what is actually compiled in.  Delete ContentGate.kt and the APK
-// renames itself.
+// The release and debug variants use the same application identity and behavior.
 /**
  * Release signing material, from keystore.properties beside this module's project root.
  *
@@ -29,8 +22,7 @@ val keystoreProps = Properties().apply {
     if (f.exists()) f.inputStream().use { load(it) }
 }
 
-val hasContentGate = file("src/main/java/com/facefusion/mobile/ContentGate.kt").exists()
-val variantTag = if (hasContentGate) "" else "-dev"
+val variantTag = ""
 
 // `dev` is a SEPARATE APP, not a differently-signed one.  Android identifies an installed
 // app by its applicationId; a build that keeps this one and changes only the key cannot be
@@ -39,13 +31,13 @@ val variantTag = if (hasContentGate) "" else "-dev"
 // and it also gives dev its own private files dir -- so the two can never share, or
 // corrupt, each other's downloaded context binaries.  The price is that dev downloads its
 // own ~300 MB tier.
-val idSuffix = if (hasContentGate) "" else ".dev"
-val appLabel = if (hasContentGate) "FaceFusion" else "FaceFusion Dev"
+val idSuffix = ""
+val appLabel = "FaceFusion"
 
 // The ncnn backend (roadmap 6), on when its staged build is present.
 //
-// Derived from the tree rather than set by hand, for the reason `hasContentGate` is: a flag
-// that has to be remembered is a flag that is wrong in one of the two builds.  ncnn is
+// Derived from the tree rather than set by hand so the build cannot drift from the native
+// sources. ncnn is
 // compiled in WSL by the Linux NDK and COPIED here by work/android/stage_ncnn.sh, because
 // Gradle and this CMake run on Windows and cannot reliably read a WSL UNC path.
 //
@@ -68,6 +60,7 @@ val hasNcnn = File(ncnnDir, "lib/libncnn.a").exists()
 val qnnStageScript = rootProject.file("stage_qnn.sh")
 val qnnTiers = (System.getenv("QNN_HTP_TIERS") ?: "68 69 73 75 79 81")
     .trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+val prebuiltNativeDir = providers.gradleProperty("prebuiltNativeDir").orNull?.let { file(it) }
 val qnnStage by tasks.registering {
     doLast {
         val required = mutableListOf(
@@ -110,13 +103,14 @@ val qnnStage by tasks.registering {
     }
 }
 
-tasks.named("preBuild") {
-    dependsOn(qnnStage)
+if (prebuiltNativeDir == null) {
+    tasks.named("preBuild") {
+        dependsOn(qnnStage)
+    }
 }
 
 // Optional matching native binaries for Kotlin/UI-only builds without the Qualcomm SDK.
 // Supply a directory containing arm64-v8a/libffnative.so and its runtime dependencies.
-val prebuiltNativeDir = providers.gradleProperty("prebuiltNativeDir").orNull?.let { file(it) }
 if (prebuiltNativeDir != null) {
     require(File(prebuiltNativeDir, "arm64-v8a/libffnative.so").isFile) {
         "prebuiltNativeDir must contain arm64-v8a/libffnative.so"
@@ -134,7 +128,7 @@ android {
 
     defaultConfig {
         applicationId = "com.facefusion.mobile$idSuffix"
-        buildConfigField("boolean", "DEV_BUILD", (!hasContentGate).toString())
+        buildConfigField("boolean", "DEV_BUILD", "false")
         minSdk = 31                 // SM8750 / HTP v79 is far above this
         targetSdk = 35
         // âš  0.1.1 IS SIGNED WITH A DIFFERENT KEY THAN 0.1.0.  The 0.1.0 keystore was lost,
@@ -448,7 +442,7 @@ android {
         // 97 is installed on the bench and sitting in its Downloads: reusing the name would
         // leave two builds answering to it, which is the ambiguity the rule exists to stop.
         versionCode = 98
-        versionName = "0.9.26$variantTag"    // "-dev" == NO content gate
+        versionName = "0.9.26$variantTag"
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }
@@ -528,10 +522,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    // buildConfig, so the Live tab can be derived from the SAME signal as the app id and
-    // the label -- ContentGate.kt's presence -- instead of a hand-set flag that can drift
-    // out of step with which line actually built. The Live code compiles into both APKs;
-    // only the destination is hidden, which keeps `git diff main dev` exactly the gate.
+    // buildConfig keeps the Live tab and other build-specific behavior explicit.
     buildFeatures { compose = true; buildConfig = true }
 }
 

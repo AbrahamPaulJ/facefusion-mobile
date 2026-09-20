@@ -22,12 +22,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Local Dream solves this by making the inference itself a standalone native server and
  * reducing its app to a launcher. That shape does not fit here, and copying it would be a
  * mistake: on this project the pipeline is native but three things around it are not.
- * The content gate's POLICY is Kotlin (thresholds, video sampling, the refusal); the video
- * path is MediaCodec and MediaExtractor, which are Android APIs with no native equivalent
- * in this tree; and the models live in the app's own external files dir. A native server
- * would have to reimplement all three, and the first one it got wrong would be the gate --
- * a fourth processing path with nothing guarding it, reachable from any machine on the
- * network. So the server lives INSIDE the app and calls exactly what the screen calls.
+ * The video path is MediaCodec and MediaExtractor, which are Android APIs with no native
+ * equivalent in this tree; and the models live in the app's own external files dir. So the
+ * server lives INSIDE the app and calls exactly what the screen calls.
  *
  * ## The API
  *
@@ -37,7 +34,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * ```
  * GET  /                           -> the web UI, a single self-contained page
  * GET  /health                      -> JSON: tier, arch, models, whether a source is set
- * POST /source   <image bytes>      -> JSON: sets the face to swap FROM, gated, kept warm
+ * POST /source   <image bytes>      -> JSON: sets the face to swap FROM, kept warm
  * POST /swap     <image bytes>      -> image/png, the swapped still
  * POST /swap_video <mp4 bytes>      -> video/mp4, the whole clip (blocks; can take minutes)
  * ```
@@ -50,9 +47,6 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * ## What it refuses
  *
- * - The gate runs on the source in [source] and on every frame in [swap] and inside
- *   VideoSwapper's own path, which is the same code `refreshSwapped` and `runSwap` use.
- *   There is no way in here that skips it.
  * - One job at a time, through [PipeGuard]. A request that arrives while the screen is
  *   swapping gets 503 rather than sharing a global the C++ side assumes is exclusive.
  */
@@ -339,31 +333,11 @@ class ApiServer(
         ))
     }
 
-    /**
-     * The face to swap FROM.
-     *
-     * Gated before it is embedded, and in that order for the same reason the preview does
-     * it that way: the check needs the models up, but `setSource` is already processing --
-     * it detects, aligns and embeds. Anything that must not be processed has to be refused
-     * in the gap between those two.
-     */
+    /** The face to swap FROM. */
     private fun source(req: Request, out: OutputStream) {
         val bmp = decode(req.body)
             ?: return respond(out, 400, "application/json", json("error" to "cannot decode image"))
         withPipeline(out, SwapOptions.load(ctx).overrides(req.query), applySource = false) { _ ->
-            val gate = ContentGate.checkImage(bmp)
-            log("api source score %+.3f".format(gate.score))
-            if (!gate.ok) {
-                respond(out, 403, "application/json",
-                        json("error" to ContentGate.messageEnglish(ctx, R.string.gate_subject_source_image, gate),
-                             "verdict" to gate.verdict.name,
-                             "score" to gate.score,
-                             // The native reason when the check could not RUN. A refusal
-                             // and a broken checker are different problems and must not
-                             // arrive looking the same.
-                             "detail" to gate.detail))
-                return@withPipeline
-            }
             val soft = bmp.asArgb8888()
             val px = IntArray(soft.width * soft.height)
             soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
@@ -380,22 +354,13 @@ class ApiServer(
         }
     }
 
-    /** One still, swapped. The frame is gated exactly as the preview pane gates it. */
+    /** One still, swapped. */
     private fun swap(req: Request, out: OutputStream) {
         if (sourceBgr == null)
             return respond(out, 409, "application/json", json("error" to "POST /source first"))
         val bmp = decode(req.body)
             ?: return respond(out, 400, "application/json", json("error" to "cannot decode image"))
         withPipeline(out, SwapOptions.load(ctx).overrides(req.query)) { _ ->
-            val gate = ContentGate.checkImage(bmp)
-            if (!gate.ok) {
-                respond(out, 403, "application/json",
-                        json("error" to ContentGate.messageEnglish(ctx, R.string.gate_subject_target_image, gate),
-                             "verdict" to gate.verdict.name,
-                             "score" to gate.score,
-                             "detail" to gate.detail))
-                return@withPipeline
-            }
             val soft = bmp.asArgb8888()
             val w = soft.width; val h = soft.height
             val px = IntArray(w * h)
@@ -437,18 +402,6 @@ class ApiServer(
         }
         val outFile = File(ctx.cacheDir, "api_out.mp4")
         withPipeline(out, SwapOptions.load(ctx).overrides(req.query)) { opts ->
-            val gate = ContentGate.checkVideo(inFile)
-            // `detail` is an ARGUMENT, never part of the format string: it contains a "%)"
-            // that gets read as a conversion.
-            log("api target content: %s, worst %+.3f".format(gate.detail, gate.score))
-            if (!gate.ok) {
-                respond(out, 403, "application/json",
-                        json("error" to ContentGate.messageEnglish(ctx, R.string.gate_subject_target_video, gate),
-                             "verdict" to gate.verdict.name,
-                             "score" to gate.score,
-                             "detail" to gate.detail))
-                return@withPipeline
-            }
             val t0 = System.currentTimeMillis()
             var frames = 0
             val r = VideoSwapper(

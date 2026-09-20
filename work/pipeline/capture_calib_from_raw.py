@@ -30,15 +30,14 @@ import sys
 import numpy
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import nsfw_reference as nsfw
 import run_reference as ref
 
 # Sets that keep a disjoint held-out half.  The split is by frame PARITY, not by taking a
 # tail: consecutive video frames are correlated, so the odd phase is a weaker test than
 # genuinely unseen footage but at least is not the set that trained the encodings.
-# This used to be a manual step after the capture, which is why `nsfw` and `gpen` were the
-# only sets that had one and why nothing recorded how it had been done.
-HELDOUT_SETS = ('gpen', 'nsfw')
+# This used to be a manual step after the capture, which is why gpen was the only set
+# that had one and why nothing recorded how it had been done.
+HELDOUT_SETS = ('gpen',)
 
 
 def read_raw(path, w, h, frames=1):
@@ -83,10 +82,6 @@ def main():
         # .copy() because paste_back writes in place and the array is a view into one
         # big buffer -- without it, frame i+1 would carry frame i's swapped face.
         frame = frames[i].copy()
-        # The gate sees the target frame as the user supplied it -- whole-frame, letterboxed,
-        # and BEFORE any swapping.  process_frame pastes into `frame` in place, so this has
-        # to be taken first or the gate would be calibrated on this tool's own output.
-        calib.setdefault('nsfw', []).append(nsfw.prepare_detect_frame(frame)[0])
         n_before = len(calib.get('arcface', []))
         ref.process_frame(models, source_face, frame, calib)
         n = len(calib.get('arcface', [])) - n_before
