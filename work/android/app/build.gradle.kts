@@ -454,8 +454,12 @@ android {
         // the model, and the download path SHA256s every byte against the manifest.
         // v0.9.26 is published and is versionCode 98, so this build has stopped being
         // that release and must stop answering to its name.
-        versionCode = 99
-        versionName = "0.9.27$variantTag"    // "-dev" == NO content gate
+        // 100 = the API server stopped coming back by itself. START_STICKY had
+        // Android re-create the service after a memory kill, with a null intent that
+        // fell through every guard -- reported from the bench as "the api notif starts
+        // running on its own".
+        versionCode = 101
+        versionName = "0.9.29$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }

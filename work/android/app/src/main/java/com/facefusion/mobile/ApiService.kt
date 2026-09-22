@@ -34,7 +34,7 @@ class ApiService : Service() {
             shutdown()
             return START_NOT_STICKY
         }
-        if (server != null) return START_STICKY
+        if (server != null) return START_NOT_STICKY
 
         val lan = intent?.getBooleanExtra(EXTRA_LAN, false) ?: false
         createChannel()
@@ -64,7 +64,22 @@ class ApiService : Service() {
                   else "http://127.0.0.1:" + ApiServer.PORT
         running = true
         notify(notification(address))
-        return START_STICKY
+        // ⚠ NOT_STICKY, and it is the whole point. START_STICKY asks Android to
+        // re-create this service after a low-memory kill, and it re-creates it with a
+        // NULL intent -- which walks through every guard above (no ACTION_STOP, no live
+        // server, lan defaulting to false) and opens the port again with nobody asking.
+        // This class's own rule is that opening a port is a decision and stays one, and
+        // `restore` is careful to bring back only which way the SWITCH was thrown; a
+        // sticky service undoes that one level down. It also silently demotes a
+        // deliberately-LAN server to loopback, so the address someone was using stops
+        // answering while the notification still says the API is running -- the exact
+        // failure restore's comment was written about.
+        //
+        // The cost is that a server really killed for memory stays down until the app is
+        // opened. That is the correct direction for a face swapper: a port that is closed
+        // when you did not ask for it is an inconvenience, one that is open when you did
+        // not ask for it is not.
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {

@@ -1344,8 +1344,18 @@ class MainActivity : ComponentActivity() {
         // phone could flip without the user seeing the screen. Opening the port to the
         // network stays a deliberate touch on a switch that says what it does. The token is
         // required either way.
-        if (intent?.getStringExtra("api") == "start")
+        // ⚠ CONSUMED, not merely read. The launch intent stays attached to the task,
+        // so Android hands it back every time this activity is re-created -- after a
+        // low-memory kill, or when the task is restored. An extra that merely SELECTS
+        // something can be replayed harmlessly; one that performs an ACTION cannot, and
+        // this one opens a port. Left un-consumed it reads as "the API notification comes
+        // back on its own", which is what it was reported as, and no switch in Settings
+        // explains it because no switch was touched.
+        if (intent?.getStringExtra("api") == "start") {
+            intent.removeExtra("api")
+            setIntent(intent)
             toggleApi(on = true, lan = false, remember = false)
+        }
 
         sweepOrphanedOutputs()
         probeDevice()
@@ -1943,9 +1953,13 @@ class MainActivity : ComponentActivity() {
      */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        setIntent(intent)
-        if (intent.getStringExtra("api") == "start")
+        // Same consumption as onCreate: this intent becomes the task's, so an extra
+        // left in it is an instruction that runs again at every future re-creation.
+        if (intent.getStringExtra("api") == "start") {
+            intent.removeExtra("api")
             toggleApi(on = true, lan = false, remember = false)
+        }
+        setIntent(intent)
     }
 
     /**
