@@ -470,8 +470,10 @@ android {
         // 105 = the fullscreen exit stopped hiding under the navigation bar (the dialog
         // window was never set up edge-to-edge, so its insets read as nothing), Use lost
         // its confirmation, and the primary action on both screens follows the scroll.
-        versionCode = 105
-        versionName = "0.9.33$variantTag"    // "-dev" == NO content gate
+        // 106 = hyperswap_1b/1c became hosted, and OPTIONAL: required they would have
+        // put 1.6 GB behind the button a new install taps to get started.
+        versionCode = 106
+        versionName = "0.9.34$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }

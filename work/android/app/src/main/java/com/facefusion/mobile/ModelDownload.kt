@@ -155,7 +155,14 @@ object ModelDownload {
      * ⚠ wav2lip is here because ffpipe stopped opening it in 0.6.0 -- it is not merely
      * optional, it is unreachable, and it is still published for tiers built before then.
      */
-    private val OPTIONAL_MODELS = listOf("gpen", "edtalk", "wav2lip")
+    // ⚠ hyperswap_1b and 1c are OPTIONAL and must stay that way. They are ~205 MB
+    // EACH per tier, so a required pair would put 1.6 GB behind the one button a new
+    // install taps to get started -- on a phone, on whatever connection it has. The list
+    // is an EXCLUSION so that a model added to the manifest later is required by default;
+    // these two are named here because they are alternatives to a swapper the app already
+    // has, not additions to the set it needs.
+    private val OPTIONAL_MODELS =
+        listOf("gpen", "edtalk", "wav2lip", "hyperswap_1b", "hyperswap_1c")
 
     /** Which of [entries] are not already present and correct in [dir]. */
     fun missing(dir: File, entries: List<Entry>): List<Entry> =

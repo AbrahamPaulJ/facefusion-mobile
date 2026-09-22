@@ -43,6 +43,15 @@ Ruhs. The pipeline, the models, and the option names, defaults and ranges are Fa
   (Android asks for permission); leave it off for silent video. The switch is locked while
   recording and saving. Fast mode forces the settings a camera can keep up with; turning it
   off is experimental and asks first.
+- **Three face swap models**: `hyperswap` **1a**, **1b** and **1c**, picked from the gear
+  beside the `face_swapper` chip. All three run at 256 and cost the same on an NPU — they
+  differ in how they were trained, so the same face can come out differently. 1b and 1c are
+  separate downloads; the picker only offers what you have. There is no ranking here:
+  FaceFusion publishes none, and the only honest test is your own footage.
+- **Fullscreen Live**: the expand button at the corner of the feed fills the screen, and
+  tapping a face to assign a source still works there.
+- **Saved faces**: keep a source face with the bookmark button and it is still there next
+  time, even after you clear the row. The faces button opens what you have kept.
 - **Assign per person**: give each person in the shot their own source face. On **Live**,
   enable the mode, choose a source, then tap a detected-person photo (`Person 1`, `Person 2`,
   and so on) or tap the person directly in the preview. The photos show the real camera faces,
@@ -72,8 +81,10 @@ Ruhs. The pipeline, the models, and the option names, defaults and ranges are Fa
 - Can be driven from a browser on your PC over the local network, if you turn that on.
 
 Optional extras, each a separate download: a face enhancer (`gpen_bfr_256`, about 2.5 ms
-more per face, 25 MB), a lip syncer (`edtalk_256`, 60 MB) and pixel boost, which renders the
-swapped face at 512, 768 or 1024 instead of 256 at a proportional cost in time.
+more per face, 25 MB), a lip syncer (`edtalk_256`, 60 MB), the alternative swappers
+`hyperswap_1b` and `hyperswap_1c` (about 200 MB each, and neither is faster or slower than
+the one that ships), and pixel boost, which renders the swapped face at 512, 768 or 1024
+instead of 256 at a proportional cost in time.
 
 The photo row in **Assign per person** is a way to pick somebody without chasing a moving
 face on the preview: the pictures are taken before anything is swapped, and the row is
@@ -208,6 +219,12 @@ Outside contributions, with thanks:
   recordings and the first version of **Assign per person** on Live ([#1]), then the ideas
   behind several source faces on the Swap screen, per-person assignment there, the option to
   leave a person's own face alone, and a Live mirror independent of the lens ([#2], [#4]).
+  Then ([#6]) the photo-based person picker on both screens — real pre-swap faces, captured
+  once, so the detector's per-frame ordering can no longer change which person `Person 1`
+  means — assign per person on stills, and recordings that follow the mirror switch.
+  **`hyperswap_1b` and `1c` are his too**: he did the conversion work, wired both through
+  ncnn, QNN, the ONNX export and the app, and published the source graphs, which is what
+  the builds shipped here were made from.
 - **[@aaazhouaa](https://github.com/aaazhouaa)** — the monochrome light/dark theme and the
   theme setting, the Russian and Chinese translations, batch thumbnails, the collapsible
   log, and a preview performance fix ([#3]).
@@ -216,6 +233,7 @@ Outside contributions, with thanks:
 [#2]: https://github.com/AbrahamPaulJ/facefusion-mobile/pull/2
 [#3]: https://github.com/AbrahamPaulJ/facefusion-mobile/pull/3
 [#4]: https://github.com/AbrahamPaulJ/facefusion-mobile/pull/4
+[#6]: https://github.com/AbrahamPaulJ/facefusion-mobile/pull/6
 
 ## Support
 
