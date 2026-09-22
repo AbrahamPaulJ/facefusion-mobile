@@ -1087,7 +1087,10 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
                                                 jobject jV, jint vRow, jint vPix,
                                                 jint w, jint h,
                                                 jobject jBitmap, jint dstW, jint dstH,
-                                                jfloat gateThreshold, jbyteArray jBgrOut) {
+                                                jfloat gateThreshold, jboolean jMirrorRecording,
+                                                jbyteArray jBgrOut,
+                                                jbyteArray jOriginalBgrOut,
+                                                jfloatArray jFaceBoxesOut) {
   if (!g_pipe) { g_err = "pipeline not initialised"; return -1; }
   if (w <= 0 || h <= 0) { g_err = "liveFrame: empty frame"; return -1; }
 
@@ -1197,6 +1200,34 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
     g_assignResult.source = tapKeepOriginal ? -1 : tapSource;
   }
 
+  // Capture the real camera frame and the current face boxes BEFORE swapAll mutates the
+  // image. The Java side requests this only when Assign per person is opened, so the
+  // ordinary Live path keeps its zero-copy/zero-allocation behaviour.
+  if (jOriginalBgrOut) {
+    const jsize want = (jsize)(w * h * 3);
+    if (env->GetArrayLength(jOriginalBgrOut) == want)
+      env->SetByteArrayRegion(jOriginalBgrOut, 0, want,
+                              (const jbyte*)frame.data.data());
+  }
+  if (jFaceBoxesOut) {
+    const jsize cap = env->GetArrayLength(jFaceBoxesOut) / 5;
+    const jsize n = std::min<jsize>((jsize)faces.size(), cap);
+    if (n > 0) {
+      std::vector<float> flat((size_t)n * 5);
+      const float sx = (float)dw / (float)w;
+      const float sy = (float)dh / (float)h;
+      for (jsize i = 0; i < n; ++i) {
+        const auto& f = faces[(size_t)i];
+        flat[(size_t)i * 5 + 0] = f.box[0] * sx;
+        flat[(size_t)i * 5 + 1] = f.box[1] * sy;
+        flat[(size_t)i * 5 + 2] = f.box[2] * sx;
+        flat[(size_t)i * 5 + 3] = f.box[3] * sy;
+        flat[(size_t)i * 5 + 4] = f.detScore;
+      }
+      env->SetFloatArrayRegion(jFaceBoxesOut, 0, n * 5, flat.data());
+    }
+  }
+
   if (!faces.empty()) {
     if (!g_pipe->swapAll(frame, faces)) { g_err = g_pipe->error(); return -1; }
     // Its own pass, after the swap, never fused -- see Pipeline::enhance's doc.
@@ -1210,8 +1241,35 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
   // the downsampled picture instead of the one that was computed.
   if (jBgrOut) {
     const jsize want = (jsize)(w * h * 3);
-    if (env->GetArrayLength(jBgrOut) == want)
-      env->SetByteArrayRegion(jBgrOut, 0, want, (const jbyte*)frame.data.data());
+    if (env->GetArrayLength(jBgrOut) == want) {
+      const bool mirror = jMirrorRecording == JNI_TRUE;
+      // Mirror in the reusable native frame, copy to the encoder, then restore the
+      // unmirrored frame for the preview. This avoids a second full-size allocation per
+      // recorded frame and keeps the display path unchanged.
+      if (mirror) {
+        for (int y = 0; y < h; ++y) {
+          for (int x = 0; x < w / 2; ++x) {
+            uint8_t* a = frame.row(y) + (size_t)x * 3;
+            uint8_t* b = frame.row(y) + (size_t)(w - 1 - x) * 3;
+            for (int c = 0; c < 3; ++c) {
+              const uint8_t t = a[c]; a[c] = b[c]; b[c] = t;
+            }
+          }
+        }
+        env->SetByteArrayRegion(jBgrOut, 0, want, (const jbyte*)frame.data.data());
+        for (int y = 0; y < h; ++y) {
+          for (int x = 0; x < w / 2; ++x) {
+            uint8_t* a = frame.row(y) + (size_t)x * 3;
+            uint8_t* b = frame.row(y) + (size_t)(w - 1 - x) * 3;
+            for (int c = 0; c < 3; ++c) {
+              const uint8_t t = a[c]; a[c] = b[c]; b[c] = t;
+            }
+          }
+        }
+      } else {
+        env->SetByteArrayRegion(jBgrOut, 0, want, (const jbyte*)frame.data.data());
+      }
+    }
     // A wrong-sized array is the caller's bug and must not be half-filled: a partial frame
     // would be recorded as a torn picture rather than reported.
   }

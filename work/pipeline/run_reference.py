@@ -371,6 +371,10 @@ def paste_back(frame, crop, crop_mask, affine_matrix):
 
 SWAPPER_SPEC = {
 	'hyperswap_1a_256': dict(template='arcface_128', size=(256, 256), mean=0.5, std=0.5, denorm=True),
+	# 1b/1c: same I/O and prep as 1a, separate weights. Calibration captures the
+	# swapper's INPUTS only, so any hyperswap variant is a valid capture vehicle.
+	'hyperswap_1b_256': dict(template='arcface_128', size=(256, 256), mean=0.5, std=0.5, denorm=True),
+	'hyperswap_1c_256': dict(template='arcface_128', size=(256, 256), mean=0.5, std=0.5, denorm=True),
 	'inswapper_128':    dict(template='arcface_128', size=(128, 128), mean=0.0, std=1.0, denorm=False),
 }
 

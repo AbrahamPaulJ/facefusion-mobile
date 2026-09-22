@@ -606,6 +606,6 @@ private fun SwapOptions.overrides(q: Map<String, String>): SwapOptions {
         lipSync = b("lip_sync") ?: lipSync,
         enhanceBlend = f("enhance_blend")?.coerceIn(0f, 1f) ?: enhanceBlend,
         outputFps = i("fps")?.coerceIn(0, 240) ?: outputFps,
-        swapper = q["swapper"]?.takeIf { it == "hyperswap" || it == "inswapper" } ?: swapper,
+        swapper = q["swapper"]?.takeIf { it == "hyperswap" || it == "hyperswap_1b" || it == "hyperswap_1c" } ?: swapper,
     )
 }

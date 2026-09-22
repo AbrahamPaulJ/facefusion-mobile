@@ -53,7 +53,28 @@ class LiveEngine {
 
     /** One frame's worth of result, handed to the UI. */
     data class Shot(val bitmap: Bitmap?, val faces: Int, val fps: Double, val error: String?,
-                    val gate: Gate = Gate.None)
+                    val gate: Gate = Gate.None,
+                    /** Original camera pixels, only for the one-shot person thumbnails. */
+                    val originalBgr: ByteArray? = null,
+                    val originalW: Int = 0,
+                    val originalH: Int = 0,
+                    /** Current boxes in the display bitmap's coordinates. */
+                    val faceBoxes: FloatArray? = null)
+
+    /** Assign mode asks for boxes every frame; this is only a few floats, not a bitmap. */
+    @Volatile var faceBoxesEnabled: Boolean = false
+    /** Whether the encoder should receive the same horizontal flip as the preview. */
+    @Volatile var mirrorRecording: Boolean = false
+    @Volatile private var faceSnapshotRequested: Boolean = false
+
+    /** Capture the next frame before the native swapper changes it. */
+    fun requestFaceSnapshot() {
+        faceSnapshotRequested = true
+    }
+
+    fun cancelFaceSnapshot() {
+        faceSnapshotRequested = false
+    }
 
     /**
      * Score above which a sampled frame is refused, and how often to sample.
@@ -349,6 +370,12 @@ class LiveEngine {
             // moment; testing it twice could hand liveFrame a buffer and then find no
             // recorder to give the result to, or the reverse.
             val rec = recorder
+            val takeFaceSnapshot = faceSnapshotRequested
+            val wantFaceBoxes = faceBoxesEnabled || takeFaceSnapshot
+            // Assign mode already pays for fresh detection. These arrays stay out of the
+            // normal Live path so ordinary preview frames allocate nothing extra.
+            val originalOut = if (takeFaceSnapshot) ByteArray(w * h * 3) else null
+            val boxesOut = if (wantFaceBoxes) FloatArray(5 * 64) else null
             val nowMs = System.currentTimeMillis()
             val gateNow = !gateThreshold.isNaN() && (nowMs - lastGateMs >= kGateIntervalMs)
             if (gateNow) lastGateMs = nowMs
@@ -359,6 +386,7 @@ class LiveEngine {
                 p[2].buffer, p[2].rowStride, p[2].pixelStride,
                 w, h, bmp, dw, dh,
                 if (gateNow) gateThreshold else Float.NaN,
+                mirrorRecording,
                 // Only while recording: null costs the native side one branch.
                 if (rec != null) {
                     val need = w * h * 3
@@ -366,6 +394,8 @@ class LiveEngine {
                     if (b == null || b.size != need) { b = ByteArray(need); recBuf = b }
                     b
                 } else null,
+                originalOut,
+                boxesOut,
             )
             msPump += (System.nanoTime() - t) / 1e6
             // -2 refused, -3 could not measure. Both STOP the pump rather than skipping a
@@ -414,7 +444,13 @@ class LiveEngine {
                 fps = windowFrames / elapsed
                 windowStart = now; windowFrames = 0
             }
-            onShot(Shot(bmp, faces, fps, null))
+            val boxCount = minOf(faces, boxesOut?.size?.div(5) ?: 0)
+            val boxes = if (boxesOut != null) boxesOut.copyOf(boxCount * 5) else null
+            // A snapshot is requested after boxes have appeared, so a successful frame
+            // closes the request and avoids copying full-resolution camera pixels again.
+            if (takeFaceSnapshot && faces > 0) faceSnapshotRequested = false
+            onShot(Shot(bmp, faces, fps, null, Gate.None,
+                        originalOut?.takeIf { faces > 0 }, w, h, boxes))
         } catch (t: Throwable) {
             // A throw on the analyzer thread would otherwise take the stream down silently.
             onShot(Shot(null, 0, fps, "${t.javaClass.simpleName}: ${t.message ?: ""}"))

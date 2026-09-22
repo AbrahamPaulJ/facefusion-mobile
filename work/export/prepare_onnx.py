@@ -171,13 +171,16 @@ def drop_broadcast_expands(model):
 	return removed
 
 
-def do_hyperswap():
+def do_hyperswap(variant='hyperswap_1a_256'):
 	"""Drop the unused `mask` output, then delete the broadcast-only Expands.
 
 	`mask` is free to remove -- face_swapper/core.py:657 reads output 0 only, and the
 	masker feeds `output` too, so GMAC is unchanged at 31.93.
+
+	Variant-parametrised for hyperswap_1b: same I/O (target 1,3,256,256 +
+	source 1,512, output 0), same surgeries. Call as do_hyperswap('hyperswap_1b_256').
 	"""
-	m = load('hyperswap_1a_256')
+	m = load(variant)
 	names = [o.name for o in m.graph.output]
 	print('  outputs were:', names)
 	m = onnx.utils.Extractor(strip_value_info(m)).extract_model(
@@ -193,7 +196,9 @@ def do_hyperswap():
 		ops[n.op_type] = ops.get(n.op_type, 0) + 1
 	print('  now: %d nodes; Shape=%d Expand=%d Reshape=%d' %
 		  (len(m.graph.node), ops.get('Shape', 0), ops.get('Expand', 0), ops.get('Reshape', 0)))
-	return save(m, 'hyperswap_1a_256_nomask')
+	stem = variant + '_nomask'
+	# The 1a stem keeps its historical name (convert.sh reads hyperswap_1a_256_fp32).
+	return save(m, stem if variant != 'hyperswap_1a_256' else 'hyperswap_1a_256_nomask')
 
 
 # ------------------------------------------------------------------ inswapper
@@ -402,7 +407,7 @@ def demote_fp16_to_fp32(model):
 	return stats
 
 
-def do_hyperswap_fp32():
+def do_hyperswap_fp32(variant='hyperswap_1a_256'):
 	"""`do_hyperswap`, plus the fp16 -> fp32 demotion.  THIS IS THE SHIPPING GRAPH.
 
 	`hyperswap` is the only natively-fp16 model here (306 fp16 initialisers).  Demoting the
@@ -411,10 +416,11 @@ def do_hyperswap_fp32():
 	the only form QAIRT 2.28 will convert at all.  It is NOT faster -- session 3 measured
 	-3.5 % and a counterbalanced re-measurement found 0.02 ms (docs/traps.md #16).
 
-	Still written as `hyperswap_1a_256_fp32.onnx` beside `..._sim.onnx` rather than over
-	it, so the pre-promotion control stays buildable for A/Bs.
+	Still written as `<variant>_fp32.onnx` beside `..._sim.onnx` rather than over
+	it, so the pre-promotion control stays buildable for A/Bs. The 1a name is
+	historical (convert.sh reads `hyperswap_1a_256_fp32.onnx`).
 	"""
-	m = load('hyperswap_1a_256')
+	m = load(variant)
 	names = [o.name for o in m.graph.output]
 	m = onnx.utils.Extractor(strip_value_info(m)).extract_model(
 		[i.name for i in m.graph.input], [names[0]])
@@ -430,7 +436,7 @@ def do_hyperswap_fp32():
 	checker.check_model(m)
 	left = sum(1 for t in m.graph.initializer if t.data_type == 10)
 	print('  fp16 initialisers remaining: %d (want 0)' % left)
-	return save(m, 'hyperswap_1a_256_fp32')
+	return save(m, variant + '_fp32')
 
 
 def add_explicit_slice_steps(model):
@@ -1705,6 +1711,16 @@ TASKS = {
 	# reads `hyperswap_1a_256_fp32.onnx`, so `all` has to produce it or a clean rebuild
 	# stops at a missing file.
 	'hyperswap_fp32': do_hyperswap_fp32,
+	# hyperswap_1b: same I/O and surgeries as 1a, separate weights. convert.sh reads
+	# `hyperswap_1b_256_fp32.onnx`. Licence of the 1b weights must be confirmed
+	# (1a is ResearchRAIL) before hosting.
+	'hyperswap_1b': lambda: do_hyperswap('hyperswap_1b_256'),
+	'hyperswap_1b_fp32': lambda: do_hyperswap_fp32('hyperswap_1b_256'),
+	# hyperswap_1c: same I/O and surgeries as 1a/1b, separate weights. convert.sh reads
+	# `hyperswap_1c_256_fp32.onnx`. Licence of the 1c weights must be confirmed
+	# (1a is ResearchRAIL) before hosting.
+	'hyperswap_1c': lambda: do_hyperswap('hyperswap_1c_256'),
+	'hyperswap_1c_fp32': lambda: do_hyperswap_fp32('hyperswap_1c_256'),
 	'nsfw': do_nsfw,
 	'gpen': do_gpen,
 	'yoloface_slicefix': do_yoloface_slicefix,

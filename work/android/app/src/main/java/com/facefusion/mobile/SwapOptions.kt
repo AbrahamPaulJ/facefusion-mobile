@@ -16,7 +16,7 @@ import android.content.Context
  * context over polyphase sub-images. It costs `pixelBoost^2` invocations per face.
  */
 data class SwapOptions(
-    /** `hyperswap` (256, ships) or `inswapper` (128, converted, needs its binary pushed). */
+    /** `hyperswap` 1a (256, ships), `hyperswap_1b` / `hyperswap_1c` (256, same I/O, separate weights). */
     val swapper: String = "hyperswap",
 
     /**
@@ -233,7 +233,8 @@ data class SwapOptions(
                     ?.takeIf { it.size == 4 }
             }.getOrNull() ?: d.maskPadding
             return SwapOptions(
-                swapper = p.getString(K_SWAPPER, d.swapper) ?: d.swapper,
+                swapper = (p.getString(K_SWAPPER, d.swapper) ?: d.swapper)
+                    .let { if (it == "inswapper") "hyperswap" else it },
                 weight = p.getFloat(K_WEIGHT, d.weight),
                 maskBlur = p.getFloat(K_BLUR, d.maskBlur),
                 maskPadding = padding,

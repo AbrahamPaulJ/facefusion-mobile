@@ -30,6 +30,15 @@ SPECS = {
 	'hyperswap': dict(onnx='onnx/hyperswap_1a_256_sim.onnx',
 					  inputs=[('target', 'calib/swap_target', (1, 3, 256, 256)),
 							  ('source', 'calib/swap_source', (1, 512))]),
+	# hyperswap_1b: same calibration domain as 1a (same faces, same crops).
+	# Reference is the _fp32 graph convert.sh reads (1a's _sim predates the demotion).
+	'hyperswap_1b': dict(onnx='onnx/hyperswap_1b_256_fp32.onnx',
+					  inputs=[('target', 'calib/swap_target', (1, 3, 256, 256)),
+							  ('source', 'calib/swap_source', (1, 512))]),
+	# hyperswap_1c: same domain again -- all three hyperswaps see the same faces.
+	'hyperswap_1c': dict(onnx='onnx/hyperswap_1c_256_fp32.onnx',
+					  inputs=[('target', 'calib/swap_target', (1, 3, 256, 256)),
+							  ('source', 'calib/swap_source', (1, 512))]),
 	# The held-out set is the ODD stride phase, so it is DISJOINT from calibration rather
 	# than merely the tail of the same sequence (nsfw_reference.py:frames).
 	'nsfw':      dict(onnx='onnx/nsfw_2_sim.onnx',

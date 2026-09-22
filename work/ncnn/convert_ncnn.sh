@@ -71,6 +71,10 @@ want arcface_w600k_r50_b1  && convert arcface_w600k_r50_b1   "[1,3,112,112]"
 #   py -3.10 work/ncnn/pnnx_prep.py work/onnx/gpen_bfr_256_sim.onnx work/onnx/gpen_ncnn.onnx
 want gpen_ncnn             && convert gpen_ncnn              "[1,3,256,256]"
 want hyperswap_1a_256_fp32 && convert hyperswap_1a_256_fp32  "[1,512],[1,3,256,256]"
+# hyperswap_1b: same I/O as 1a (source embedding FIRST), separate weights.
+want hyperswap_1b_256_fp32 && convert hyperswap_1b_256_fp32  "[1,512],[1,3,256,256]"
+# hyperswap_1c: same I/O again, separate weights.
+want hyperswap_1c_256_fp32 && convert hyperswap_1c_256_fp32  "[1,512],[1,3,256,256]"
 want yoloface_8n_b1        && convert yoloface_8n_b1         "[1,3,640,640]"
 # The content gate. It is MANDATORY on both branch lines -- ffpipe treats a missing gate as
 # an init failure, not a fallback -- so no non-Qualcomm build can ship until this converts.
