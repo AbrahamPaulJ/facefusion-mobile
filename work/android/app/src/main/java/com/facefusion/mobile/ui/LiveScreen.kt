@@ -193,11 +193,14 @@ fun LiveScreen(
                          stringResource(R.string.faces_open), Modifier.size(16.dp))
                 }
                 if (sourceThumb != null && !running) {
-                    IconButton(onSaveSource, Modifier.size(28.dp), enabled = !sourceSaved) {
-                        Icon(painterResource(R.drawable.ic_save_face),
-                             stringResource(if (sourceSaved) R.string.faces_saved
+                    IconButton(onSaveSource, Modifier.size(28.dp)) {
+                        Icon(painterResource(if (sourceSaved) R.drawable.ic_saved_face
+                                             else R.drawable.ic_save_face),
+                             stringResource(if (sourceSaved) R.string.faces_unsave
                                             else R.string.faces_save),
-                             Modifier.size(16.dp))
+                             Modifier.size(16.dp),
+                             tint = if (sourceSaved) MaterialTheme.colorScheme.primary
+                                    else LocalContentColor.current)
                     }
                 }
                 if (!running) {

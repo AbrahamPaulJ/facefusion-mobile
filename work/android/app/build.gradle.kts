@@ -464,8 +464,11 @@ android {
         // 103 = the fullscreen exit button cleared the gesture bar (it was UNREACHABLE),
         // theme moved to the Device tab, the swapper dialog says what is actually known
         // about 1a/1b/1c, and saved faces became a bookmark plus a library popup.
-        versionCode = 103
-        versionName = "0.9.31$variantTag"    // "-dev" == NO content gate
+        // 104 = the keep button toggles and shows which state it is in, the library's
+        // delete stopped leaving it stuck, every face action confirms, and four icons in
+        // one slot stopped touching.
+        versionCode = 104
+        versionName = "0.9.32$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }

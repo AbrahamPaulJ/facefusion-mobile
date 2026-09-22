@@ -276,7 +276,14 @@ fun PreviewPane(
                 Modifier.height(40.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, content = trailing)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    // Four icons abutting each other read as one control and are hard to
+                    // hit apart on a phone. Applies to every pane's slot; the two-button
+                    // panes wanted the room too.
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    content = trailing,
+                )
             }
         }
         Box(

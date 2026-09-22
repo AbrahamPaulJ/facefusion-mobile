@@ -221,8 +221,27 @@
     <string name="set_updating">Updating</string>
     <string name="faces_open">Saved faces</string>
     <string name="faces_save">Keep this face</string>
-    <string name="faces_saved">Already kept</string>
     <string name="faces_saved_toast">Face kept. It stays even if you clear the row.</string>
+    <string name="faces_unsave">Stop keeping this face</string>
+    <string name="faces_unsaved_toast">No longer kept.</string>
+    <!-- keeping a face -->
+    <string name="faces_save_title">Keep this face?</string>
+    <string name="faces_save_body">It stays in Saved faces even after you remove it from the row, and is there the next time you open the app.</string>
+    <string name="faces_save_ok">Keep</string>
+    <!-- un-keeping one -->
+    <string name="faces_unsave_title">Stop keeping this face?</string>
+    <string name="faces_unsave_body">It leaves Saved faces. The copy in the row stays until you remove that too.</string>
+    <string name="faces_unsave_ok">Stop keeping</string>
+    <!-- using one from the library -->
+    <string name="faces_use_title">Use this face?</string>
+    <string name="faces_use_body">It joins your source faces and becomes the selected one.</string>
+    <string name="faces_use_ok">Use</string>
+    <!-- deleting one from the library -->
+    <string name="faces_delete_title">Delete this saved face?</string>
+    <string name="faces_delete_body">It is removed from this phone. If it is also in your source row, that copy stays.</string>
+    <!-- removing the shown face from the row -->
+    <string name="faces_remove_title">Remove this face from the row?</string>
+    <string name="faces_remove_body">Its copy is deleted from this phone. If you have kept it in Saved faces, that copy stays.</string>
     <string name="faces_title">Saved faces</string>
     <string name="faces_use">Use</string>
     <string name="faces_empty">Nothing kept yet. Load a source face and tap the bookmark to keep it here — kept faces stay even when you clear the row.</string>

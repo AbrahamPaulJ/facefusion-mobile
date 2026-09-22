@@ -633,19 +633,59 @@ class MainActivity : ComponentActivity() {
             }
     }
 
-    /** Whether the face on show is already kept. Drives the button's enabled state. */
+    /**
+     * Whether the face on show is already kept.
+     *
+     * ⚠ Derived from [savedFaces], NOT from the filesystem. It used to ask the disk
+     * directly, and Compose has no way to know a file was deleted -- so removing a face in
+     * the library left this reading `true` for ever and the button stayed dead. A state
+     * this UI reacts to has to be read from state this UI observes.
+     */
     private val shownSourceSaved: Boolean
-        get() = sourceUri?.path?.let { File(savedDir(), File(it).name).exists() } ?: false
-
-    /** Keep the shown face. A copy, so removing it from the row leaves this one alone. */
-    private fun saveShownSource() {
-        val src = sourceUri?.path?.let { File(it) } ?: return
-        runCatching {
-            val dst = File(savedDir(), src.name)
-            if (!dst.exists()) src.copyTo(dst)
-            refreshSavedFaces()
-            status = getString(R.string.faces_saved_toast)
+        get() {
+            val name = sourceUri?.path?.let { File(it).name } ?: return false
+            return savedFaces.any { s -> s.uri.path?.let { File(it).name } == name }
         }
+
+    /** Keep the shown face, or stop keeping it. The one button does both. */
+    private fun toggleShownSourceSaved() {
+        val src = sourceUri?.path?.let { File(it) } ?: return
+        val dst = File(savedDir(), src.name)
+        if (dst.exists()) {
+            confirm(R.string.faces_unsave_title, R.string.faces_unsave_body,
+                    R.string.faces_unsave_ok, destructive = true) {
+                runCatching { dst.delete() }
+                refreshSavedFaces()
+                status = getString(R.string.faces_unsaved_toast)
+            }
+        } else {
+            confirm(R.string.faces_save_title, R.string.faces_save_body,
+                    R.string.faces_save_ok) {
+                runCatching { src.copyTo(dst) }
+                refreshSavedFaces()
+                status = getString(R.string.faces_saved_toast)
+            }
+        }
+    }
+
+    /**
+     * One confirmation, asked the same way everywhere.
+     *
+     * Every action on a kept face confirms -- keeping, un-keeping, using and deleting --
+     * because they sit next to each other on 28 dp buttons where the destructive one is
+     * not distinguishable from the harmless one at arm's length.
+     */
+    private data class Confirm(
+        val title: String, val body: String, val ok: String,
+        val destructive: Boolean, val action: () -> Unit,
+    )
+
+    private var pendingConfirm by mutableStateOf<Confirm?>(null)
+
+    private fun confirm(title: Int, body: Int, ok: Int,
+                        destructive: Boolean = false, action: () -> Unit) {
+        pendingConfirm = Confirm(getString(title), getString(body), getString(ok),
+                                 destructive, action)
     }
 
     /**
@@ -658,14 +698,19 @@ class MainActivity : ComponentActivity() {
      * to have been examined.
      */
     private fun useSavedFace(uri: Uri) {
-        facesDialogOpen = false
-        setSourceFrom(uri)
+        confirm(R.string.faces_use_title, R.string.faces_use_body, R.string.faces_use_ok) {
+            facesDialogOpen = false
+            setSourceFrom(uri)
+        }
     }
 
     /** Forget a kept face. The row keeps its own copy if it has one. */
     private fun deleteSavedFace(uri: Uri) {
-        runCatching { uri.path?.let { File(it).delete() } }
-        refreshSavedFaces()
+        confirm(R.string.faces_delete_title, R.string.faces_delete_body,
+                R.string.common_delete, destructive = true) {
+            runCatching { uri.path?.let { File(it).delete() } }
+            refreshSavedFaces()
+        }
     }
 
     /**
@@ -1717,7 +1762,7 @@ class MainActivity : ComponentActivity() {
                                 log = log,
                                 opts = opts,
                                 onOptsChange = ::applyOpts,
-                                onSaveSource = ::saveShownSource,
+                                onSaveSource = ::toggleShownSourceSaved,
                                 sourceSaved = shownSourceSaved,
                                 onOpenFaces = { refreshSavedFaces(); facesDialogOpen = true },
                                 hasHyperswap1b = hasHyperswap1b,
@@ -1752,7 +1797,12 @@ class MainActivity : ComponentActivity() {
                                 onPickTarget = {
                                     pickTarget.launch(arrayOf("video/*", "image/*"))
                                 },
-                                onClearSource = ::clearSource,
+                                onClearSource = {
+                                    confirm(R.string.faces_remove_title,
+                                            R.string.faces_remove_body,
+                                            R.string.common_delete,
+                                            destructive = true) { clearSource() }
+                                },
                                 onCaptureSource = { capture(video = false, forSource = true) },
                                 onCapturePhoto = { capture(video = false) },
                                 onCaptureVideo = { capture(video = true) },
@@ -1849,7 +1899,12 @@ class MainActivity : ComponentActivity() {
                                 activeSource = liveSourceIndex,
                                 onSelectSource = ::selectLiveSource,
                                 onPickSource = ::pickLiveSource,
-                                onClearSource = ::clearLiveSource,
+                                onClearSource = {
+                                    confirm(R.string.faces_remove_title,
+                                            R.string.faces_remove_body,
+                                            R.string.common_delete,
+                                            destructive = true) { clearLiveSource() }
+                                },
                                 onCaptureSource = { capture(video = false, forSource = true) },
                                 frame = liveFrame,
                                 running = liveRunning,
@@ -1885,7 +1940,7 @@ class MainActivity : ComponentActivity() {
                                 onToggleAssignMode = ::toggleLiveAssign,
                                 onAssignFace = ::assignLiveFace,
                                 onEnterFullscreen = { liveFullscreen = true },
-                                onSaveSource = ::saveShownSource,
+                                onSaveSource = ::toggleShownSourceSaved,
                                 sourceSaved = shownSourceSaved,
                                 onOpenFaces = { refreshSavedFaces(); facesDialogOpen = true },
                                 assignBox = liveAssignBox,
@@ -1969,6 +2024,30 @@ class MainActivity : ComponentActivity() {
                             dismissButton = {
                                 TextButton({ confirmModel = null }) {
                                     Text(stringResource(R.string.proc_get_cancel))
+                                }
+                            },
+                        )
+                    }
+
+                    pendingConfirm?.let { c ->
+                        AlertDialog(
+                            onDismissRequest = { pendingConfirm = null },
+                            title = { Text(c.title) },
+                            text = { Text(c.body) },
+                            confirmButton = {
+                                TextButton({
+                                    val run = c.action
+                                    pendingConfirm = null
+                                    run()
+                                }) {
+                                    Text(c.ok, color = if (c.destructive)
+                                        MaterialTheme.colorScheme.error
+                                        else MaterialTheme.colorScheme.primary)
+                                }
+                            },
+                            dismissButton = {
+                                TextButton({ pendingConfirm = null }) {
+                                    Text(stringResource(R.string.common_cancel))
                                 }
                             },
                         )
