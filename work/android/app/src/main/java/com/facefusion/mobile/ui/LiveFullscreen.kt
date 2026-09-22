@@ -6,7 +6,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.Image
 import androidx.compose.material3.Icon
@@ -108,9 +110,17 @@ fun LiveFullscreen(
                  color = MaterialTheme.colorScheme.onSurface)
         }
 
+        // ⚠ navigationBarsPadding, or the gesture bar sits ON this button and the only
+        // way out of fullscreen is a back gesture the user has no reason to guess at.
+        // A Dialog draws under the system bars: filling the screen means exactly that,
+        // including the parts of it the system has already spoken for.
         IconButton(
             onClick = onExit,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .navigationBarsPadding()
+                .statusBarsPadding()
+                .padding(16.dp),
             colors = IconButtonDefaults.filledTonalIconButtonColors(),
         ) {
             Icon(

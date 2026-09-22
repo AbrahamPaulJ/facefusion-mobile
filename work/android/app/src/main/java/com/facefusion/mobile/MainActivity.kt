@@ -606,8 +606,67 @@ class MainActivity : ComponentActivity() {
         return sources.lastIndex
     }
 
-    /** Where kept source faces live. App-private; nothing else on the phone can read it. */
+    /** The row's own copies. App-private; nothing else on the phone can read it. */
     private fun sourcesDir(): File = File(filesDir, "sources").apply { mkdirs() }
+
+    /**
+     * The KEPT faces, which is a different question from what is in the row.
+     *
+     * The row survives a restart on its own, but it is also a working surface -- faces
+     * come and go from it and the X on a tile deletes one for good. A face in here is one
+     * the user said to keep, so clearing the row cannot take it. Same content-hash name in
+     * both places, so a face that is in both is the same face and costs one photo twice.
+     */
+    private fun savedDir(): File = File(filesDir, "saved").apply { mkdirs() }
+
+    /** The library, newest last, rebuilt from disk whenever it changes. */
+    private var savedFaces by mutableStateOf<List<com.facefusion.mobile.ui.SavedFace>>(emptyList())
+    private var facesDialogOpen by mutableStateOf(false)
+
+    private fun refreshSavedFaces() {
+        savedFaces = (savedDir().listFiles() ?: emptyArray())
+            .sortedBy { it.lastModified() }
+            .mapNotNull { f ->
+                val u = Uri.fromFile(f)
+                val thumb = decodeOriented(u) ?: return@mapNotNull null
+                com.facefusion.mobile.ui.SavedFace(u, thumb, f.lastModified())
+            }
+    }
+
+    /** Whether the face on show is already kept. Drives the button's enabled state. */
+    private val shownSourceSaved: Boolean
+        get() = sourceUri?.path?.let { File(savedDir(), File(it).name).exists() } ?: false
+
+    /** Keep the shown face. A copy, so removing it from the row leaves this one alone. */
+    private fun saveShownSource() {
+        val src = sourceUri?.path?.let { File(it) } ?: return
+        runCatching {
+            val dst = File(savedDir(), src.name)
+            if (!dst.exists()) src.copyTo(dst)
+            refreshSavedFaces()
+            status = getString(R.string.faces_saved_toast)
+        }
+    }
+
+    /**
+     * Put a kept face back in the row and select it.
+     *
+     * ⚠ Through [setSourceFrom], which is the ONE way a source is chosen -- it adds to
+     * the list, moves both screens' indices and tells the warm pipeline the identity
+     * changed. Assigning the state here instead would be a source that arrived by a route
+     * no other source takes, which is exactly the shape of a path that later turns out not
+     * to have been examined.
+     */
+    private fun useSavedFace(uri: Uri) {
+        facesDialogOpen = false
+        setSourceFrom(uri)
+    }
+
+    /** Forget a kept face. The row keeps its own copy if it has one. */
+    private fun deleteSavedFace(uri: Uri) {
+        runCatching { uri.path?.let { File(it).delete() } }
+        refreshSavedFaces()
+    }
 
     /**
      * Copy [uri]'s bytes into [sourcesDir], named by their SHA-256. Null if unreadable.
@@ -642,22 +701,7 @@ class MainActivity : ComponentActivity() {
     private fun restoreSources() {
         val files = sourcesDir().listFiles()?.sortedBy { it.lastModified() } ?: return
         for (f in files) addToSources(Uri.fromFile(f))
-    }
-
-    /** Forget one kept face: out of the row, and off the disk. */
-    private fun forgetSource(uri: Uri) {
-        val i = sources.indexOfFirst { it.uri == uri }
-        if (i >= 0) removeSource(i)
-        runCatching { if (uri.scheme == "file") File(uri.path!!).delete() }
-    }
-
-    /** Forget all of them. */
-    private fun forgetAllSources() {
-        sources.map { it.uri }.forEach { u ->
-            runCatching { if (u.scheme == "file") File(u.path!!).delete() }
-        }
-        while (sources.isNotEmpty()) removeSource(sources.lastIndex)
-        sourcesDir().listFiles()?.forEach { runCatching { it.delete() } }
+        refreshSavedFaces()
     }
 
     /**
@@ -672,6 +716,17 @@ class MainActivity : ComponentActivity() {
      */
     private fun removeSource(index: Int) {
         if (index !in sources.indices) return
+        // The row owns its copy, so removing a tile has to drop it -- otherwise a list
+        // that restores itself never shrinks, and the X becomes a button that appears to
+        // work until the next launch. The LIBRARY copy is a different file and is left
+        // alone: keeping a face is what protects it from this.
+        val gone = sources[index].uri
+        runCatching {
+            if (gone.scheme == "file") {
+                val f = File(gone.path!!)
+                if (f.parentFile == sourcesDir()) f.delete()
+            }
+        }
         sources = sources.filterIndexed { i, _ -> i != index }
         swapPersonAssignments = swapPersonAssignments.mapNotNull { (person, slot) ->
             when {
@@ -1662,6 +1717,9 @@ class MainActivity : ComponentActivity() {
                                 log = log,
                                 opts = opts,
                                 onOptsChange = ::applyOpts,
+                                onSaveSource = ::saveShownSource,
+                                sourceSaved = shownSourceSaved,
+                                onOpenFaces = { refreshSavedFaces(); facesDialogOpen = true },
                                 hasHyperswap1b = hasHyperswap1b,
                                 hasHyperswap1c = hasHyperswap1c,
                                 hasEnhancer = hasEnhancer,
@@ -1827,6 +1885,9 @@ class MainActivity : ComponentActivity() {
                                 onToggleAssignMode = ::toggleLiveAssign,
                                 onAssignFace = ::assignLiveFace,
                                 onEnterFullscreen = { liveFullscreen = true },
+                                onSaveSource = ::saveShownSource,
+                                sourceSaved = shownSourceSaved,
+                                onOpenFaces = { refreshSavedFaces(); facesDialogOpen = true },
                                 assignBox = liveAssignBox,
                                 assignNonce = liveAssignNonce,
                                 assignCount = liveAssignCount,
@@ -1845,16 +1906,6 @@ class MainActivity : ComponentActivity() {
                                 // name, so the two models that have nothing BUT this button
                                 // could not be downloaded at all.
                                 onDownloadModel = { m -> onDownloadTapped(m.files) },
-                                // Built from `sources` itself, not a second list: one
-                                // list of faces, and Settings is a view of it.
-                                savedFaces = sources.mapNotNull { s ->
-                                    val p = s.uri.path?.takeIf { s.uri.scheme == "file" }
-                                        ?: return@mapNotNull null
-                                    com.facefusion.mobile.ui.SavedFace(
-                                        s.uri, s.thumb, File(p).lastModified())
-                                },
-                                onForgetFace = { forgetSource(it.uri) },
-                                onForgetAllFaces = { forgetAllSources() },
                                 onDeleteModel = { m ->
                                     // Every file of the row, not just the one it is named
                                     // after: an ncnn model is a param/bin pair.
@@ -1922,6 +1973,13 @@ class MainActivity : ComponentActivity() {
                             },
                         )
                     }
+
+                    if (facesDialogOpen) SavedFacesDialog(
+                        faces = savedFaces,
+                        onUse = { useSavedFace(it.uri) },
+                        onDelete = { deleteSavedFace(it.uri) },
+                        onDismiss = { facesDialogOpen = false },
+                    )
 
                     // The live feed, filling the screen. Only while the pump is actually
                     // running: fullscreen over a stopped session is a black rectangle that

@@ -461,8 +461,11 @@ android {
         // 102 = Live controls ordered by what a person touches mid-session, the swapper
         // picker off that screen entirely, a fullscreen feed, source faces that survive a
         // restart, and the version on the About tab.
-        versionCode = 102
-        versionName = "0.9.30$variantTag"    // "-dev" == NO content gate
+        // 103 = the fullscreen exit button cleared the gesture bar (it was UNREACHABLE),
+        // theme moved to the Device tab, the swapper dialog says what is actually known
+        // about 1a/1b/1c, and saved faces became a bookmark plus a library popup.
+        versionCode = 103
+        versionName = "0.9.31$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }

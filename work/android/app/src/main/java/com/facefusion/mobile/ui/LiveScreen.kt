@@ -85,6 +85,9 @@ fun LiveScreen(
     onPickSource: () -> Unit,
     onClearSource: () -> Unit,
     onCaptureSource: () -> Unit,
+    onSaveSource: () -> Unit = {},
+    sourceSaved: Boolean = false,
+    onOpenFaces: () -> Unit = {},
     frame: Bitmap?,
     running: Boolean,
     onToggleRun: () -> Unit,
@@ -182,6 +185,21 @@ fun LiveScreen(
                 actionIcon = if (sourceThumb != null) null else Icons.Default.Add,
                 zoom = null,
             ) {
+                // The kept-faces library, and a way to put this face in it. Left of the
+                // camera, and the library is reachable with NO source loaded -- restoring
+                // one is the whole point of it.
+                IconButton(onOpenFaces, Modifier.size(28.dp)) {
+                    Icon(painterResource(R.drawable.ic_faces),
+                         stringResource(R.string.faces_open), Modifier.size(16.dp))
+                }
+                if (sourceThumb != null && !running) {
+                    IconButton(onSaveSource, Modifier.size(28.dp), enabled = !sourceSaved) {
+                        Icon(painterResource(R.drawable.ic_save_face),
+                             stringResource(if (sourceSaved) R.string.faces_saved
+                                            else R.string.faces_save),
+                             Modifier.size(16.dp))
+                    }
+                }
                 if (!running) {
                     IconButton(onCaptureSource, Modifier.size(28.dp)) {
                         Icon(painterResource(R.drawable.ic_photo_camera),

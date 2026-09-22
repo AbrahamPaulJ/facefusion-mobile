@@ -294,6 +294,12 @@ fun SwapScreen(
     onClearSource: () -> Unit,
     /** Shoot the source face with the camera. Stills only -- a source is an identity. */
     onCaptureSource: () -> Unit,
+    /** Keep the SHOWN face when the row is next cleared. */
+    onSaveSource: () -> Unit = {},
+    /** Already kept, so the button says so instead of offering it twice. */
+    sourceSaved: Boolean = false,
+    /** Open the kept-faces library. */
+    onOpenFaces: () -> Unit = {},
     /** Take a still / record a clip with the system camera, as the target. */
     onCapturePhoto: () -> Unit,
     onCaptureVideo: () -> Unit,
@@ -678,6 +684,21 @@ fun SwapScreen(
                 // panning them together would be a gesture with no meaning.
                 zoom = null,
             ) {
+                // The kept-faces library, and a way to put this face in it. Left of the
+                // camera, and the library is reachable with NO source loaded -- restoring
+                // one is the whole point of it.
+                IconButton(onOpenFaces, Modifier.size(28.dp)) {
+                    Icon(painterResource(R.drawable.ic_faces),
+                         stringResource(R.string.faces_open), Modifier.size(16.dp))
+                }
+                if (hasSource && idle) {
+                    IconButton(onSaveSource, Modifier.size(28.dp), enabled = !sourceSaved) {
+                        Icon(painterResource(R.drawable.ic_save_face),
+                             stringResource(if (sourceSaved) R.string.faces_saved
+                                            else R.string.faces_save),
+                             Modifier.size(16.dp))
+                    }
+                }
                 // Shoot a face instead of finding one. Stills only: a source is an
                 // identity, and there is no video form of that.
                 if (idle) {

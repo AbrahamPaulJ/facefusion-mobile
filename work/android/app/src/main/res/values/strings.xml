@@ -159,7 +159,7 @@
     <string name="opt_swapper">hyperswap:</string>
     <string name="opt_model_info">About these models</string>
     <string name="swapper_info_title">Face swap models</string>
-    <string name="swapper_info_body">All three run at 256² and take the same inputs. They differ only in their weights, so the same face can come out differently — and none of them is the better one: it depends on the face, the lighting and the pose.\n\nThere is no ranking here on purpose. Try them on your own footage and keep whichever works.</string>
+    <string name="swapper_info_body">Third-party services describe 1a as the fastest, 1b as balanced and 1c as the most realistic. FaceFusion itself publishes no description of any of them.\n\nOn this phone all three cost the same — measured within half a millisecond of each other — so the speed part does not apply here. They are the same size and the same architecture, and differ only in how they were trained.\n\nTry each on your own footage and keep whichever works.</string>
 
     <string name="opt_face_masker">Face Masker</string>
     <!-- %1$s blur amount, %2$s padding -->
@@ -219,9 +219,13 @@
     <string name="set_required_suffix">(required)</string>
     <string name="set_update">Update</string>
     <string name="set_updating">Updating</string>
-    <string name="set_saved_faces">Saved faces</string>
-    <string name="set_saved_faces_body">Source faces stay in the row between app launches. Remove any you no longer want kept on this phone.</string>
-    <string name="set_saved_faces_clear">Forget all faces</string>
+    <string name="faces_open">Saved faces</string>
+    <string name="faces_save">Keep this face</string>
+    <string name="faces_saved">Already kept</string>
+    <string name="faces_saved_toast">Face kept. It stays even if you clear the row.</string>
+    <string name="faces_title">Saved faces</string>
+    <string name="faces_use">Use</string>
+    <string name="faces_empty">Nothing kept yet. Load a source face and tap the bookmark to keep it here — kept faces stay even when you clear the row.</string>
     <string name="set_delete">Delete</string>
     <string name="set_download">Download</string>
     <string name="set_downloading">Downloading</string>
