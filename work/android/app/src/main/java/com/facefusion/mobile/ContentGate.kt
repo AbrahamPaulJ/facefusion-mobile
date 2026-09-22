@@ -11,9 +11,9 @@ import java.io.File
  * It **blocks**: FaceFusion's `content_analyser.py` refuses to process flagged content and
  * so does this port (decided 2026-08-24). Everything here is upstream's rule, ported:
  *
- *  * a still is checked once ([checkImage], `analyse_image`);
+ *  * a still is checked once ([inspectStill], `analyse_image`);
  *  * a video is sampled **one frame per second** and refused when more than **10%** of the
- *    samples trip the gate ([checkVideo], `analyse_video`) -- not every frame, which is
+ *    samples trip the gate ([inspectClip], `analyse_video`) -- not every frame, which is
  *    what makes a ~5 ms graph cost ~56 ms for a whole clip instead of 1.5 s.
  *
  * ⚠ **This port gates on `nsfw_2` alone.** Upstream votes 2-of-3 across `nsfw_1`, `nsfw_2`
@@ -57,8 +57,14 @@ object ContentGate {
         val flagged: Int = 0,
         val detail: String = "",
     ) {
-        val blocked get() = verdict == Verdict.BLOCK
-        val ok get() = verdict == Verdict.ALLOW
+        val refused get() = verdict == Verdict.BLOCK
+
+        /**
+         * ⚠ ALLOW and nothing else. Not "not blocked" -- ERROR is not blocked either,
+         * and a check that could not run has established nothing. Every caller asks this
+         * question and no caller re-derives it from [verdict].
+         */
+        val permitted get() = verdict == Verdict.ALLOW
     }
 
     private fun judge(score: Float): Verdict = when {
@@ -72,18 +78,18 @@ object ContentGate {
      * One BGR frame to a verdict. The single place a score becomes a decision, so both the
      * still path and both video paths cannot drift apart on how NaN is treated.
      */
-    private fun checkBgr(bgr: ByteArray, w: Int, h: Int): Result {
+    private fun inspectPixels(bgr: ByteArray, w: Int, h: Int): Result {
         val score = NativePipe.contentScore(bgr, w, h)
         return Result(judge(score), score,
                       detail = if (score.isNaN()) NativePipe.lastError() else "")
     }
 
-    fun checkImage(bitmap: Bitmap): Result {
+    fun inspectStill(bitmap: Bitmap): Result {
         val soft = bitmap.asArgb8888()
             ?: return Result(Verdict.ERROR, Float.NaN, detail = "cannot read image")
         val px = IntArray(soft.width * soft.height)
         soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
-        return checkBgr(NativePipe.argbToBgr(px, soft.width, soft.height), soft.width, soft.height)
+        return inspectPixels(NativePipe.argbToBgr(px, soft.width, soft.height), soft.width, soft.height)
     }
 
     /**
@@ -107,7 +113,7 @@ object ContentGate {
      * swapper could process. Fail-closed, so never a way through the gate, but a way to be
      * told no about a good file.
      */
-    fun checkVideo(file: File): Result =
+    fun inspectClip(file: File): Result =
         sampleByRetriever(file) ?: sampleByDecoder(file)
 
     /**
@@ -132,10 +138,10 @@ object ContentGate {
                 val frame = r.getFrameAtTime(us, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                     ?: r.getFrameAtTime(us, MediaMetadataRetriever.OPTION_CLOSEST)
                 if (frame != null) {
-                    val res = checkImage(frame)
+                    val res = inspectStill(frame)
                     if (res.verdict == Verdict.ERROR) return res
                     sampled++
-                    if (res.blocked) flagged++
+                    if (res.refused) flagged++
                     if (res.score > worst) worst = res.score
                 }
                 us += SAMPLE_INTERVAL_US
@@ -157,12 +163,12 @@ object ContentGate {
 
         val taken = VideoFrames.sample(file.absolutePath, SAMPLE_INTERVAL_US) { bgr, w, h ->
             if (graphError == null) {
-                val res = checkBgr(bgr, w, h)
+                val res = inspectPixels(bgr, w, h)
                 if (res.verdict == Verdict.ERROR) {
                     graphError = res
                 } else {
                     sampled++
-                    if (res.blocked) flagged++
+                    if (res.refused) flagged++
                     if (res.score > worst) worst = res.score
                 }
             }

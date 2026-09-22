@@ -351,9 +351,9 @@ class ApiServer(
         val bmp = decode(req.body)
             ?: return respond(out, 400, "application/json", json("error" to "cannot decode image"))
         withPipeline(out, SwapOptions.load(ctx).overrides(req.query), applySource = false) { _ ->
-            val gate = ContentGate.checkImage(bmp)
+            val gate = ContentGate.inspectStill(bmp)
             log("api source score %+.3f".format(gate.score))
-            if (!gate.ok) {
+            if (!gate.permitted) {
                 respond(out, 403, "application/json",
                         json("error" to ContentGate.messageEnglish(ctx, R.string.gate_subject_source_image, gate),
                              "verdict" to gate.verdict.name,
@@ -387,8 +387,8 @@ class ApiServer(
         val bmp = decode(req.body)
             ?: return respond(out, 400, "application/json", json("error" to "cannot decode image"))
         withPipeline(out, SwapOptions.load(ctx).overrides(req.query)) { _ ->
-            val gate = ContentGate.checkImage(bmp)
-            if (!gate.ok) {
+            val gate = ContentGate.inspectStill(bmp)
+            if (!gate.permitted) {
                 respond(out, 403, "application/json",
                         json("error" to ContentGate.messageEnglish(ctx, R.string.gate_subject_target_image, gate),
                              "verdict" to gate.verdict.name,
@@ -437,11 +437,11 @@ class ApiServer(
         }
         val outFile = File(ctx.cacheDir, "api_out.mp4")
         withPipeline(out, SwapOptions.load(ctx).overrides(req.query)) { opts ->
-            val gate = ContentGate.checkVideo(inFile)
+            val gate = ContentGate.inspectClip(inFile)
             // `detail` is an ARGUMENT, never part of the format string: it contains a "%)"
             // that gets read as a conversion.
             log("api target content: %s, worst %+.3f".format(gate.detail, gate.score))
-            if (!gate.ok) {
+            if (!gate.permitted) {
                 respond(out, 403, "application/json",
                         json("error" to ContentGate.messageEnglish(ctx, R.string.gate_subject_target_video, gate),
                              "verdict" to gate.verdict.name,

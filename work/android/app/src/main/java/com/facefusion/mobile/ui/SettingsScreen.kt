@@ -1,6 +1,8 @@
 package com.facefusion.mobile.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
@@ -11,7 +13,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -22,8 +27,17 @@ import com.facefusion.mobile.ModelDownload
 import androidx.compose.ui.res.stringResource
 import com.facefusion.mobile.R
 import androidx.compose.runtime.saveable.rememberSaveable
+import java.text.DateFormat
+import java.util.Date
 
 /** One context binary on disk, or one that should be and is not. */
+/** One kept source face: what it looks like, where it lives, and when it arrived. */
+data class SavedFace(
+    val uri: android.net.Uri,
+    val thumb: android.graphics.Bitmap,
+    val addedMs: Long,
+)
+
 data class ModelRow(
     val label: String,
     val fileName: String,
@@ -132,6 +146,16 @@ fun SettingsScreen(
      * saying the models were ready.
      */
     onDownloadModel: (ModelRow) -> Unit,
+    /**
+     * The source faces the app is keeping, oldest first, with when each was added.
+     *
+     * They live here rather than on Swap or Live because the rows there are for CHOOSING
+     * a face and this is for getting rid of one -- and a delete control next to a face
+     * you are about to tap is a control you will eventually hit by accident.
+     */
+    savedFaces: List<SavedFace> = emptyList(),
+    onForgetFace: (SavedFace) -> Unit = {},
+    onForgetAllFaces: () -> Unit = {},
     /** Start or stop the HTTP server. [lan] binds every interface instead of loopback. */
     onApiToggle: (on: Boolean, lan: Boolean) -> Unit,
     /**
@@ -332,6 +356,57 @@ fun SettingsScreen(
         }
 
         Spacer(Modifier.height(6.dp))
+
+        // ---------------------------------------------------------------- saved faces
+        //
+        // The source row survives a restart, so there has to be somewhere to undo that.
+        // Shown only when there is something to show: an empty card explaining a feature
+        // that has not happened yet is noise on the one tab people open to free up space.
+        if (savedFaces.isNotEmpty()) {
+            Caption(stringResource(R.string.set_saved_faces))
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp)) {
+                    Text(
+                        stringResource(R.string.set_saved_faces_body),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    savedFaces.forEach { face ->
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Image(
+                                face.thumb.asImageBitmap(),
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.size(40.dp).clip(CircleShape),
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                DateFormat.getDateInstance(DateFormat.MEDIUM)
+                                    .format(Date(face.addedMs)),
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton({ onForgetFace(face) }) {
+                                Text(stringResource(R.string.set_delete),
+                                     color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    }
+                    if (savedFaces.size > 1) {
+                        Spacer(Modifier.height(4.dp))
+                        TextButton({ onForgetAllFaces() }, Modifier.fillMaxWidth()) {
+                            Text(stringResource(R.string.set_saved_faces_clear),
+                                 color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+        }
 
         // ---------------------------------------------------------------- theme
         //
@@ -675,6 +750,17 @@ fun SettingsScreen(
         val uris = LocalUriHandler.current
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // The version, where somebody looking for it would look. Every bug report
+                // this project has had to chase started with not knowing which build the
+                // reporter was holding -- 0.7.0 shipped four APKs under one name and 0.8.0
+                // built ten. BOTH numbers: the name is what a person quotes, the code is
+                // what actually distinguishes two builds that share one.
+                Text(
+                    stringResource(R.string.set_about_version,
+                                   com.facefusion.mobile.BuildConfig.VERSION_NAME,
+                                   com.facefusion.mobile.BuildConfig.VERSION_CODE),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
                 Text(
                     stringResource(R.string.set_about_body),
                     style = MaterialTheme.typography.bodySmall,

@@ -219,6 +219,9 @@
     <string name="set_required_suffix">(required)</string>
     <string name="set_update">Update</string>
     <string name="set_updating">Updating</string>
+    <string name="set_saved_faces">Saved faces</string>
+    <string name="set_saved_faces_body">Source faces stay in the row between app launches. Remove any you no longer want kept on this phone.</string>
+    <string name="set_saved_faces_clear">Forget all faces</string>
     <string name="set_delete">Delete</string>
     <string name="set_download">Download</string>
     <string name="set_downloading">Downloading</string>
@@ -298,6 +301,8 @@
 
     <!-- ==================================================== settings: about -->
     <string name="set_about">About</string>
+    <!-- %1$s is the version name, %2$d the version code -->
+    <string name="set_about_version">Version %1$s (build %2$d)</string>
     <string name="set_about_body">This app is an offline port of FaceFusion\'s default face-swap path to the Qualcomm Hexagon NPU. The pipeline, the models, the option names, defaults and ranges are all FaceFusion\'s.</string>
     <string name="set_about_author">Created by Henry Ruhs.</string>
     <string name="set_link_project">This project on GitHub</string>
@@ -457,6 +462,8 @@
     <string name="status_reference_cleared">Swapping every face again.</string>
     <string name="live_rec_start">Record</string>
     <string name="live_rec_stop">Stop recording</string>
+    <string name="live_fullscreen">Fill the screen</string>
+    <string name="live_fullscreen_exit">Leave fullscreen</string>
     <string name="live_rec_badge">REC</string>
     <string name="status_live_recording">Recording the live feed.</string>
     <string name="status_live_rec_saved">Recording saved, %1$d frames.</string>
@@ -507,8 +514,6 @@ Turning it off runs your own Swap settings instead. This is experimental: the en
     <string name="live_swap">Face swap</string>
     <string name="live_swap_on">Swapping active</string>
     <string name="live_swap_off">Swapping disabled</string>
-    <string name="live_swapper">Swap model</string>
-    <string name="live_swapper_hint">Takes effect on the next Start — stop the feed to change it.</string>
     <string name="live_target">Target faces</string>
     <string name="live_source_label">Source %1$d</string>
     <string name="nav_live">Live</string>

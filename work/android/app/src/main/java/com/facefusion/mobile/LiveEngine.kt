@@ -101,7 +101,7 @@ class LiveEngine {
      * SECONDS of unchecked camera between samples on exactly the devices that are slowest,
      * which is a gate that quietly weakens as the hardware gets worse.
      *
-     * One second matches what checkVideo already promises for a file (analyse_video's
+     * One second matches what inspectClip already promises for a file (analyse_video's
      * SAMPLE_INTERVAL_US), so the app now makes ONE promise about unchecked footage
      * regardless of path or backend. The cost is bounded the same way: 5.05 ms once a
      * second on the NPU is 0.5% of a frame's budget.

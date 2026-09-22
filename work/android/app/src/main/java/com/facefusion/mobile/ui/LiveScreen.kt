@@ -32,8 +32,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.facefusion.mobile.R
-import com.facefusion.mobile.SwapperInfoButton
-import com.facefusion.mobile.SwapperSegments
 import kotlinx.coroutines.delay
 
 /**
@@ -47,6 +45,35 @@ import kotlinx.coroutines.delay
  * the same reason it sits at the top there: it is an input, it is chosen by tapping its own
  * frame, and a second way of picking the same thing is a second thing to learn.
  */
+/**
+ * A tap on a live feed, in that surface's pixels, mapped to DISPLAY bitmap coordinates.
+ *
+ * The pane draws the frame with ContentScale.Crop and, on the front lens, MIRRORED. Both
+ * have to be undone before the point means anything to the pipeline, which sees the true,
+ * uncropped image.
+ *
+ * ⚠ Shared by the inline feed and the fullscreen one on purpose. The two surfaces have
+ * different sizes and different aspect ratios, and the crop scale is derived from the box
+ * it is given -- so the same code is correct for both, and two copies would only differ
+ * the first time one of them was fixed.
+ */
+internal fun liveTapToFrame(
+    x: Float, y: Float,
+    boxW: Float, boxH: Float,
+    frameW: Float, frameH: Float,
+    mirror: Boolean,
+): Pair<Float, Float> {
+    val s = maxOf(boxW / frameW, boxH / frameH)
+    val ox = (boxW - frameW * s) / 2f
+    val oy = (boxH - frameH * s) / 2f
+    var bx = (x - ox) / s
+    val by = (y - oy) / s
+    // The MIRROR, not the lens: the finger lands on what is DRAWN, and after the
+    // override those are two different questions.
+    if (mirror) bx = frameW - bx
+    return bx.coerceIn(0f, frameW) to by.coerceIn(0f, frameH)
+}
+
 @Composable
 fun LiveScreen(
     sourceThumb: Bitmap?,
@@ -88,18 +115,10 @@ fun LiveScreen(
     onLargestOnlyChange: (Boolean) -> Unit = {},
     swapEnabled: Boolean = true,
     onToggleSwapEnabled: () -> Unit = {},
-    /**
-     * Which swapper the next Start initialises the pipeline with -- the same shared
-     * option the Swap screen edits. A swapper is a different model file, so it cannot
-     * change under a running pump: the segments are locked while running and the
-     * choice takes effect on the next Start.
-     */
-    swapper: String = "hyperswap",
-    onSwapperChange: (String) -> Unit = {},
-    hasHyperswap1b: Boolean = false,
-    hasHyperswap1c: Boolean = false,
     /** Assign-per-person mode: OFF is default behaviour, ON lets each face keep a source. */
     assignMode: Boolean = false,
+    /** Expand the feed to fill the screen. The pump is untouched -- see [LiveFullscreen]. */
+    onEnterFullscreen: () -> Unit = {},
     /** Fixed photographs of the people found when Assign per person was enabled. */
     personThumbs: List<Bitmap> = emptyList(),
     selectedPerson: Int = -1,
@@ -252,16 +271,11 @@ fun LiveScreen(
                 .pointerInput(assignMode, running, mirror, fw, fh) {
                     if (assignMode && running && frame != null) {
                         detectTapGestures { off ->
-                            val bw = size.width.toFloat(); val bh = size.height.toFloat()
-                            val s = maxOf(bw / fw, bh / fh)
-                            val ox = (bw - fw * s) / 2f; val oy = (bh - fh * s) / 2f
-                            var bx = (off.x - ox) / s
-                            val by = (off.y - oy) / s
-                            // The MIRROR, not the lens: the finger lands on what is
-                            // DRAWN, and after the override those are two different
-                            // questions.
-                            if (mirror) bx = fw - bx
-                            onAssignFace(bx.coerceIn(0f, fw), by.coerceIn(0f, fh))
+                            val (bx, by) = liveTapToFrame(
+                                off.x, off.y,
+                                size.width.toFloat(), size.height.toFloat(),
+                                fw, fh, mirror)
+                            onAssignFace(bx, by)
                         }
                     }
                 },
@@ -329,6 +343,23 @@ fun LiveScreen(
                 )
             }
 
+            // Fullscreen, over the picture, because that is the thing it acts on. Only
+            // once there is a picture: an expand button over an empty pane offers to make
+            // nothing bigger.
+            if (frame != null) {
+                IconButton(
+                    onClick = onEnterFullscreen,
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp),
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(),
+                ) {
+                    Icon(
+                        painterResource(R.drawable.ic_fullscreen),
+                        contentDescription = stringResource(R.string.live_fullscreen),
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+
             // The one thing that does belong over the picture: whether this is being
             // recorded. It is the state a user must be able to check without looking away
             // from what they are pointing the camera at.
@@ -336,7 +367,10 @@ fun LiveScreen(
                 Surface(
                     color = FfRed,
                     shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp),
+                    // BottomSTART: the fullscreen control took the opposite corner, and
+                    // two things in one corner is one of them covering the other exactly
+                    // when both matter -- recording, fullscreen, one tap apart.
+                    modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
                 ) {
                     Text(
                         stringResource(R.string.live_rec_badge),
@@ -454,54 +488,6 @@ fun LiveScreen(
             }
         }
 
-        // ---------------------------------------------------------------- swap model
-        //
-        // The same swappers as the Swap screen, on the same shared option, right
-        // under the buttons that start the work. Locked while the pump is running -- a
-        // swapper is a model reload, and the pipeline is initialised once at Start --
-        // and applied on the next Start.
-        Column {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.live_swapper),
-                     style = MaterialTheme.typography.bodyMedium,
-                     modifier = Modifier.weight(1f))
-                SwapperInfoButton()
-            }
-            SwapperSegments(
-                swapper, hasHyperswap1b, hasHyperswap1c, onSwapperChange,
-                enabled = !running,
-            )
-            if (running)
-                Text(stringResource(R.string.live_swapper_hint),
-                     style = MaterialTheme.typography.bodySmall, fontSize = 11.sp)
-        }
-
-        // ⚠ The MIRROR only. The lens already has a control -- the chip over the top-left
-        // of the preview, which says which camera is live rather than only that it can be
-        // changed -- and a second switch for it down here would be two controls for one
-        // setting, disagreeing the moment either grew a condition the other did not.
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.live_mirror),
-                     style = MaterialTheme.typography.bodyMedium)
-                Text(stringResource(if (mirror) R.string.live_mirror_on
-                                    else R.string.live_mirror_off),
-                     style = MaterialTheme.typography.bodySmall,
-                     color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Switch(checked = mirror, onCheckedChange = { onToggleMirror() })
-        }
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.live_mic), style = MaterialTheme.typography.bodyMedium)
-                Text(stringResource(if (microphone) R.string.live_mic_on else R.string.live_mic_off),
-                     style = MaterialTheme.typography.bodySmall)
-            }
-            Switch(checked = microphone, onCheckedChange = onMicrophoneChange,
-                   enabled = !recording && !finalizing)
-        }
-
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(stringResource(R.string.live_swap), style = MaterialTheme.typography.bodyMedium)
@@ -515,23 +501,6 @@ fun LiveScreen(
                    // of the on-the-fly mode, and the recorded feed simply keeps the
                    // unswapped frames for as long as it is off.
                    enabled = !finalizing)
-        }
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.live_target), style = MaterialTheme.typography.bodyMedium)
-                // Mutually exclusive with assign per person (both choose which face gets
-                // which source). While assign is on the selector is pinned to "all
-                // faces", so the switch is locked and says so.
-                Text(stringResource(
-                    if (assignMode) R.string.live_target_locked
-                    else if (largestOnly) R.string.live_target_one
-                    else R.string.live_target_all),
-                     style = MaterialTheme.typography.bodySmall)
-            }
-            Switch(checked = !largestOnly,
-                   onCheckedChange = { onLargestOnlyChange(!it) },
-                   enabled = !assignMode && !recording && !finalizing)
         }
 
         // How assign mode works: select the source FIRST, then tap the person -- the
@@ -584,6 +553,49 @@ fun LiveScreen(
                     }
                 },
             )
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.live_target), style = MaterialTheme.typography.bodyMedium)
+                // Mutually exclusive with assign per person (both choose which face gets
+                // which source). While assign is on the selector is pinned to "all
+                // faces", so the switch is locked and says so.
+                Text(stringResource(
+                    if (assignMode) R.string.live_target_locked
+                    else if (largestOnly) R.string.live_target_one
+                    else R.string.live_target_all),
+                     style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(checked = !largestOnly,
+                   onCheckedChange = { onLargestOnlyChange(!it) },
+                   enabled = !assignMode && !recording && !finalizing)
+        }
+
+        // ⚠ The MIRROR only. The lens already has a control -- the chip over the top-left
+        // of the preview, which says which camera is live rather than only that it can be
+        // changed -- and a second switch for it down here would be two controls for one
+        // setting, disagreeing the moment either grew a condition the other did not.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.live_mirror),
+                     style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(if (mirror) R.string.live_mirror_on
+                                    else R.string.live_mirror_off),
+                     style = MaterialTheme.typography.bodySmall,
+                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(checked = mirror, onCheckedChange = { onToggleMirror() })
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.live_mic), style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(if (microphone) R.string.live_mic_on else R.string.live_mic_off),
+                     style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(checked = microphone, onCheckedChange = onMicrophoneChange,
+                   enabled = !recording && !finalizing)
         }
 
         // ---------------------------------------------------------------- fast mode

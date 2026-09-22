@@ -458,8 +458,11 @@ android {
         // Android re-create the service after a memory kill, with a null intent that
         // fell through every guard -- reported from the bench as "the api notif starts
         // running on its own".
-        versionCode = 101
-        versionName = "0.9.29$variantTag"    // "-dev" == NO content gate
+        // 102 = Live controls ordered by what a person touches mid-session, the swapper
+        // picker off that screen entirely, a fullscreen feed, source faces that survive a
+        // restart, and the version on the About tab.
+        versionCode = 102
+        versionName = "0.9.30$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }

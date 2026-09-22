@@ -329,6 +329,16 @@ class MainActivity : ComponentActivity() {
         live.mirrorRecording = next
     }
 
+    /**
+     * The feed is filling the screen.
+     *
+     * A VIEW flag and nothing more -- the pump, the pipeline and the recorder do not know
+     * about it, so entering and leaving cannot interrupt a session or a recording. Cleared
+     * by [stopLive] so a stopped session can never leave a black screen with no feed
+     * coming to it.
+     */
+    private var liveFullscreen by mutableStateOf(false)
+
     /** Live's brush: the counterpart of [swapBrushKeepOriginal] on the other screen. */
     private var liveBrushKeepOriginal by mutableStateOf(false)
 
@@ -580,14 +590,74 @@ class MainActivity : ComponentActivity() {
      * caller is told, because a picker that visibly does nothing is the bug report.
      */
     private fun addToSources(uri: Uri): Int? {
-        val existing = sources.indexOfFirst { it.uri == uri }
+        // KEPT, not merely referenced. A picker Uri is borrowed -- GetContent grants no
+        // persistable permission, and the picture itself can be deleted from the gallery
+        // -- so a list that outlives the process has to own its bytes. The copy is named
+        // by content hash, which makes re-picking the same face a no-op instead of a
+        // second tile of the same person.
+        val kept = keepSourceFile(uri) ?: uri
+        val existing = sources.indexOfFirst { it.uri == kept }
         if (existing >= 0) return existing
-        val thumb = decodeOriented(uri) ?: run {
+        val thumb = decodeOriented(kept) ?: run {
             status = getString(R.string.status_cannot_read_source)
             return null
         }
-        sources = sources + SourceItem(uri, thumb)
+        sources = sources + SourceItem(kept, thumb)
         return sources.lastIndex
+    }
+
+    /** Where kept source faces live. App-private; nothing else on the phone can read it. */
+    private fun sourcesDir(): File = File(filesDir, "sources").apply { mkdirs() }
+
+    /**
+     * Copy [uri]'s bytes into [sourcesDir], named by their SHA-256. Null if unreadable.
+     *
+     * Raw bytes rather than the decoded Bitmap, so EXIF orientation survives -- the
+     * decode path already honours it, and re-encoding here would either lose the tag or
+     * bake in a rotation the decoder would then apply twice.
+     */
+    private fun keepSourceFile(uri: Uri): Uri? = runCatching {
+        if (uri.scheme == "file" && File(uri.path!!).parentFile == sourcesDir()) return uri
+        val bytes = (contentResolver.openInputStream(uri) ?: return null).use { it.readBytes() }
+        val name = java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
+            .joinToString("") { "%02x".format(it) }.take(32) + ".img"
+        val f = File(sourcesDir(), name)
+        if (!f.exists()) f.writeBytes(bytes)
+        Uri.fromFile(f)
+    }.getOrNull()
+
+    /**
+     * Put last session's faces back in the row.
+     *
+     * ⚠ This does NOT create an unchecked path, and it deliberately does not add a
+     * check of its own. A restored face is an entry in `sources` like any other, and
+     * `screenSourceList` walks the WHOLE list every time a pipeline is built -- so it is
+     * examined before it can be swapped into anything, on every screen, exactly as a face
+     * picked a second ago is. Adding a check here would be a second place that decision
+     * is made, which is how one of them ends up disagreeing with the other.
+     *
+     * Routed through [addToSources] rather than assigning `sources`, because that is the
+     * one place the list grows and it is where the decode failure is reported.
+     */
+    private fun restoreSources() {
+        val files = sourcesDir().listFiles()?.sortedBy { it.lastModified() } ?: return
+        for (f in files) addToSources(Uri.fromFile(f))
+    }
+
+    /** Forget one kept face: out of the row, and off the disk. */
+    private fun forgetSource(uri: Uri) {
+        val i = sources.indexOfFirst { it.uri == uri }
+        if (i >= 0) removeSource(i)
+        runCatching { if (uri.scheme == "file") File(uri.path!!).delete() }
+    }
+
+    /** Forget all of them. */
+    private fun forgetAllSources() {
+        sources.map { it.uri }.forEach { u ->
+            runCatching { if (u.scheme == "file") File(u.path!!).delete() }
+        }
+        while (sources.isNotEmpty()) removeSource(sources.lastIndex)
+        sourcesDir().listFiles()?.forEach { runCatching { it.delete() } }
     }
 
     /**
@@ -633,7 +703,7 @@ class MainActivity : ComponentActivity() {
      * them cannot be read -- a partial list would register faces at the wrong slots.
      *
      * Decoding is not processing, so this needs no pipeline and carries no check. The
-     * check is [gateSources], which runs against the bitmaps this returns.
+     * check is [screenSourceList], which runs against the bitmaps this returns.
      */
     private fun prepareSources(): PreparedSources? {
         if (sources.isEmpty()) return null
@@ -660,14 +730,14 @@ class MainActivity : ComponentActivity() {
      * ⚠ `ok` is ALLOW alone. A check that could not run refuses, the same as one that
      * refused, so a broken graph is never a way through.
      */
-    private fun gateSources(bitmaps: List<Bitmap>, tag: String): String? {
+    private fun screenSourceList(bitmaps: List<Bitmap>, tag: String): String? {
         for ((i, bmp) in bitmaps.withIndex()) {
-            val v = ContentGate.checkImage(bmp)
+            val v = ContentGate.inspectStill(bmp)
             // The reason, not only the number. A faulted check reads "NaN" and stops
             // there, and the detail is then the whole story.
             appendLog("$tag source ${i + 1} score %+.3f".format(v.score) +
                       (if (v.detail.isNotBlank()) "  [" + v.detail + "]" else ""))
-            if (!v.ok) return ContentGate.message(
+            if (!v.permitted) return ContentGate.message(
                 this, R.string.gate_subject_source_image, v)
         }
         return null
@@ -883,8 +953,8 @@ class MainActivity : ComponentActivity() {
             soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
             val bgr = NativePipe.argbToBgr(px, soft.width, soft.height)
             val refusal = withContext(Dispatchers.Default) {
-                val v = ContentGate.checkImage(bmp)
-                if (!v.ok) ContentGate.message(
+                val v = ContentGate.inspectStill(bmp)
+                if (!v.permitted) ContentGate.message(
                     this@MainActivity, R.string.gate_subject_source_image, v)
                 // The native slots must stay aligned with this list, so the new face is
                 // registered at the index the row will show it at.
@@ -1296,6 +1366,9 @@ class MainActivity : ComponentActivity() {
         // pinned dark mode does not flash the light scheme on launch.
         darkTheme = ThemePrefs.load(this)
         modelDir()
+        // The faces from last time. Before the UI composes, so the row is never briefly
+        // empty and then repopulated under the user's finger.
+        restoreSources()
         opts = SwapOptions.load(this).let {
             // inswapper_128 is retired from the UI: it is 128 px where all three
             // hyperswaps are 256, which is the reason -- NOT that it never worked. It is
@@ -1745,13 +1818,6 @@ class MainActivity : ComponentActivity() {
                                 onLargestOnlyChange = { liveLargestOnly = it; if (liveRunning) NativePipe.setSwapLargestOnly(it) },
                                 swapEnabled = liveSwapEnabled,
                                 onToggleSwapEnabled = { toggleSwapEnabled() },
-                                // Same shared option as the Swap screen; Live initialises
-                                // its pipeline from it at Start, so a change while
-                                // stopped applies to the next run.
-                                swapper = opts.swapper,
-                                onSwapperChange = { applyOpts(opts.copy(swapper = it)) },
-                                hasHyperswap1b = hasHyperswap1b,
-                                hasHyperswap1c = hasHyperswap1c,
                                 assignMode = liveAssignMode,
                                 personThumbs = livePersonThumbs,
                                 selectedPerson = liveSelectedPerson,
@@ -1760,6 +1826,7 @@ class MainActivity : ComponentActivity() {
                                 onKeepOriginal = ::selectLiveKeepOriginal,
                                 onToggleAssignMode = ::toggleLiveAssign,
                                 onAssignFace = ::assignLiveFace,
+                                onEnterFullscreen = { liveFullscreen = true },
                                 assignBox = liveAssignBox,
                                 assignNonce = liveAssignNonce,
                                 assignCount = liveAssignCount,
@@ -1778,6 +1845,16 @@ class MainActivity : ComponentActivity() {
                                 // name, so the two models that have nothing BUT this button
                                 // could not be downloaded at all.
                                 onDownloadModel = { m -> onDownloadTapped(m.files) },
+                                // Built from `sources` itself, not a second list: one
+                                // list of faces, and Settings is a view of it.
+                                savedFaces = sources.mapNotNull { s ->
+                                    val p = s.uri.path?.takeIf { s.uri.scheme == "file" }
+                                        ?: return@mapNotNull null
+                                    com.facefusion.mobile.ui.SavedFace(
+                                        s.uri, s.thumb, File(p).lastModified())
+                                },
+                                onForgetFace = { forgetSource(it.uri) },
+                                onForgetAllFaces = { forgetAllSources() },
                                 onDeleteModel = { m ->
                                     // Every file of the row, not just the one it is named
                                     // after: an ncnn model is a param/bin pair.
@@ -1845,6 +1922,18 @@ class MainActivity : ComponentActivity() {
                             },
                         )
                     }
+
+                    // The live feed, filling the screen. Only while the pump is actually
+                    // running: fullscreen over a stopped session is a black rectangle that
+                    // will never get a frame, and Back is the only way out of it.
+                    if (liveFullscreen && liveRunning) LiveFullscreen(
+                        frame = liveFrame,
+                        mirror = liveMirror,
+                        assignMode = liveAssignMode,
+                        running = liveRunning,
+                        onAssignFace = ::assignLiveFace,
+                        onExit = { liveFullscreen = false },
+                    )
 
                     // The live player, over everything. A Dialog, so it does not matter
                     // where in the tree it sits -- it is here with the other dialogs rather
@@ -2604,7 +2693,7 @@ class MainActivity : ComponentActivity() {
                         // The same check runSwap makes, over the same list. Without it the
                         // preview is a complete second processing path with no check on
                         // it, and the check becomes avoidable by never pressing Swap.
-                        gate = { gateSources(prepared.bitmaps, "preview") },
+                        gate = { screenSourceList(prepared.bitmaps, "preview") },
                     )
                     // Before the error branch, because a rejection is worth recording even
                     // when the fallback then succeeded and there is no error to report.
@@ -2630,8 +2719,8 @@ class MainActivity : ComponentActivity() {
                 // Every previewed frame, not just the source. The source is checked once,
                 // when the pipeline warms; the target is checked here because the trim
                 // handle can reach any frame in the clip and this pane displays it.
-                ContentGate.checkImage(frame).let { v ->
-                    if (!v.ok) {
+                ContentGate.inspectStill(frame).let { v ->
+                    if (!v.permitted) {
                         previewNote = ContentGate.message(this@MainActivity, R.string.gate_subject_this_frame, v)
                         swappedFrame = null
                         return@launch
@@ -3624,8 +3713,8 @@ class MainActivity : ComponentActivity() {
                 for ((i, ls) in sources.withIndex()) {
                     val bmp = decodeOriented(ls.uri)
                         ?: return@withContext "cannot read source ${i + 1}"
-                    val verdict = ContentGate.checkImage(bmp)
-                    if (!verdict.ok)
+                    val verdict = ContentGate.inspectStill(bmp)
+                    if (!verdict.permitted)
                         return@withContext ContentGate.message(
                             this@MainActivity, R.string.gate_subject_source_image, verdict)
                     val soft = bmp.asArgb8888()
@@ -3772,6 +3861,7 @@ class MainActivity : ComponentActivity() {
         live.faceBoxesEnabled = false
         live.cancelFaceSnapshot()
         clearLiveFacePreview()
+        liveFullscreen = false
         assignTapPending = false
         liveAssignBox = null; liveAssignCount = 0; liveSelectionBox = null
         liveFrame = null; liveFps = 0.0; liveFaces = 0
@@ -3807,7 +3897,7 @@ class MainActivity : ComponentActivity() {
      * is onto this list.
      *
      * ⚠ The exposure is the same SET OF FRAMES `runSwap` has -- one file, played through
-     * from a position the user can move -- so `checkVideo`, which samples across the whole
+     * from a position the user can move -- so `inspectClip`, which samples across the whole
      * clip, is the same answer for both and neither is the weaker door.
      */
     private fun startPlayer() {
@@ -3846,13 +3936,13 @@ class MainActivity : ComponentActivity() {
                 if (NativePipe.contentGateIsQuantised())
                     appendLog("content gate: W8A16 build, biased " +
                               "+${ContentGate.QUANTISED_BIAS} toward refusing")
-                gateSources(prepared.bitmaps, "player")?.let { return@withContext it }
-                ContentGate.checkVideo(tgt).let {
+                screenSourceList(prepared.bitmaps, "player")?.let { return@withContext it }
+                ContentGate.inspectClip(tgt).let {
                     // `detail` is an ARGUMENT, never interpolated into the format string:
                     // it reads "0/11 flagged (0.0%)" and that trailing `%)` parses as a
                     // conversion. See runSwap -- it cost a whole run once.
                     appendLog("player target content: %s, worst %+.3f".format(it.detail, it.score))
-                    if (!it.ok) return@withContext ContentGate.message(
+                    if (!it.permitted) return@withContext ContentGate.message(
                         this@MainActivity, R.string.gate_subject_target_video, it)
                 }
 
@@ -3979,15 +4069,15 @@ class MainActivity : ComponentActivity() {
                     if (NativePipe.contentGateIsQuantised())
                         appendLog("content gate: W8A16 build, biased " +
                                   "+${ContentGate.QUANTISED_BIAS} toward refusing")
-                    gateSources(prepared.bitmaps, "run")?.let { throw ContentGate.Refused(it) }
+                    screenSourceList(prepared.bitmaps, "run")?.let { throw ContentGate.Refused(it) }
                     // The target, sampled across the clip.
-                    ContentGate.checkVideo(tgt).let {
+                    ContentGate.inspectClip(tgt).let {
                         // `detail` is an ARGUMENT, never interpolated into the format
                         // string: it reads "0/11 flagged (0.0%)", and that trailing `%)`
                         // is parsed as a conversion -- UnknownFormatConversionException,
                         // which killed the whole swap after the gate had already passed.
                         appendLog("target content: %s, worst %+.3f".format(it.detail, it.score))
-                        if (!it.ok)
+                        if (!it.permitted)
                             throw ContentGate.Refused(
                                 ContentGate.message(this@MainActivity,
                                                     R.string.gate_subject_target_video, it))
@@ -4103,7 +4193,7 @@ class MainActivity : ComponentActivity() {
      * Every queued target, one after another, on one loaded pipeline -- roadmap 14.
      *
      * ⚠ THIS IS A SIXTH GATED PROCESSING PATH. `docs/gate.md` enumerates them and this is
-     * now on that list. Every item is checked with the SAME `ContentGate.checkVideo` a
+     * now on that list. Every item is checked with the SAME `ContentGate.inspectClip` a
      * single run makes, and a refused clip is marked refused while the queue CONTINUES --
      * one refusal is not a reason to abandon eleven other clips.
      *
@@ -4184,9 +4274,9 @@ class MainActivity : ComponentActivity() {
                     status = getString(R.string.status_reading_source)
                     val bmp = decodeOriented(src) ?: error("cannot decode source image")
                     status = getString(R.string.status_content_check)
-                    ContentGate.checkImage(bmp).let {
+                    ContentGate.inspectStill(bmp).let {
                         appendLog("source content score %+.3f".format(it.score))
-                        if (!it.ok) throw ContentGate.Refused(
+                        if (!it.permitted) throw ContentGate.Refused(
                             ContentGate.message(this@MainActivity,
                                                 R.string.gate_subject_source_image, it))
                     }
@@ -4246,10 +4336,10 @@ class MainActivity : ComponentActivity() {
                                     ?: error("cannot read " + item.name)
 
                         // ⚠ THE GATE, PER ITEM. The same call a single run makes.
-                        ContentGate.checkVideo(f).let {
+                        ContentGate.inspectClip(f).let {
                             appendLog(item.name + ": " + it.detail +
                                       ", worst %+.3f".format(it.score))
-                            if (!it.ok) throw ContentGate.Refused(
+                            if (!it.permitted) throw ContentGate.Refused(
                                 ContentGate.message(this@MainActivity,
                                                     R.string.gate_subject_target_video, it))
                         }
@@ -4663,16 +4753,16 @@ class MainActivity : ComponentActivity() {
                 // without refusing is decoration.
                 if (srcFile.exists()) {
                     val b = decodeOriented(srcFile)
-                    if (b != null) ContentGate.checkImage(b).let {
+                    if (b != null) ContentGate.inspectStill(b).let {
                         say("gate source: %s score %+.4f %s"
                             .format(it.verdict, it.score, it.detail))
-                        if (!it.ok) { say("SELFTEST REFUSED: source"); return@launch }
+                        if (!it.permitted) { say("SELFTEST REFUSED: source"); return@launch }
                     }
                 }
-                if (tgtFile.exists()) ContentGate.checkVideo(tgtFile).let {
+                if (tgtFile.exists()) ContentGate.inspectClip(tgtFile).let {
                     say("gate target: %s worst %+.4f %s"
                         .format(it.verdict, it.score, it.detail))
-                    if (!it.ok) { say("SELFTEST REFUSED: target"); return@launch }
+                    if (!it.permitted) { say("SELFTEST REFUSED: target"); return@launch }
                 }
                 if (!srcFile.exists() || !tgtFile.exists()) {
                     say("SELFTEST PARTIAL: DSP reachable, no test assets"); return@launch
