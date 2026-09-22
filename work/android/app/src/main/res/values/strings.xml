@@ -232,10 +232,6 @@
     <string name="faces_unsave_title">Stop keeping this face?</string>
     <string name="faces_unsave_body">It leaves Saved faces. The copy in the row stays until you remove that too.</string>
     <string name="faces_unsave_ok">Stop keeping</string>
-    <!-- using one from the library -->
-    <string name="faces_use_title">Use this face?</string>
-    <string name="faces_use_body">It joins your source faces and becomes the selected one.</string>
-    <string name="faces_use_ok">Use</string>
     <!-- deleting one from the library -->
     <string name="faces_delete_title">Delete this saved face?</string>
     <string name="faces_delete_body">It is removed from this phone. If it is also in your source row, that copy stays.</string>

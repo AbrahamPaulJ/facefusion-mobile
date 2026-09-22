@@ -21,6 +21,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
@@ -712,3 +714,21 @@ fun LogBox(
         }
     }
 }
+
+/**
+ * Report whether this element is actually ON SCREEN inside its scrolling parent.
+ *
+ * `boundsInWindow` is intersected with every clipping ancestor, so a child scrolled out
+ * of a clipped scroll container reports zero height -- which is the whole trick. The
+ * fraction matters because a button with two pixels showing is not a button you can
+ * press: below 60% visible the caller shows its pinned copy instead.
+ *
+ * ⚠ Fires on every layout pass, so the caller must only react to CHANGES -- writing
+ * the same value into state each pass would recompose the screen once per frame.
+ */
+fun Modifier.reportOnScreen(onChange: (Boolean) -> Unit): Modifier =
+    onGloballyPositioned { c ->
+        val full = c.size.height.toFloat()
+        val shown = c.boundsInWindow().height
+        onChange(full <= 0f || shown >= full * 0.6f)
+    }

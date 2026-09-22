@@ -154,6 +154,10 @@ fun LiveScreen(
     // SCROLLS. Without this the controls below the feed are simply clipped: the first build
     // put the settings switch behind the navigation bar, where the only clue it existed was
     // a few pixels of its track poking out under the Start button.
+    // Start and Record follow you down the page, for the same reason Swap does on the
+    // other screen: they are the two things you came here to press.
+    var actionOnScreen by remember { mutableStateOf(true) }
+    Box(Modifier.fillMaxSize()) {
     Column(
         Modifier
             .fillMaxSize()
@@ -488,7 +492,8 @@ fun LiveScreen(
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.reportOnScreen { actionOnScreen = it }) {
             Button(
                 onClick = onToggleRun,
                 enabled = modelsReady && sourceThumb != null,
@@ -674,5 +679,33 @@ fun LiveScreen(
                  color = MaterialTheme.colorScheme.error)
 
         Spacer(Modifier.height(8.dp))
+    }
+
+        if (!actionOnScreen) Surface(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+            tonalElevation = 3.dp,
+            shadowElevation = 8.dp,
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = onToggleRun,
+                    enabled = modelsReady && sourceThumb != null,
+                    modifier = Modifier.weight(1f),
+                ) { Text(stringResource(if (running) R.string.live_stop
+                                        else R.string.live_start)) }
+                OutlinedButton(
+                    onClick = onToggleRecord,
+                    enabled = running && !finalizing,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(stringResource(if (recording) R.string.live_rec_stop
+                                        else R.string.live_rec_start),
+                         color = if (recording) FfRed else Color.Unspecified)
+                }
+            }
+        }
     }
 }

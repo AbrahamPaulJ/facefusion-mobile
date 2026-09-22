@@ -698,10 +698,10 @@ class MainActivity : ComponentActivity() {
      * to have been examined.
      */
     private fun useSavedFace(uri: Uri) {
-        confirm(R.string.faces_use_title, R.string.faces_use_body, R.string.faces_use_ok) {
-            facesDialogOpen = false
-            setSourceFrom(uri)
-        }
+        // No confirmation: nothing is lost and it is what the library is FOR. The prompts
+        // are for the actions that delete something.
+        facesDialogOpen = false
+        setSourceFrom(uri)
     }
 
     /** Forget a kept face. The row keeps its own copy if it has one. */

@@ -5,10 +5,24 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
+import android.view.ViewGroup
+import android.view.WindowManager
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.systemGestures
+import androidx.compose.foundation.layout.union
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.Image
 import androidx.compose.material3.Icon
@@ -73,6 +87,43 @@ fun LiveFullscreen(
     // Back leaves fullscreen rather than the screen behind it. Anything else would end a
     // running session with a gesture the user meant as "make this smaller again".
     BackHandler(enabled = true, onBack = onExit)
+
+    // ⚠ THE WINDOW, set up the way the live player's is. Without this the dialog is a
+    // window that merely covers the screen: the system bars still sit over it, insets
+    // inside it read as nothing, and the exit control lands UNDER the navigation bar and
+    // hard against the physical edge -- which is exactly how it shipped in 0.9.31.
+    // MATCH_PARENT makes it the whole display, decorFitsSystemWindows(false) makes the
+    // insets real, and hiding the bars means there is no navigation bar to dodge.
+    // Set on the DIALOG's window: a dialog gets its own, and decorating the Activity's
+    // leaves the bars over this one.
+    val view = LocalView.current
+    val dialogWindow = (view.parent as? DialogWindowProvider)?.window
+    LaunchedEffect(dialogWindow) {
+        dialogWindow?.let { w ->
+            w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT)
+            // A live feed is something you watch; the screen must not time out under it.
+            w.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            WindowCompat.setDecorFitsSystemWindows(w, false)
+            WindowInsetsControllerCompat(w, w.decorView).apply {
+                hide(WindowInsetsCompat.Type.systemBars())
+                systemBarsBehavior =
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        }
+    }
+
+    // Read INSIDE the dialog: it carries its own window and its own insets, and the
+    // Activity's describe a different one. safeDrawing alone is not enough -- a swipe
+    // brings the bars back transiently, and the gesture strip and any cutout are places
+    // a control must not be even while they are hidden.
+    val dir = LocalLayoutDirection.current
+    val edges = WindowInsets.safeDrawing
+        .union(WindowInsets.systemGestures)
+        .union(WindowInsets.displayCutout)
+        .asPaddingValues()
+    val edgeEnd = maxOf(edges.calculateEndPadding(dir), 20.dp)
+    val edgeBottom = maxOf(edges.calculateBottomPadding(), 28.dp)
     Box(
         Modifier
             .fillMaxSize()
@@ -110,17 +161,12 @@ fun LiveFullscreen(
                  color = MaterialTheme.colorScheme.onSurface)
         }
 
-        // ⚠ navigationBarsPadding, or the gesture bar sits ON this button and the only
-        // way out of fullscreen is a back gesture the user has no reason to guess at.
-        // A Dialog draws under the system bars: filling the screen means exactly that,
-        // including the parts of it the system has already spoken for.
+        // The one way out, kept clear of every edge the system might want back.
         IconButton(
             onClick = onExit,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .navigationBarsPadding()
-                .statusBarsPadding()
-                .padding(16.dp),
+                .padding(end = edgeEnd, bottom = edgeBottom),
             colors = IconButtonDefaults.filledTonalIconButtonColors(),
         ) {
             Icon(

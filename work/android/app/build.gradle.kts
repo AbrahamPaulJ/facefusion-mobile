@@ -467,8 +467,11 @@ android {
         // 104 = the keep button toggles and shows which state it is in, the library's
         // delete stopped leaving it stuck, every face action confirms, and four icons in
         // one slot stopped touching.
-        versionCode = 104
-        versionName = "0.9.32$variantTag"    // "-dev" == NO content gate
+        // 105 = the fullscreen exit stopped hiding under the navigation bar (the dialog
+        // window was never set up edge-to-edge, so its insets read as nothing), Use lost
+        // its confirmation, and the primary action on both screens follows the scroll.
+        versionCode = 105
+        versionName = "0.9.33$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }

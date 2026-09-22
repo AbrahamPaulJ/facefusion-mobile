@@ -337,6 +337,12 @@ fun SwapScreen(
     // does not close it mid-adjustment.
     var settingsFor by rememberSaveable { mutableStateOf<String?>(null) }
     var confirmDeleteOutput by rememberSaveable { mutableStateOf(false) }
+    // The primary action follows you down the page. It is the bottom of a long scroll,
+    // and on a tall phone the top of that scroll is nowhere near it -- so when it is out
+    // of view a copy sits above the tab bar instead. Only a copy: the real one keeps its
+    // place, so nothing moves when you do scroll to it.
+    var actionOnScreen by remember { mutableStateOf(true) }
+    Box(Modifier.fillMaxSize()) {
     Column(
         modifier
             .fillMaxSize()
@@ -1132,7 +1138,8 @@ fun SwapScreen(
             onClick = if (run.busy) onCancel else onSwap,
             enabled = run.busy || (idle && hasSource && hasTarget && !modelsMissing &&
                                     (!opts.lipSync || hasVoice)),
-            modifier = Modifier.fillMaxWidth().height(52.dp),
+            modifier = Modifier.fillMaxWidth().height(52.dp)
+                .reportOnScreen { actionOnScreen = it },
             // 14.dp everywhere: the stadium default made the two primary buttons the only
             // fully-round things on a screen of 14.dp panes and cards.
             shape = RoundedCornerShape(14.dp),
@@ -1451,6 +1458,30 @@ fun SwapScreen(
         if (log.isNotEmpty()) LogBox(log, logOpen, { logOpen = !logOpen })
 
         Spacer(Modifier.height(8.dp))
+    }
+
+        // The pinned copy. Same handler, same enablement, same words -- a second button
+        // that could disagree with the first would be worse than no second button.
+        if (!imageTarget && !actionOnScreen) Surface(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+            tonalElevation = 3.dp,
+            shadowElevation = 8.dp,
+        ) {
+            Button(
+                onClick = if (run.busy) onCancel else onSwap,
+                enabled = run.busy || (idle && hasSource && hasTarget && !modelsMissing &&
+                                        (!opts.lipSync || hasVoice)),
+                modifier = Modifier.fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                    .height(52.dp),
+                shape = RoundedCornerShape(14.dp),
+            ) { Text(stringResource(
+                        if (run.busy) R.string.swap_cancel
+                        else if (batch.size > 1) R.string.swap_action_batch
+                        else R.string.swap_action,
+                        batch.size),
+                     fontSize = 16.sp) }
+        }
     }
 
     if (confirmDeleteOutput) {
