@@ -447,8 +447,15 @@ android {
         // 98 = `--es unit auto|gpu|cpu`, so the ncnn unit pin can be driven from a script.
         // 97 is installed on the bench and sitting in its Downloads: reusing the name would
         // leave two builds answering to it, which is the ambiguity the rule exists to stop.
-        versionCode = 98
-        versionName = "0.9.26$variantTag"    // "-dev" == NO content gate
+        // 99 = PR #6 merged: the frozen pre-swap photo row for Assign per person on
+        // both screens, assign-per-person on stills, the Live swapper picker, and
+        // hyperswap 1b/1c selectable when their binary is present. The correction on
+        // top dropped the Import button -- a hand-picked file of the right NAME is not
+        // the model, and the download path SHA256s every byte against the manifest.
+        // v0.9.26 is published and is versionCode 98, so this build has stopped being
+        // that release and must stop answering to its name.
+        versionCode = 99
+        versionName = "0.9.27$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }

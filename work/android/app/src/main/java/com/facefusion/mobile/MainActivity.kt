@@ -848,61 +848,6 @@ class MainActivity : ComponentActivity() {
         if (uri != null) setSourceFrom(uri)
     }
 
-    /**
-     * The file a Settings row is waiting for, or null.
-     *
-     * Import is the path for models nobody hosts -- a converted swapper shared over
-     * KDE Connect rather than downloaded -- so the manifest cannot name what is coming
-     * and the row's own [ModelRow.files] is the whole contract: the picked file's name
-     * must be one of them, and it lands under exactly that name.
-     */
-    private var pendingImport: com.facefusion.mobile.ui.ModelRow? = null
-    private val importModelFile =
-        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            val row = pendingImport; pendingImport = null
-            if (uri == null || row == null) return@registerForActivityResult
-            lifecycleScope.launch(Dispatchers.IO) {
-                var name: String? = null
-                runCatching {
-                    contentResolver.query(
-                        uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
-                        null, null, null)?.use { c ->
-                        if (c.moveToFirst()) name = c.getString(0)
-                    }
-                }
-                val target = name?.substringAfterLast('/')
-                if (target == null || target !in row.files) {
-                    runOnUiThread {
-                        toast(getString(R.string.set_import_bad_name,
-                                        row.files.joinToString(", ")))
-                    }
-                    return@launch
-                }
-                try {
-                    val dir = modelDir()
-                    val tmp = java.io.File(dir, "$target.part")
-                    (contentResolver.openInputStream(uri)
-                        ?: throw java.io.IOException("cannot open"))
-                        .use { input -> tmp.outputStream().use { input.copyTo(it) } }
-                    java.io.File(dir, target).delete()
-                    if (!tmp.renameTo(java.io.File(dir, target)))
-                        throw java.io.IOException("cannot save")
-                    // Length is what ModelDownload.missing and the outdated flag read,
-                    // so a file of the wrong length shows as update-available rather
-                    // than silently passing as the model.
-                    withContext(Dispatchers.Main) {
-                        modelsVersion++
-                        toast(getString(R.string.set_import_done, target))
-                    }
-                } catch (e: Exception) {
-                    runOnUiThread {
-                        toast(getString(R.string.set_import_failed,
-                                        e.message ?: e.toString()))
-                    }
-                }
-            }
-        }
-
     private val pickLiveSources = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) addLiveSource(uri)
     }
@@ -1352,8 +1297,11 @@ class MainActivity : ComponentActivity() {
         darkTheme = ThemePrefs.load(this)
         modelDir()
         opts = SwapOptions.load(this).let {
-            // inswapper_128 retired: quality too poor. A saved "inswapper" falls back
-            // to hyperswap 1a rather than pointing at a model the UI no longer offers.
+            // inswapper_128 is retired from the UI: it is 128 px where all three
+            // hyperswaps are 256, which is the reason -- NOT that it never worked. It is
+            // converted, measured (32.96 dB / 23.32 ms) and still loadable by ffjni. A
+            // saved "inswapper" falls back rather than pointing at a model no picker
+            // offers, and Settings keeps a delete-only row for the file itself.
             if (it.swapper == "inswapper") it.copy(swapper = "hyperswap") else it
         }
         ApiService.restore(this)
@@ -1769,11 +1717,6 @@ class MainActivity : ComponentActivity() {
                                 faces = liveFaces,
                                 useMySettings = liveUseMySettings,
                                 onUseMySettings = { liveUseMySettings = it },
-                                detectionOpts = opts.copy(largestOnly = liveLargestOnly),
-                                onDetectionOptsChange = { changed ->
-                                    liveLargestOnly = changed.largestOnly
-                                    applyOpts(changed)
-                                },
                                 note = liveNote,
                                 modelsReady = !modelsMissing,
                                 onDownload = { onDownloadTapped() },
@@ -1825,13 +1768,6 @@ class MainActivity : ComponentActivity() {
                                 // name, so the two models that have nothing BUT this button
                                 // could not be downloaded at all.
                                 onDownloadModel = { m -> onDownloadTapped(m.files) },
-                                // Import from a file on the phone: the row's own files
-                                // are the contract, so a KDE Connect share landed in
-                                // Download lands in the models dir under its own name.
-                                onImportModel = { m ->
-                                    pendingImport = m
-                                    importModelFile.launch(arrayOf("*/*"))
-                                },
                                 onDeleteModel = { m ->
                                     // Every file of the row, not just the one it is named
                                     // after: an ncnn model is a param/bin pair.
@@ -2415,11 +2351,17 @@ class MainActivity : ComponentActivity() {
                             // so the two stopped meaning the same thing.
                             fetching = files.any { it.name in ModelDownload.queued })
         }
+        // RETIRED, and still on some devices. inswapper_128 is no longer offered
+        // anywhere -- three 256 swappers supersede a 128 one -- but it is 136 MB and it
+        // is hosted, so anyone who ever fetched it is holding it. Present-only, never
+        // `downloadable`: a row is how a file gets DELETED, and offering to download a
+        // model nothing can select would be the opposite of retiring it.
+        val retired = listOf("inswapper" to getString(R.string.model_swapper_retired))
         return (required.map { (n, l) -> row(n, l, true) } +
-            // Every row is shown, hosted or not: import is the path for files nobody
-            // hosts.
-            gate.map { (n, l) -> row(n, l, !gateOk) } +
-            optional.map { (n, l) -> row(n, l, false) })
+            gate.map { (n, l) -> row(n, l, !gateOk) }.filter { it.present || it.downloadable } +
+            optional.map { (n, l) -> row(n, l, false) }.filter { it.present || it.downloadable } +
+            retired.map { (n, l) -> row(n, l, false).copy(downloadable = false) }
+                .filter { it.present })
             // One row per FILE SET, not per logical name. The two gate names resolve to two
             // different context binaries on QNN and to the SAME `nsfw_2_sim` pair on ncnn --
             // the quantised build exists because a QNN tier below v79 cannot finalize the

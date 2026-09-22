@@ -117,7 +117,6 @@
     <string name="opt_pixel_boost_cost">в %1$d раз дороже на лицо: нормально для фото, медленно для видео</string>
     <string name="opt_model">Модель</string>
     <string name="opt_swapper">hyperswap:</string>
-    <string name="opt_model_hint">1a: стабильная · 1b: качественнее · 1c: лучшая</string>
     <string name="opt_face_masker">Маска лица</string>
     <string name="opt_masker_summary">размытие %1$s   отступ %2$s</string>
     <string name="opt_blur">Размытие</string>
@@ -175,7 +174,6 @@
     <string name="model_landmarker">Детектор лендмарок</string>
     <string name="model_recogniser">Распознаватель лиц</string>
     <string name="model_swapper">Замена лица</string>
-    <string name="model_swapper_alt">Замена лица (альтернативная)</string>
     <string name="model_content_checker">Проверка контента</string>
     <string name="model_content_checker_quantised">Проверка контента (квантованная)</string>
     <string name="model_enhancer">Улучшение лица</string>

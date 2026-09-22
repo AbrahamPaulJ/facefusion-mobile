@@ -33,8 +33,14 @@ data class ModelRow(
     val required: Boolean,
     /**
      * The manifest publishes this file, so an absent one is worth showing WITH a way to
-     * download it. A row that is not hosted is still shown -- with Import instead --
-     * because the file may already exist somewhere else (a convert shared directly).
+     * get it. An optional model that is not hosted stays hidden when absent: a download
+     * button for a file nobody serves is a promise the app cannot keep.
+     *
+     * ⚠ It is also the ONLY way a file reaches the models dir, and that is the point.
+     * Every download is SHA256'd against the manifest (ModelDownload's head comment), so
+     * a hand-picked file of the right NAME is not the same thing as the model and must
+     * never be treated as one -- least of all the content gate's, where a binary that
+     * loads and returns a low score is a gate that passes everything.
      */
     val downloadable: Boolean = false,
     /**
@@ -126,14 +132,6 @@ fun SettingsScreen(
      * saying the models were ready.
      */
     onDownloadModel: (ModelRow) -> Unit,
-    /**
-     * Copy THIS row's file in from a document the user picks.
-     *
-     * The path for models nobody hosts -- a converted swapper handed over directly
-     * rather than downloaded -- which is why it shows even when the row is not
-     * downloadable. The filename must match: the row's files are the contract.
-     */
-    onImportModel: (ModelRow) -> Unit = {},
     /** Start or stop the HTTP server. [lan] binds every interface instead of loopback. */
     onApiToggle: (on: Boolean, lan: Boolean) -> Unit,
     /**
@@ -281,7 +279,7 @@ fun SettingsScreen(
                                     Text(stringResource(R.string.set_delete),
                                          color = MaterialTheme.colorScheme.error)
                                 }
-                            } else if (active) {
+                            } else if (m.downloadable && active) {
                                 // ⚠ m.fetching, not ModelDownload.running. The first asks
                                 // whether THIS model is in the current queue; the second
                                 // only whether some download exists. Every row used to
@@ -289,17 +287,10 @@ fun SettingsScreen(
                                 // visibly wrong once the optional models stopped being
                                 // fetched by the bulk button. The button stays DISABLED
                                 // either way -- two downloads at once is still not a thing.
-                                if (m.downloadable) {
-                                    TextButton({ onDownloadModel(m) }, enabled = !ModelDownload.running) {
-                                        Text(stringResource(if (m.fetching)
-                                                                R.string.set_downloading
-                                                            else R.string.set_download))
-                                    }
-                                }
-                                // Import shows even when the row is not downloadable:
-                                // that is exactly the unpublished file it exists for.
-                                TextButton({ onImportModel(m) }, enabled = !ModelDownload.running) {
-                                    Text(stringResource(R.string.set_import))
+                                TextButton({ onDownloadModel(m) }, enabled = !ModelDownload.running) {
+                                    Text(stringResource(if (m.fetching)
+                                                           R.string.set_downloading
+                                                       else R.string.set_download))
                                 }
                             }
                         }

@@ -159,7 +159,7 @@
     <string name="opt_swapper">hyperswap:</string>
     <string name="opt_model_info">About these models</string>
     <string name="swapper_info_title">Face swap models</string>
-    <string name="swapper_info_body">hyperswap (1a): runs at 256², no enhancer needed.\n\nhyperswap_1b: same resolution and inputs as 1a, separate weights.\n\nhyperswap_1c: same resolution and inputs as 1a, separate weights.\n\nThese descriptions come from the model developer. Rendering varies with lighting, pose, faces and settings — try each one and keep what works for you.</string>
+    <string name="swapper_info_body">All three run at 256² and take the same inputs. They differ only in their weights, so the same face can come out differently — and none of them is the better one: it depends on the face, the lighting and the pose.\n\nThere is no ranking here on purpose. Try them on your own footage and keep whichever works.</string>
 
     <string name="opt_face_masker">Face Masker</string>
     <!-- %1$s blur amount, %2$s padding -->
@@ -222,11 +222,6 @@
     <string name="set_delete">Delete</string>
     <string name="set_download">Download</string>
     <string name="set_downloading">Downloading</string>
-    <string name="set_import">Import</string>
-    <!-- %1$s is the filename the app expects -->
-    <string name="set_import_bad_name">That file is not this model — pick %1$s.</string>
-    <string name="set_import_failed">Could not import: %1$s.</string>
-    <string name="set_import_done">Imported %1$s.</string>
     <!-- %1$s is the model's display name -->
     <string name="set_delete_title">Delete %1$s?</string>
     <!-- %1$s filename, %2$s size -->
@@ -239,7 +234,8 @@
     <string name="model_landmarker">Face landmarker</string>
     <string name="model_recogniser">Face recogniser</string>
     <string name="model_swapper">Face swapper</string>
-    <string name="model_swapper_alt">Face swapper (alternative)</string>
+    <!-- No longer selectable anywhere; the row exists so the file can be deleted -->
+    <string name="model_swapper_retired">Face swapper (retired)</string>
     <string name="model_content_checker">Content checker</string>
     <string name="model_content_checker_quantised">Content checker (quantised)</string>
     <string name="model_enhancer">Face enhancer</string>
@@ -484,8 +480,6 @@
 
 Turning it off runs your own Swap settings instead. This is experimental: the enhancer at 1024 can take the feed into single-figure frame rates, and lip sync has no audio to follow live.</string>
     <string name="live_fast_confirm_ok">Turn it off</string>
-    <string name="live_detection_settings">Detection settings</string>
-    <string name="live_detection_settings_hint">Changes apply the next time Live starts. Fast mode keeps tracking at its own performance preset; turn Fast mode off to use your selected tracking interval.</string>
     <string name="common_cancel">Cancel</string>
     <string name="common_delete">Delete</string>
     <string name="common_expand">Expand</string>

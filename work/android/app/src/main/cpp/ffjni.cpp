@@ -1242,30 +1242,28 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
   if (jBgrOut) {
     const jsize want = (jsize)(w * h * 3);
     if (env->GetArrayLength(jBgrOut) == want) {
-      const bool mirror = jMirrorRecording == JNI_TRUE;
-      // Mirror in the reusable native frame, copy to the encoder, then restore the
-      // unmirrored frame for the preview. This avoids a second full-size allocation per
-      // recorded frame and keeps the display path unchanged.
-      if (mirror) {
+      // ⚠ Mirrored into the COPY, never into `frame` itself. `frame` is the one
+      // static pump buffer that the display downsample below and the next frame's
+      // detector both read; mirroring it in place -- even restored immediately after --
+      // makes one image two for as long as the copy takes, and walks the whole frame
+      // twice to end up where it started. docs/live.md's rule is that mirroring is the
+      // display's job and nowhere else, and the encoder's own buffer is the nearest
+      // thing to a display on this path.
+      if (jMirrorRecording == JNI_TRUE) {
+        // Static: one allocation for the life of the process, not one per recorded
+        // frame. Single-pump, so there is exactly one writer (see liveFrame's note).
+        static std::vector<uint8_t> flip;
+        flip.resize((size_t)want);
         for (int y = 0; y < h; ++y) {
-          for (int x = 0; x < w / 2; ++x) {
-            uint8_t* a = frame.row(y) + (size_t)x * 3;
-            uint8_t* b = frame.row(y) + (size_t)(w - 1 - x) * 3;
-            for (int c = 0; c < 3; ++c) {
-              const uint8_t t = a[c]; a[c] = b[c]; b[c] = t;
-            }
+          const uint8_t* src = frame.row(y);
+          uint8_t* dst = flip.data() + (size_t)y * (size_t)w * 3;
+          for (int x = 0; x < w; ++x) {
+            const uint8_t* s = src + (size_t)(w - 1 - x) * 3;
+            uint8_t* d = dst + (size_t)x * 3;
+            d[0] = s[0]; d[1] = s[1]; d[2] = s[2];
           }
         }
-        env->SetByteArrayRegion(jBgrOut, 0, want, (const jbyte*)frame.data.data());
-        for (int y = 0; y < h; ++y) {
-          for (int x = 0; x < w / 2; ++x) {
-            uint8_t* a = frame.row(y) + (size_t)x * 3;
-            uint8_t* b = frame.row(y) + (size_t)(w - 1 - x) * 3;
-            for (int c = 0; c < 3; ++c) {
-              const uint8_t t = a[c]; a[c] = b[c]; b[c] = t;
-            }
-          }
-        }
+        env->SetByteArrayRegion(jBgrOut, 0, want, (const jbyte*)flip.data());
       } else {
         env->SetByteArrayRegion(jBgrOut, 0, want, (const jbyte*)frame.data.data());
       }

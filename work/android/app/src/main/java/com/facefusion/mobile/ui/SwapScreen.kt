@@ -130,7 +130,15 @@ fun SwapScreen(
      * IDENTITY and native matches it on every frame of the run.
      */
     assignMode: Boolean = false,
-    /** The people detected in the frame on screen, in the same order as `faceBoxes`. */
+    /**
+     * The people found when the mode was switched on, in that FROZEN frame's order.
+     *
+     * ⚠ NOT `faceBoxes`' order. Those boxes follow the frame on screen and are
+     * re-scored on every seek; this row is captured once per target precisely so the
+     * detector's per-frame ordering cannot change which face "Person 1" means. The two
+     * agree on the frame the snapshot came from and nowhere else, which is why nothing
+     * indexes one with the other.
+     */
     personThumbs: List<Bitmap> = emptyList(),
     selectedPerson: Int = -1,
     /** person index -> source slot, or -1 for "keeps their own face". */

@@ -59,9 +59,6 @@ Ruhs. The pipeline, the models, and the option names, defaults and ranges are Fa
 - The Live preview is mirrored on the front camera, as a selfie camera is, and not on the
   back one. A switch overrides that per lens; when the switch is on, recordings use the same
   selfie-style horizontal flip.
-- **Detection settings**: in Live, open the button with the gear icon while the feed is
-  stopped. Adjust the face confidence, alignment confidence, face selection and redetection
-  interval. The settings take effect the next time you press Start.
 - Takes its inputs from the camera and microphone as well as your files — shoot a source
   face, film a target, or record the voice that drives the lip syncer.
 - Saves to your gallery, or hands a still straight out of the preview.
@@ -78,19 +75,10 @@ Optional extras, each a separate download: a face enhancer (`gpen_bfr_256`, abou
 more per face, 25 MB), a lip syncer (`edtalk_256`, 60 MB) and pixel boost, which renders the
 swapped face at 512, 768 or 1024 instead of 256 at a proportional cost in time.
 
-### Live controls: user and developer notes
-
-For everyday use, **Assign per person** keeps the source assignment attached to the tracked
-person. The photo row is a low-cost way to choose a person without chasing a moving face on
-the preview. If another face enters the shot, the app takes one new pre-swap snapshot and
-updates the row; it does not create a new thumbnail on every camera frame.
-
-Technically, Live returns detector boxes on the assign path and requests a pre-swap BGR frame
-only when the row is first populated or when the detected face count grows. The native pipeline
-keeps the normal preview path allocation-free, matches a selected photo to the current boxes,
-and sends the selected source to the existing per-person tracker. Recording mirroring is
-applied only to the encoder buffer, then the native preview frame is restored, so the display
-and face detection continue to use the original camera orientation.
+The photo row in **Assign per person** is a way to pick somebody without chasing a moving
+face on the preview: the pictures are taken before anything is swapped, and the row is
+refreshed once when another person enters the shot rather than rebuilt every frame. Whoever
+you assigned keeps their source while the row changes around them.
 
 The lip syncer needs a target video and a separate audio or video file to drive the mouth
 from — a photo, a silent clip, or a target with no voice picked has nothing to sync to. It

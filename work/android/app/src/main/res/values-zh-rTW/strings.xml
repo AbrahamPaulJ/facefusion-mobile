@@ -112,7 +112,6 @@
     <string name="opt_pixel_boost_cost">每張臉的換臉成本變為 %1$d 倍 ， 處理相片沒問題，處理影片會很慢</string>
     <string name="opt_model">模型</string>
     <string name="opt_swapper">hyperswap:</string>
-    <string name="opt_model_hint">1a：穩定 · 1b：畫質更好 · 1c：畫質最佳</string>
 
     <string name="opt_face_masker">遮罩</string>
     <string name="opt_masker_summary">模糊 %1$s   邊界 %2$s</string>
@@ -170,7 +169,6 @@
     <string name="model_landmarker">人臉關鍵點</string>
     <string name="model_recogniser">人臉辨識</string>
     <string name="model_swapper">人臉替換</string>
-    <string name="model_swapper_alt">人臉替換（備選）</string>
     <string name="model_content_checker">內容檢查</string>
     <string name="model_content_checker_quantised">內容檢查（量化版）</string>
     <string name="model_enhancer">人臉增強</string>

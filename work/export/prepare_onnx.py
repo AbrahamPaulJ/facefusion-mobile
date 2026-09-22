@@ -196,9 +196,8 @@ def do_hyperswap(variant='hyperswap_1a_256'):
 		ops[n.op_type] = ops.get(n.op_type, 0) + 1
 	print('  now: %d nodes; Shape=%d Expand=%d Reshape=%d' %
 		  (len(m.graph.node), ops.get('Shape', 0), ops.get('Expand', 0), ops.get('Reshape', 0)))
-	stem = variant + '_nomask'
-	# The 1a stem keeps its historical name (convert.sh reads hyperswap_1a_256_fp32).
-	return save(m, stem if variant != 'hyperswap_1a_256' else 'hyperswap_1a_256_nomask')
+	# No special case for 1a: variant + '_nomask' already IS its historical name.
+	return save(m, variant + '_nomask')
 
 
 # ------------------------------------------------------------------ inswapper
