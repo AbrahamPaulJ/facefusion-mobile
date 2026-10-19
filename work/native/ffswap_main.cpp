@@ -144,6 +144,7 @@ int main(int argc, char** argv) {
       // S26 Ultra to a two-generation-old context.
       {"8 Elite Gen 5 v81 / 8 MB", {true, 0, 99, 81, 8, false, false}, "v81"},
       {"beyond v81    v85 / 8 MB", {true, 0, 99, 85, 8, false, false}, "v81"},
+      {"8 Gen 5       v81 / 97  ", {true, 0, 97, 81, 8, false, false}, "v81s97"},
       {"v79 but only 4 MB VTCM  ", {true, 0, 69, 79, 4, false, false}, "v68"},
       {"probe failed            ", {},                                 "v68"},
     };
@@ -163,6 +164,7 @@ int main(int argc, char** argv) {
     struct ChainCase { const char* what; ffqnn::DeviceInfo d; const char* want; };
     const ChainCase chains[] = {
       {"8 Elite Gen 5 v81", {true, 0, 99, 81, 8, false, false}, "v81,v73,v68"},
+      {"8 Gen 5   v81 / 97", {true, 0, 97, 81, 8, false, false}, "v81s97,v73,v68"},
       {"8 Elite       v79", {true, 0, 69, 79, 8, false, false}, "v79,v73,v68"},
       {"8 Gen 2       v73", {true, 0,  0, 73, 8, false, false}, "v73,v68"},
       {"SD 888        v68", {true, 0,  0, 68, 2, false, false}, "v68"},
@@ -183,6 +185,10 @@ int main(int argc, char** argv) {
       for (const std::string& t : ffqnn::tierChain(c.d)) {
         if (c.d.arch >= 81 && t == "v79") {
           printf("  FATAL: v79 is soc-pinned and must never appear in a v81 chain\n");
+          ++bad;
+        }
+        if (c.d.socModel == 97 && t == "v81") {
+          printf("  FATAL: the v81 set is scheduled for SM8850 and dies on soc 97 (#16)\n");
           ++bad;
         }
       }

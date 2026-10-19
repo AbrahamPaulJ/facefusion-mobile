@@ -770,6 +770,14 @@ std::vector<std::string> tierChain(const DeviceInfo& d) {
   // for the SoC, not the arch, so for a v81 part it is not a fallback at all -- it is a
   // guaranteed failure.  A tier belongs in a chain only if a context built for it actually
   // RUNS on this chip.
+  //
+  // ⚠ "v81" is not one HTP. The v81 set carries no soc_model, so 2.49 schedules it for its
+  // default v81 part, SM8850 (87) -- and the generator models the 8 Gen 5 (SM8845, 97) as
+  // a different chip: the same hyperswap spills 72.6 MB for 97 against 31.5 for 87. Issue
+  // #16 is that set on a 97: every context LOADS, the first execute fails with
+  // QNN_COMMON_ERROR_SYSTEM and every later one with SYSTEM_COMMUNICATION (the DSP process
+  // is gone). So 97 gets its own build, and never the v81 one.
+  if (d.arch >= 81 && d.socModel == 97) return {"v81s97", "v73", "v68"};
   if (d.arch >= 81) return {"v81", "v73", "v68"};
 
   // soc_model is baked into the v79 config (69 == SM8750) and pins that context to one

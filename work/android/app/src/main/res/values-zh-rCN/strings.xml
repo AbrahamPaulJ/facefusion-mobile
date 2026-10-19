@@ -237,6 +237,7 @@
     <string name="tier_v73">8 Gen 2 (v73)、8 Gen 3 (v75)，以及 SM8750 以外的 v79 芯片</string>
     <string name="tier_v79">骁龙 8 至尊版 (SM8750)</string>
     <string name="tier_v81">骁龙 8 至尊版 Gen 5 (v81) 及更新</string>
+    <string name="tier_v81s97">骁龙 8 Gen 5 (SM8845)</string>
 
     <string name="notif_channel_name">模型下载</string>
     <string name="notif_channel_desc">下载 NPU 模型时的进度</string>

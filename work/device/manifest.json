@@ -37,9 +37,29 @@
           "name": "gpen_v68.bin",
           "bytes": 24962264,
           "sha256": "00e487d96d8148bb05ba83448069321cfd60994ee3dd4fa71415fe211faabe5a"
+        },
+        {
+          "name": "wav2lip_v68.bin",
+          "bytes": 43658752,
+          "sha256": "3743f9329cfdfbce8d1457e4a678b2379941ae728303afa756578c86d3aa9076"
+        },
+        {
+          "name": "edtalk_v68.bin",
+          "bytes": 62429456,
+          "sha256": "1be1c48d2e355d4305d655ecd50f15ade0727406393cf033d787e5cc3035a6bb"
+        },
+        {
+          "name": "hyperswap_1b_v68.bin",
+          "bytes": 204956024,
+          "sha256": "de1e911877a298fc012b07565d062fedf918d70213c2733e329ac1adfd4cca0b"
+        },
+        {
+          "name": "hyperswap_1c_v68.bin",
+          "bytes": 204956024,
+          "sha256": "4cb0eab46c661ce3d40e8e006a9de5803363dd8ee857634de517870a6218f027"
         }
       ],
-      "bytes": 316431072
+      "bytes": 422519280
     },
     "v73": {
       "files": [
@@ -77,9 +97,29 @@
           "name": "gpen_v73.bin",
           "bytes": 24618200,
           "sha256": "58b6f1843976ec994406a8232e8420e99c320cae058e103b076ff62515ea5a33"
+        },
+        {
+          "name": "wav2lip_v73.bin",
+          "bytes": 43744768,
+          "sha256": "2988f56b1f735c55f62c875c2eb1a771ceaf44b49a3b151327c47804b50dbe9e"
+        },
+        {
+          "name": "edtalk_v73.bin",
+          "bytes": 60303632,
+          "sha256": "81bbe64a3e891e3783e75f4e337dfdef5da57f0a4ca1a0922e7d482e9833204b"
+        },
+        {
+          "name": "hyperswap_1b_v73.bin",
+          "bytes": 205693304,
+          "sha256": "617b8ec67fad997994783dc1385aaa4768b063df8739979bcbca7054f1cbab93"
+        },
+        {
+          "name": "hyperswap_1c_v73.bin",
+          "bytes": 205689208,
+          "sha256": "5fc2a92948ffbb623bdf4d72443047122dfe5fdd78b0ee68338ac7e078aebff2"
         }
       ],
-      "bytes": 316857056
+      "bytes": 420905456
     },
     "v79": {
       "files": [
@@ -112,9 +152,29 @@
           "name": "gpen_v79.bin",
           "bytes": 24659192,
           "sha256": "f586b117c06f2b0a86a8ac2e78faad845ecd2e5e082cd67d50c43ffaff89f7c9"
+        },
+        {
+          "name": "wav2lip_v79.bin",
+          "bytes": 43732520,
+          "sha256": "42936340616c8d58a46d0c5948d0b8182824cd4927fc6a7068db808850fcdaad"
+        },
+        {
+          "name": "edtalk_v79.bin",
+          "bytes": 60365112,
+          "sha256": "38516779998cd29c2eeba44a2ee0a5a123a8ac3052bf91384059489de9fc605a"
+        },
+        {
+          "name": "hyperswap_1b_v79.bin",
+          "bytes": 205799840,
+          "sha256": "4cea7a845ff2af18d62a067bd44a3bd5ecff1102e9fe03d90cac899633461a2b"
+        },
+        {
+          "name": "hyperswap_1c_v79.bin",
+          "bytes": 205767072,
+          "sha256": "34a0ecfeb4601df69b8d2f7fbe9ab46b53b6ee4a6a3d311e33db86a13159da1c"
         }
       ],
-      "bytes": 317385664
+      "bytes": 421483296
     },
     "v81": {
       "files": [
@@ -147,13 +207,83 @@
           "name": "nsfwq2_v81.bin",
           "bytes": 6662104,
           "sha256": "16ee9369d8fd62b8c7dce0b7d4f5cf2e57e6885effd6c25bc100aeac606e58e1"
+        },
+        {
+          "name": "wav2lip_v81.bin",
+          "bytes": 43757056,
+          "sha256": "d277183f4ef8126f9bc66b95d87346c0ef71303255b2d0adac130fdebe4f8e94"
+        },
+        {
+          "name": "edtalk_v81.bin",
+          "bytes": 60733712,
+          "sha256": "1b1bc2216c29bf86f90fedd9c1458166415be7909c55017db14e9d33d234dfd6"
+        },
+        {
+          "name": "hyperswap_1b_v81.bin",
+          "bytes": 206659960,
+          "sha256": "f3c4ffc6e00ec5476c9fa00416ffc8cc0b92379e8fddb137d421b06dbaf956ed"
+        },
+        {
+          "name": "hyperswap_1c_v81.bin",
+          "bytes": 206651768,
+          "sha256": "71ba591265852ae610755c90caa777f85df6f4a4f2bd3848d223e2482f11a6b6"
         }
       ],
-      "bytes": 311608072
+      "bytes": 416098840
+    },
+    "v81s97": {
+      "files": [
+        {
+          "name": "yoloface_v81s97.bin",
+          "bytes": 4003000,
+          "sha256": "0f97150cd46b73d0c6e81632daffd0a03f3cb21e9842babc3eaa423db93677fb"
+        },
+        {
+          "name": "fan2d_v81s97.bin",
+          "bytes": 24923616,
+          "sha256": "840f5bff880febbad5bddfffd121e8fe16dd96c3c5703b294a5e03040aecfd78"
+        },
+        {
+          "name": "arcface_v81s97.bin",
+          "bytes": 44143280,
+          "sha256": "cd7348848cb283d6e7f7fa625bf220ab68a8a9c2df54f0a2491616a3ce96aca5"
+        },
+        {
+          "name": "hyperswap_v81s97.bin",
+          "bytes": 206307736,
+          "sha256": "bad071db5f9bfba1322d7c74d2e72bc7efe1280aa4d6228ae9bb07e689139395"
+        },
+        {
+          "name": "gpen_v81s97.bin",
+          "bytes": 24659192,
+          "sha256": "de5e2b1a4a4676bc544df4c0415cb25971b3a4c7a01ab56b24e45d494007a797"
+        },
+        {
+          "name": "nsfwq2_v81s97.bin",
+          "bytes": 6641656,
+          "sha256": "9d44b6132df404eedce2f9d0a825429e2e0abe4e09543194979e7a9677e4ae47"
+        },
+        {
+          "name": "edtalk_v81s97.bin",
+          "bytes": 60332344,
+          "sha256": "80cc0ff156b08111851f3633f276f7afdae9d0fc236d5c34742f290eb2f54777"
+        },
+        {
+          "name": "hyperswap_1b_v81s97.bin",
+          "bytes": 206307744,
+          "sha256": "85c9393c72b015af1b89d0bc31fb9e35f665630e7e235b720464fc718dcfb5fd"
+        },
+        {
+          "name": "hyperswap_1c_v81s97.bin",
+          "bytes": 206299552,
+          "sha256": "b9325d76004b5c88eac67b171f79bde0bd3165c2658c5229236e858a21d37cad"
+        }
+      ],
+      "bytes": 371010824
     }
   },
   "ncnn_preview": {
-    "note": "EXPERIMENTAL, roadmap 6. No shipped app reads this. fp16 storage except where stated; gpen requires fp32 activations and is wrong on Vulkan even at fp32.",
+    "note": "Roadmap 6, the non-Qualcomm model set. Read by app 0.4.0 and up, which resolve the variant \"ncnn\" here; `tiers` is searched first, so this block can move under it without an app release. fp16 storage. gpen and the content checker are pinned to the CPU by the app -- on Vulkan gpen is wrong and the gate errs toward allowing.",
     "files": [
       {
         "name": "ncnn/yoloface_8n_b1.ncnn.param",
@@ -207,8 +337,8 @@
       },
       {
         "name": "ncnn/gpen_ncnn.ncnn.param",
-        "bytes": 35497,
-        "sha256": "cedf0ae0209cd572a327be16fee7a1e92fd66e6ac4451a08177759e0f1b383a8"
+        "bytes": 35590,
+        "sha256": "ebf2e655680053590f700320095e0a305329acae87116906a5f4e6c3d588bf27"
       },
       {
         "name": "ncnn/gpen_ncnn.ncnn.bin",
@@ -216,6 +346,6 @@
         "sha256": "f79a16f4700ba0763be1927f4c203178c1a972fe6b38dfc74ff20764893bde03"
       }
     ],
-    "bytes": 604114036
+    "bytes": 604114129
   }
 }

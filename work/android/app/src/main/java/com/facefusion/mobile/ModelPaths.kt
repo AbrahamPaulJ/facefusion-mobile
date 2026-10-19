@@ -275,7 +275,7 @@ object ModelPaths {
     )
 
     /** Every QNN arch tier the app knows how to name. Not what this chip can LOAD. */
-    val QNN_TIERS = listOf("v81", "v79", "v73", "v68")
+    val QNN_TIERS = listOf("v81s97", "v81", "v79", "v73", "v68")
 
     /**
      * Which model sets have files on this device, best-known first.

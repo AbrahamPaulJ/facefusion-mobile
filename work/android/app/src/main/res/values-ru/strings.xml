@@ -243,6 +243,7 @@
     <string name="tier_v73">8 Gen 2 (v73), 8 Gen 3 (v75) и чипы v79, кроме SM8750</string>
     <string name="tier_v79">Snapdragon 8 Elite (SM8750)</string>
     <string name="tier_v81">Snapdragon 8 Elite Gen 5 (v81) и новее</string>
+    <string name="tier_v81s97">Snapdragon 8 Gen 5 (SM8845)</string>
 
     <string name="notif_channel_name">Загрузка моделей</string>
     <string name="notif_channel_desc">Ход загрузки моделей NPU</string>

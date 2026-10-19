@@ -672,7 +672,7 @@ fun SettingsScreen(
                             fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
                             color = if (active) MaterialTheme.colorScheme.onSurface
                             else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.width(46.dp),
+                            modifier = Modifier.width(60.dp),   // "v81s97", monospace
                         )
                         Text(
                             chips,
@@ -875,4 +875,5 @@ private val TIERS = listOf(
     "v73" to R.string.tier_v73,
     "v79" to R.string.tier_v79,
     "v81" to R.string.tier_v81,
+    "v81s97" to R.string.tier_v81s97,
 )

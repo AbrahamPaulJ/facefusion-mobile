@@ -41,7 +41,11 @@ FF=${FF:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
 #             ⚠ vtcm_mb 8 is the CONSERVATIVE value carried over from v73/v79, not a
 #             measurement: no v81 part has been on the bench.  If one reports more VTCM,
 #             raising this is free performance and needs re-emitting nothing else.
-TIERS="v68:2 v69:8 v73:8 v79:8 v81:8"
+#   v81s97/8 -- 8 Gen 5 (SM8845, soc_model 97).  dsp_arch v81 PINNED to 97: the generator
+#             schedules 97 as a different HTP from the SM8850 that an unpinned v81 build
+#             targets (hyperswap spill 72.6 MB vs 31.5), and the unpinned set loads on a 97
+#             and dies at its first execute (issue #16).
+TIERS="v68:2 v69:8 v73:8 v79:8 v81:8 v81s97:8"
 
 emit() {
   local name=$1 arch=$2 vtcm=$3
@@ -76,11 +80,15 @@ emit() {
 
   local cfg=$FF/work/qnn/htp_config_${name}_${arch}.json
   local be=$FF/work/qnn/htp_backend_${name}_${arch}.json
-  local soc=""
-  [ "$arch" = "v79" ] && soc='"soc_model": 69,'
+  # A tier is not always a bare arch: v81s97 is dsp_arch v81 pinned to one SoC.
+  local dsp=$arch soc=""
+  case "$arch" in
+    v79)    soc='"soc_model": 69,' ;;
+    v81s97) dsp=v81; soc='"soc_model": 97,' ;;
+  esac
   cat > "$cfg" <<EOF
 { "graphs": [ { "vtcm_mb": $vtcm, "graph_names": ["$graph"], "O": 3.0 } ],
-  "devices": [ { "dsp_arch": "$arch", $soc
+  "devices": [ { "dsp_arch": "$dsp", $soc
                  "cores": [ { "perf_profile": "burst", "rpc_control_latency": 100 } ] } ] }
 EOF
   cat > "$be" <<EOF

@@ -240,6 +240,7 @@
     <string name="tier_v73">8 Gen 2 (v73)、8 Gen 3 (v75)，以及 SM8750 以外的 v79 晶片</string>
     <string name="tier_v79">Snapdragon 8 Elite (SM8750)</string>
     <string name="tier_v81">Snapdragon 8 Elite Gen 5 (v81) 及更新</string>
+    <string name="tier_v81s97">Snapdragon 8 Gen 5 (SM8845)</string>
 
     <string name="notif_channel_name">模型下載</string>
     <string name="notif_channel_desc">下載 NPU 模型時的進度</string>
