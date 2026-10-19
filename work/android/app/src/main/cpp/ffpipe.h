@@ -349,6 +349,42 @@ class Pipeline {
   bool hasReferenceFace() const;
 
   /**
+   * The faces that get the lip sync: one tapped identity per person.
+   *
+   * Same identity mechanism as setReferenceFaceAt, but read ONLY by syncLip and
+   * kept as a LIST: tapping faces adds them (tapping one again removes it).
+   * Empty = every face is synced (today's behaviour). Each stored identity dubs
+   * only its best-matching face in the frame (within Config::referenceDistance),
+   * so two similar faces never both move for one tap, and several taps never
+   * dub the same face twice.
+   * Kept off Config for the same reason as the swap reference.
+   *
+   * [outBox] receives the tapped face's box; [outIndex] its new index in the
+   * list, or -1 to size. Always appends (up to a cap): the caller decides
+   * add-vs-remove by tap position, so two similar faces stay separately
+   * listable. Returns false when no detected face contains that point.
+   */
+  bool addLipReferenceFaceAt(const ffcv::Image& frame, float x, float y,
+                             float* outBox, int* outIndex);
+  /** Drop the [index]-th lips identity. False when out of range. */
+  bool removeLipReferenceAt(int index);
+  /** How many lips identities are listed. */
+  int lipReferenceCount() const;
+  /** The [index]-th lips box into [outBox]. False when out of range. */
+  bool lipReferenceBox(int index, float* outBox) const;
+  /** The [index]-th lips identity into [out] (512 floats). False when out of range. */
+  bool lipReferenceEmbedding(int index, float* out) const;
+  /**
+   * Append a lips identity directly, from an embedding already chosen.
+   *
+   * The JNI layer keeps the list and re-applies it after every init, the same
+   * way `skipVariants` is pushed rather than passed.
+   */
+  void addLipReferenceEmbedding(const float* e);
+  void clearLipReferenceFace();
+  bool hasLipReferenceFace() const;
+
+  /**
    * Take the clip's audio once, and hold one 80x16 mel window per video frame.
    *
    * `pcm` is interleaved as the decoder produced it; the resample to 16 kHz, the mix to
@@ -392,6 +428,10 @@ class Pipeline {
    * arcface_128 crop would run a numerically perfect graph on the wrong pixels.
    *
    * Runs after the swap, as its own pass, exactly as upstream orders its processors.
+   *
+   * Syncs the same faces the swapper processes (Keep face, largest-only and
+   * reference are honoured), except when lips identities were tapped -- each
+   * then dubs only its best-matching face.
    */
   bool syncLip(ffcv::Image& frame, const std::vector<Face>& faces, const float* melWindow);
 

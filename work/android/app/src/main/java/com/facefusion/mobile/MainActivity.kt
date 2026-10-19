@@ -23,6 +23,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.math.hypot
@@ -260,6 +262,15 @@ class MainActivity : ComponentActivity() {
     private var faceBoxes by mutableStateOf<FloatArray?>(null)
 
     /**
+     * Bumps to force a fresh face detection pass. Entering lips pick mode must
+     * see CURRENT boxes: flips of [showFaceBoxes] relaunch the detector only
+     * false->true, so with an already-visible overlay the tap targets would
+     * otherwise stay whatever they were (stale, or nothing yet) with no new
+     * pass to fix them.
+     */
+    private var faceDetectNonce by mutableStateOf(0)
+
+    /**
      * The frame [faceBoxes] were computed FROM, by identity.
      *
      * ⚠ Without this the boxes outlive their frame. A finished run releases the pipeline, so
@@ -271,13 +282,29 @@ class MainActivity : ComponentActivity() {
     private var faceBoxFrame: Bitmap? = null
 
     /**
-     * The face chosen to swap, as its box -- upstream's `face_selector_mode = reference`.
+     * The lips boxes and identities, in list order (parallel lists).
      *
-     * The IDENTITY lives natively (see `Pipeline::setReferenceFaceAt`); this is only what
-     * to draw. Kept as a box rather than an index because the boxes are recomputed on every
-     * new frame and an index would silently come to mean a different face.
+     * Kept in Kotlin because pressing Swap builds a FRESH pipeline, exactly like
+     * [swapPersonIdentity]: [restoreLipReference] hands them back, so the export
+     * never depends on JNI-global timing. Empty = every face is synced.
      */
-    private var referenceBox by mutableStateOf<FloatArray?>(null)
+    private var lipBoxes by mutableStateOf<List<FloatArray>>(emptyList())
+    private var lipIdentities by mutableStateOf<List<FloatArray>>(emptyList())
+
+    /**
+     * Serialises every lips-list mutation (tap add/remove, target-change
+     * clear) and the export restore.
+     *
+     * Taps resolve on background threads while target changes and export
+     * restores run elsewhere; without this two rapid taps (or a tap racing an
+     * export) interleave add/fetch/remove across the Kotlin lists, the native
+     * list and the JNI mirror, and indices silently stop meaning the same face
+     * everywhere -- the "can't deselect / only one synced" shape of bug.
+     */
+    private val lipPickMutex = Mutex()
+
+    /** Lips pick mode: taps choose the lip-sync target. */
+    private var lipPickMode by mutableStateOf(false)
 
     /** A queue row whose render would be lost; see [removeFromBatch]. */
     private var confirmBatchDelete by mutableStateOf<Int?>(null)
@@ -970,11 +997,8 @@ class MainActivity : ComponentActivity() {
         swapBrushKeepOriginal = false
         NativePipe.setFaceAssignEnabled(swapAssignMode)
         if (swapAssignMode) {
-            // ⚠ The two target selectors are MUTUALLY EXCLUSIVE, and the reference wins
-            // inside swapAll. Leaving one set would quietly reduce "assign per person" to
-            // "assign the one person I picked earlier" -- the mode running on a single
-            // face, with nothing on screen to say why.
-            dropReferenceFace()
+            // Keep the native swap selector clean: a stale reference would win
+            // inside swapAll and silently cut assign mode down to one face.
             NativePipe.clearReferenceFace()
             // The row is a row of DETECTED people, so the boxes have to exist first.
             showFaceBoxes = true
@@ -1012,6 +1036,31 @@ class MainActivity : ComponentActivity() {
             else appendLog("could not restore the choice for person ${person + 1}")
         }
         return n
+    }
+
+    /**
+     * The lips identities onto the pipeline that is loaded RIGHT NOW, exactly.
+     *
+     * Called after every init the app owns (preview warm, export, batch): the
+     * pipeline ends up holding exactly [lipIdentities], in order -- replacing
+     * whatever an init re-applied, so Kotlin state and native state cannot
+     * drift apart (rotation, concurrent re-warm, restores). Returns how many
+     * landed; zero means the run syncs every face.
+     */
+    private suspend fun pushLipSelection(): Int {
+        lipPickMutex.withLock {
+            if (lipIdentities.isEmpty()) {
+                NativePipe.setLipReferences(FloatArray(0), 0)
+                return 0
+            }
+            val flat = FloatArray(lipIdentities.size * 512)
+            lipIdentities.forEachIndexed { i, e -> e.copyInto(flat, i * 512) }
+            if (!NativePipe.setLipReferences(flat, lipIdentities.size)) {
+                appendLog("could not push the lips selection; export will sync all faces")
+                return 0
+            }
+            return lipIdentities.size
+        }
     }
 
     private val pickSource = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -1630,7 +1679,7 @@ class MainActivity : ComponentActivity() {
                 // it is exactly the question the user has when a second face is on screen.
                 // One yoloface pass, ~2 ms, and no identity work at all.
                 LaunchedEffect(originalFrame, showFaceBoxes, swapAssignMode, previewWarm,
-                               busy, targetVersion) {
+                               busy, targetVersion, faceDetectNonce) {
                     val frame = originalFrame
                     // The boxes belong to ONE frame. The moment the frame changes they are
                     // wrong, and being wrong on screen is worse than being absent -- so they
@@ -1753,7 +1802,7 @@ class MainActivity : ComponentActivity() {
                                     busy = previewBusy,
                                     note = previewNote,
                                     faceBoxes = if (showFaceBoxes) faceBoxes else null,
-                                    referenceBox = if (showFaceBoxes) referenceBox else null,
+                                    lipReferenceBoxes = if (showFaceBoxes) lipBoxes else emptyList(),
                                 ),
                                 run = RunUi(busy, preparing, progress, framesDone,
                                             framesTotal, elapsedS),
@@ -1773,14 +1822,12 @@ class MainActivity : ComponentActivity() {
                                     confirmModel = label to model
                                 },
                                 showFaceBoxes = showFaceBoxes,
-                                onToggleFaceBoxes = {
-                                    showFaceBoxes = !showFaceBoxes
-                                    // Drop the old answer with the switch. Keeping it would
-                                    // redraw the PREVIOUS frame's boxes over the current one
-                                    // for as long as detection takes.
-                                    faceBoxes = null
+                                lipPickMode = lipPickMode,
+                                onToggleLipPickMode = ::toggleLipPickMode,
+                                onPickLipFace = ::pickLipReferenceFace,
+                                onPickLipMiss = {
+                                    status = getString(R.string.status_lips_wait_boxes)
                                 },
-                                onPickFace = ::pickReferenceFace,
                                 openCard = openCard,
                                 onToggleCard = { k -> openCard = if (openCard == k) "" else k },
                                 // A still needs no run, so it has no output FILE -- what
@@ -2851,6 +2898,10 @@ class MainActivity : ComponentActivity() {
                     // pipeline and do not survive one being built, so a mode that is on
                     // would come back empty and silently swap everybody.
                     restoreSwapAssignments()
+                    // Same for the lips list: Kotlin state is the truth, pushed
+                    // exactly (rotation, concurrent re-warm and restores cannot
+                    // drift it from what the green boxes show).
+                    pushLipSelection()
                 }
 
                 // Every previewed frame, not just the source. The source is checked once,
@@ -2925,17 +2976,21 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Forget the reference face.
-     *
-     * Called wherever the TARGET changes. An identity picked out of a different video is
-     * not a selection any more -- it is an invisible filter that would silently swap
-     * nobody, and the user has no way to see that it is still set.
+     * Forget the lips target. Called wherever the TARGET changes: an identity
+     * from another clip is invisible.
      */
-    private fun dropReferenceFace() {
-        if (referenceBox == null && !NativePipe.hasReferenceFace()) return
-        NativePipe.clearReferenceFace()
-        referenceBox = null
-        faceBoxes = null
+    private fun dropLipReferenceFace() {
+        // Async under the pick mutex: a tap may be resolving right now, and
+        // clearing around it would shift every index it is about to use.
+        lifecycleScope.launch {
+            lipPickMutex.withLock {
+                if (lipBoxes.isEmpty() && lipIdentities.isEmpty() &&
+                    !NativePipe.hasLipReferenceFace()) return@withLock
+                NativePipe.clearLipReferenceFace()
+                lipBoxes = emptyList()
+                lipIdentities = emptyList()
+            }
+        }
     }
 
     /**
@@ -2956,7 +3011,8 @@ class MainActivity : ComponentActivity() {
 
     private fun loadTarget(uri: Uri) {
         resetSwapPersonState()
-        dropReferenceFace()
+        dropLipReferenceFace()
+        lipPickMode = false
         if (contentResolver.getType(uri)?.startsWith("image/") == true) {
             loadTargetImage(uri)
             return
@@ -3051,7 +3107,8 @@ class MainActivity : ComponentActivity() {
      */
     private fun loadTargetImage(uri: Uri) {
         resetSwapPersonState()
-        dropReferenceFace()
+        dropLipReferenceFace()
+        lipPickMode = false
         preparing = true
         targetName = displayName(uri)
         lifecycleScope.launch {
@@ -3427,7 +3484,8 @@ class MainActivity : ComponentActivity() {
 
     private fun clearTarget() {
         resetSwapPersonState()
-        dropReferenceFace()
+        dropLipReferenceFace()
+        lipPickMode = false
         // The queue is a list of TARGETS and item 0 was this one. Keeping the rest after
         // the visible clip goes away would leave a run that starts on a clip nothing on
         // screen mentions.
@@ -3540,71 +3598,129 @@ class MainActivity : ComponentActivity() {
      * no new lifecycle, which is the point while roadmap 11 is still open.
      */
     /**
-     * Tap a face to swap only that one; tap it again to go back to all of them.
+     * Tap faces to lip-sync them; tap one again to take it out.
      *
-     * Runs on the ORIGINAL frame -- the same image the boxes were drawn from, so the
-     * coordinates the pane hands back mean what the detector meant by them. The identity is
-     * stored natively and outlives every options change; only the box is state here.
-     *
-     * ⚠ The reference is cleared whenever the TARGET changes, in clearTarget/loadTarget:
-     * an identity picked out of a different video is not a selection, it is a filter the
-     * user cannot see and would have to guess at.
+     * Add-vs-remove is decided HERE by tap position: a tap inside an existing
+     * green marker removes that entry, anywhere else on a face adds a new one.
+     * Never by embedding guess -- two similar faces must both be listable.
+     * Empty list = every face is synced. Works whether or not Assign per person
+     * is on (assign drives the swapper, this drives the lip syncer).
      */
-    private fun pickReferenceFace(x: Float, y: Float) {
-        // ⚠ Assign per person owns the target-face selector while it is on. A reference
-        // face wins inside swapAll, so letting this gesture through would silently cut
-        // the mode down to the single face it had picked.
-        if (swapAssignMode) return
+    private fun pickLipReferenceFace(x: Float, y: Float) {
         val frame = originalFrame ?: return
         if (busy) return
-        // ⚠ THIS USED TO RETURN SILENTLY, and that is the whole of the bug reported as
-        // "after output is made i cant choose different face box unless i load the target
-        // again". A finished run RELEASES the pipeline and only re-warms through
-        // refreshSwapped(force = true); a tap landing in that window found previewWarm
-        // false, did nothing and said nothing -- so the feature looked dead, and reloading
-        // the target was the only thing that visibly fixed it, because reloading is what
-        // warms the pipeline again.
-        //
-        // A tap needs a live pipeline: the embedding under the finger cannot be resolved
-        // without one. So instead of failing quietly it says what is happening and starts
-        // the warm, and the next tap lands.
         if (!previewWarm) {
             status = getString(R.string.status_reference_warming)
             refreshSwapped(force = true)
             return
         }
-        val current = referenceBox
-        // A second tap on the CHOSEN face is how it is cleared. No new control, and it is
-        // the same gesture that set it -- which is what makes it discoverable at all.
-        if (current != null && current.size >= 4 &&
-            x >= current[0] && x <= current[2] && y >= current[1] && y <= current[3]) {
-            NativePipe.clearReferenceFace()
-            referenceBox = null
-            status = getString(R.string.status_reference_cleared)
-            previewOptionsChanged()
-            return
-        }
         lifecycleScope.launch {
-            val box = withContext(Dispatchers.Default) {
-                runCatching {
-                    val soft = frame.asArgb8888()
-                        ?: return@runCatching FloatArray(0)
-                    val px = IntArray(soft.width * soft.height)
-                    soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
-                    NativePipe.setReferenceFaceAt(
-                        NativePipe.argbToBgr(px, soft.width, soft.height),
-                        soft.width, soft.height, x, y)
-                }.getOrDefault(FloatArray(0))
+            lipPickMutex.withLock {
+                // Re-read the lists HERE, inside the lock: an earlier tap may
+                // still be resolving, and deciding on a stale snapshot removes
+                // or duplicates the wrong entry.
+                val marked = lipBoxes.indexOfFirst { b ->
+                    b.size >= 4 && x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]
+                }
+                if (marked >= 0) {
+                    // Tap inside a green marker = take that entry out.
+                    if (NativePipe.removeLipReferenceAt(marked)) {
+                        lipBoxes = lipBoxes.filterIndexed { i, _ -> i != marked }
+                        lipIdentities = lipIdentities.filterIndexed { i, _ -> i != marked }
+                    }
+                    if (lipBoxes.isEmpty()) {
+                        lipPickMode = false
+                        status = getString(R.string.status_lips_cleared)
+                    } else status = lipsCountStatus()
+                    previewOptionsChanged()
+                    return@withLock
+                }
+                // FIVE floats: the box plus the new index in the lips list.
+                val prevCount = lipBoxes.size
+                val got = withContext(Dispatchers.Default) {
+                    runCatching {
+                        val soft = frame.asArgb8888()
+                            ?: return@runCatching FloatArray(0)
+                        val px = IntArray(soft.width * soft.height)
+                        soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
+                        NativePipe.addLipReferenceFaceAt(
+                            NativePipe.argbToBgr(px, soft.width, soft.height),
+                            soft.width, soft.height, x, y)
+                    }.getOrDefault(FloatArray(0))
+                }
+                if (got.size < 5) {
+                    status = getString(R.string.status_lips_missed)
+                    return@withLock
+                }
+                val box = got.copyOf(4)
+                val idx = got[4].toInt()
+                if (idx < 0 || idx > prevCount) {
+                    status = getString(R.string.status_lips_missed)
+                    return@withLock
+                }
+                lipBoxes = lipBoxes + box
+                // Keep the identity in Kotlin too: pressing Swap builds a fresh
+                // pipeline, and restoreLipReference hands them back (same pattern
+                // as the per-person assignments).
+                val emb = runCatching { NativePipe.lipReferenceEmbedding(idx) }
+                    .getOrNull()?.takeIf { it.size == 512 }
+                if (emb == null) {
+                    // Roll back the box: an identity that cannot be kept cannot be
+                    // restored at export either.
+                    runCatching { NativePipe.removeLipReferenceAt(idx) }
+                    lipBoxes = lipBoxes.dropLast(1)
+                    appendLog("lips target picked but its identity was lost")
+                    status = getString(R.string.status_lips_missed)
+                } else {
+                    // Same person tapped again elsewhere (they moved since the
+                    // marker was drawn)? Then refresh the old marker instead of
+                    // listing them twice. Strict cosine bar (0.05, not the loose
+                    // 0.30 match threshold): lookalikes must stay separately
+                    // listable, while two taps of one face are near-identical.
+                    val dup = lipIdentities.indexOfFirst { cosineDist(it, emb) < 0.05f }
+                    if (dup >= 0) {
+                        runCatching { NativePipe.removeLipReferenceAt(idx) }
+                        lipBoxes = lipBoxes.dropLast(1).mapIndexed { i, b ->
+                            if (i == dup) box else b
+                        }
+                    } else lipIdentities = lipIdentities + emb
+                    // Keep the mode on so further taps add more faces.
+                    status = lipsCountStatus()
+                }
+                previewOptionsChanged()
             }
-            if (box.size < 4) {
-                status = getString(R.string.status_reference_missed)
-                return@launch
-            }
-            referenceBox = box
-            status = getString(R.string.status_reference_set)
-            // REDRAW, so the swapped pane immediately shows the selection taking effect.
-            // Not a reload: the reference is not a model and not even a Config field.
-            previewOptionsChanged()
+        }
+    }
+
+    /** (1 - cosine) / 2 over L2-normalised 512-float identities, as natively. */
+    private fun cosineDist(a: FloatArray, b: FloatArray): Float {
+        var dot = 0.0
+        for (i in 0 until 512) dot += a[i] * b[i]
+        return ((1.0 - dot) * 0.5).toFloat()
+    }
+
+    /** "Lip sync on N face(s)", for the status line after each lips tap. */
+    private fun lipsCountStatus(): String {
+        val n = lipBoxes.size
+        return if (n <= 1) getString(R.string.status_lips_set)
+        else getString(R.string.status_lips_set_many, n)
+    }
+
+    private fun toggleLipPickMode() {
+        lipPickMode = !lipPickMode
+        if (lipPickMode) {
+            // Just ensure the overlay is on. The boxes are NOT cleared: they
+            // describe the current frame and stay valid, so taps work at once
+            // when the overlay was already on. When it was off, flipping it
+            // relaunches detection by itself (same as the Face button).
+            // No pipeline refresh: this is a pure UI mode toggle.
+            showFaceBoxes = true
+            // Plus a guaranteed fresh pass either way: same-frame taps resolve
+            // against boxes detected for THIS frame, not leftovers.
+            faceDetectNonce++
+            status = getString(R.string.swap_lips_pick_on)
+        } else {
+            status = getString(R.string.swap_lips_pick_off)
         }
     }
 
@@ -4225,6 +4341,17 @@ class MainActivity : ComponentActivity() {
                     // user made against the PREVIEW is gone from it. Without this the mode
                     // would work perfectly on screen and do nothing in the file.
                     val restored = restoreSwapAssignments()
+                    // Same for the lips targets: N faces when set, all faces when not.
+                    // Logged so a run that syncs everyone says whether it had a choice.
+                    // TEMP DEBUG: also toasted, so the answer is on screen with no log
+                    // reading needed. Removed once the export-filter issue is fixed.
+                    val lipsN = pushLipSelection()
+                    val lipsMsg = "lips target: " +
+                        (if (lipsN > 0) "$lipsN face" + (if (lipsN > 1) "s" else "")
+                         else "all faces") +
+                        ", match %.2f".format(opts.referenceDistance)
+                    appendLog(lipsMsg)
+                    runOnUiThread { toast("DEBUG " + lipsMsg) }
                     appendLog("source ready (${prepared.slots[0].width}x" +
                               "${prepared.slots[0].height}, ${prepared.slots.size} source" +
                               (if (prepared.slots.size == 1) "" else "s") +
@@ -4424,7 +4551,10 @@ class MainActivity : ComponentActivity() {
                             NativePipe.argbToBgr(px, soft.width, soft.height),
                             soft.width, soft.height))
                         error("source: " + NativePipe.lastError())
-                    appendLog("source ready for " + batchQueue.size + " clips")
+                    val lipsN = pushLipSelection()
+                    appendLog("source ready for " + batchQueue.size + " clips, lips target: " +
+                        (if (lipsN > 0) "$lipsN face" + (if (lipsN > 1) "s" else "")
+                         else "all faces"))
                 }
             }
             if (setup.isFailure) {

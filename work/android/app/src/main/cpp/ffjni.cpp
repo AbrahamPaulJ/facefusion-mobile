@@ -9,6 +9,8 @@
 
 #include <jni.h>
 #include <android/bitmap.h>
+// TEMP DEBUG (lips target diagnosis).
+#include <android/log.h>
 
 #include <cmath>
 #include <cstdio>    // snprintf, for stageMillis
@@ -42,6 +44,12 @@ std::vector<std::string> g_skipTiers;
  * 512 floats, already L2-normalised. Empty means no reference.
  */
 std::vector<float> g_refEmbedding;
+/**
+ * The lips targets' embeddings, parallel to g_refEmbedding.
+ * Empty = sync every face. Survives init the same way, re-applied in order.
+ * Each entry is 512 floats, already L2-normalised.
+ */
+std::vector<std::vector<float>> g_lipRefEmbeddings;
 
 /**
  * Live's per-person assignment: a TAP from the UI is a REQUEST, consumed by the next
@@ -173,6 +181,13 @@ Java_com_facefusion_mobile_NativePipe_initEx(JNIEnv* env, jclass, jstring jLib, 
   // See g_refEmbedding: without this the selection survives only until the next run.
   if (g_refEmbedding.size() == 512)
     g_pipe->setReferenceEmbedding(g_refEmbedding.data());
+  // Same for the lips targets: taps in the preview must survive the export run.
+  // TEMP DEBUG: log whether there was anything to re-apply.
+  __android_log_print(ANDROID_LOG_INFO, "fflips", "initEx: lipRefs=%d",
+                      (int)g_lipRefEmbeddings.size());
+  for (const auto& e : g_lipRefEmbeddings) {
+    if (e.size() == 512) g_pipe->addLipReferenceEmbedding(e.data());
+  }
   return JNI_TRUE;
 }
 
@@ -484,6 +499,126 @@ Java_com_facefusion_mobile_NativePipe_hasReferenceFace(JNIEnv*, jclass) {
   // change releases it), and answering "no" then would drop a selection that is still set.
   return (!g_refEmbedding.empty() || (g_pipe && g_pipe->hasReferenceFace()))
              ? JNI_TRUE : JNI_FALSE;
+}
+
+// Lips targets: who gets the lip sync, as a list. Tapping faces adds them,
+// tapping one again removes it. Empty = sync every face.
+JNIEXPORT jfloatArray JNICALL
+Java_com_facefusion_mobile_NativePipe_addLipReferenceFaceAt(JNIEnv* env, jclass,
+                                                            jbyteArray jBgr, jint w, jint h,
+                                                            jfloat x, jfloat y) {
+  if (!g_pipe) { g_err = "pipeline not initialised"; return env->NewFloatArray(0); }
+  ffcv::Image img(w, h, 3);
+  if ((size_t)env->GetArrayLength(jBgr) != img.data.size()) {
+    g_err = "addLipReferenceFaceAt: frame is not w*h*3 bytes";
+    return env->NewFloatArray(0);
+  }
+  env->GetByteArrayRegion(jBgr, 0, (jsize)img.data.size(), (jbyte*)img.data.data());
+  float box[4] = {0, 0, 0, 0};
+  int index = -1;
+  if (!g_pipe->addLipReferenceFaceAt(img, x, y, box, &index)) {
+    g_err = g_pipe->error();
+    return env->NewFloatArray(0);
+  }
+  // Mirror the native list so init can re-apply it in order. Rebuilt whole
+  // rather than patched: tap, remove and restore interleave across pipelines,
+  // and an index patched against the wrong generation would silently shift
+  // every later removal.
+  g_lipRefEmbeddings.clear();
+  {
+    const int n = g_pipe->lipReferenceCount();
+    float embedding[512] = {0};
+    for (int i = 0; i < n; ++i) {
+      if (g_pipe->lipReferenceEmbedding(i, embedding))
+        g_lipRefEmbeddings.emplace_back(embedding, embedding + 512);
+    }
+  }
+  // FIVE floats: the box plus the index in the list. A same-person tap returns
+  // the existing index, so the caller toggles it off instead of doubling.
+  jfloatArray out = env->NewFloatArray(5);
+  if (out) {
+    float five[5] = {box[0], box[1], box[2], box[3], (float)index};
+    env->SetFloatArrayRegion(out, 0, 5, five);
+  }
+  return out;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_facefusion_mobile_NativePipe_removeLipReferenceAt(JNIEnv*, jclass, jint index) {
+  if (!g_pipe) { g_err = "pipeline not initialised"; return JNI_FALSE; }
+  if (!g_pipe->removeLipReferenceAt((int)index)) {
+    g_err = g_pipe->error();
+    return JNI_FALSE;
+  }
+  // Rebuilt whole, as in add: index generations must never drift apart.
+  g_lipRefEmbeddings.clear();
+  {
+    const int n = g_pipe->lipReferenceCount();
+    float embedding[512] = {0};
+    for (int i = 0; i < n; ++i) {
+      if (g_pipe->lipReferenceEmbedding(i, embedding))
+        g_lipRefEmbeddings.emplace_back(embedding, embedding + 512);
+    }
+  }
+  return JNI_TRUE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_facefusion_mobile_NativePipe_clearLipReferenceFace(JNIEnv*, jclass) {
+  g_lipRefEmbeddings.clear();
+  if (g_pipe) g_pipe->clearLipReferenceFace();
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_facefusion_mobile_NativePipe_hasLipReferenceFace(JNIEnv*, jclass) {
+  return (!g_lipRefEmbeddings.empty() || (g_pipe && g_pipe->hasLipReferenceFace()))
+             ? JNI_TRUE : JNI_FALSE;
+}
+
+// The lips identity for Kotlin to keep across inits -- the same pattern as
+// restoreFaceAssignment: the caller holds 512 floats per person and hands them
+// back after every fresh init, so the export does not depend on JNI-global timing.
+JNIEXPORT jfloatArray JNICALL
+Java_com_facefusion_mobile_NativePipe_lipReferenceEmbedding(JNIEnv* env, jclass,
+                                                            jint index) {
+  if (!g_pipe) { g_err = "pipeline not initialised"; return env->NewFloatArray(0); }
+  float embedding[512] = {0};
+  if (!g_pipe->lipReferenceEmbedding((int)index, embedding)) {
+    g_err = g_pipe->error();
+    return env->NewFloatArray(0);
+  }
+  jfloatArray out = env->NewFloatArray(512);
+  if (out) env->SetFloatArrayRegion(out, 0, 512, embedding);
+  return out;
+}
+
+/**
+ * Replace the whole lips list from Kotlin-held identities, exactly.
+ *
+ * Called after every init the app owns (preview warm, export, batch): the
+ * caller is the truth and the pipeline ends up holding exactly its entries in
+ * order -- no drift from re-applies, no doubles from restores. The JNI-global
+ * mirror is deliberately untouched (tap-time mirroring owns it).
+ */
+JNIEXPORT jboolean JNICALL
+Java_com_facefusion_mobile_NativePipe_setLipReferences(JNIEnv* env, jclass,
+                                                       jfloatArray jFlat, jint n) {
+  if (!g_pipe) { g_err = "pipeline not initialised"; return JNI_FALSE; }
+  if (n < 0) { g_err = "setLipReferences: negative count"; return JNI_FALSE; }
+  if (n == 0) {
+    g_pipe->clearLipReferenceFace();
+    return JNI_TRUE;
+  }
+  if (!jFlat || env->GetArrayLength(jFlat) != n * 512) {
+    g_err = "setLipReferences: buffer is not n*512 floats";
+    return JNI_FALSE;
+  }
+  std::vector<float> flat((size_t)n * 512);
+  env->GetFloatArrayRegion(jFlat, 0, n * 512, (jfloat*)flat.data());
+  g_pipe->clearLipReferenceFace();
+  for (int i = 0; i < n; ++i)
+    g_pipe->addLipReferenceEmbedding(flat.data() + (size_t)i * 512);
+  return JNI_TRUE;
 }
 
 JNIEXPORT jboolean JNICALL

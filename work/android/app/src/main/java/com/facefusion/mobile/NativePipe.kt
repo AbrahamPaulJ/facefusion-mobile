@@ -267,6 +267,42 @@ object NativePipe {
     /** Whether a reference face is set. Survives an options change; init clears it. */
     @JvmStatic external fun hasReferenceFace(): Boolean
 
+    /**
+     * Remember the face at (x, y) as one that gets the LIP SYNC. Tapping faces
+     * adds them; tapping one again (same person) reports its existing index so
+     * the caller removes it instead of doubling.
+     *
+     * Returns FIVE floats -- x0, y0, x1, y1 and the index in the lips list --
+     * or an EMPTY array when the tap hit no face. Unset (empty list) = every
+     * face is synced.
+     */
+    @JvmStatic external fun addLipReferenceFaceAt(bgr: ByteArray, w: Int, h: Int,
+                                                  x: Float, y: Float): FloatArray
+
+    /** Drop the [index]-th lips identity. */
+    @JvmStatic external fun removeLipReferenceAt(index: Int): Boolean
+
+    /** Forget every lips identity: back to syncing every face. */
+    @JvmStatic external fun clearLipReferenceFace()
+
+    /** Whether any lips identity is set. */
+    @JvmStatic external fun hasLipReferenceFace(): Boolean
+
+    /**
+     * The [index]-th lips identity (512 floats) for the caller to keep across
+     * inits -- the same pattern as [restoreFaceAssignment]. EMPTY when out of
+     * range.
+     */
+    @JvmStatic external fun lipReferenceEmbedding(index: Int): FloatArray
+
+    /**
+     * Replace the whole lips list from [flat] (n identities of 512 floats).
+     *
+     * Exact-sync after every init the app owns: the pipeline ends up holding
+     * exactly these, in order. n = 0 clears back to syncing every face.
+     */
+    @JvmStatic external fun setLipReferences(flat: FloatArray, n: Int): Boolean
+
     /** True when this tier had no fp32 gate context; see [ContentGate.QUANTISED_BIAS]. */
     @JvmStatic external fun contentGateIsQuantised(): Boolean
 

@@ -225,10 +225,13 @@ fun PreviewPane(
      */
     faceBoxes: FloatArray? = null,
     /**
-     * The box of the face currently chosen as the reference, drawn differently from the
-     * rest. Four floats, same coordinates as [faceBoxes].
+     * The boxes of the faces that get the lip sync, drawn in green and twice
+     * as thick. Chosen with the lips button on the Swap screen; who gets
+     * swapped is Assign per person's job. Drawn straight from this list, never
+     * matched against [faceBoxes], so a selection stays visible even when the
+     * detector redraws slightly shifted boxes.
      */
-    referenceBox: FloatArray? = null,
+    lipReferenceBoxes: List<FloatArray> = emptyList(),
     /**
      * A tap landed inside one of [faceBoxes]; the arguments are the tap in the BITMAP's own
      * pixel coordinates.
@@ -238,6 +241,13 @@ fun PreviewPane(
      * swallowing misses would break the way every other pane on the screen behaves.
      */
     onPickFace: ((Float, Float) -> Unit)? = null,
+    /**
+     * Runs when a tap hits NO box while [onPickFace] is set -- the boxes are
+     * still being detected, or the tap landed between faces. Without this a
+     * missed tap dies silently and the picker looks broken. Takes precedence
+     * over [onClick] for that tap; null keeps the old fall-through.
+     */
+    onPickMiss: (() -> Unit)? = null,
     trailing: @Composable RowScope.() -> Unit = {},
 ) {
     // ONE container around the caption row AND the image, rather than a caption floating
@@ -333,7 +343,7 @@ fun PreviewPane(
                                     } while (ev.changes.any { it.pressed })
                                 }
                             }
-                            .pointerInput(zoom, onClick, onPickFace, faceBoxes) {
+                            .pointerInput(zoom, onClick, onPickFace, onPickMiss, faceBoxes) {
                                 detectTapGestures(
                                     // The only way back from a deep zoom, and the
                                     // conventional one.
@@ -373,7 +383,14 @@ fun PreviewPane(
                                                 }
                                             }
                                         }
-                                        if (!picked) onClick?.invoke()
+                                        // A miss with a picker armed says so instead of
+                                        // dying silently; otherwise the picker reads as
+                                        // broken while boxes are still detecting.
+                                        if (!picked) {
+                                            if (onPickFace != null && onPickMiss != null)
+                                                onPickMiss()
+                                            else onClick?.invoke()
+                                        }
                                     },
                                 )
                             }
@@ -400,7 +417,8 @@ fun PreviewPane(
                         ),
                     contentScale = ContentScale.Fit,
                 )
-                if (faceBoxes != null && faceBoxes.size >= 5) {
+                if ((faceBoxes != null && faceBoxes.size >= 5) ||
+                    lipReferenceBoxes.isNotEmpty()) {
                     // The SAME graphicsLayer as the Image above, so the outlines pan and
                     // zoom with what they are outlining rather than sliding off it.
                     Canvas(
@@ -428,25 +446,33 @@ fun PreviewPane(
                             // 2 dp at scale 1, thinned as the pane zooms in so the stroke
                             // stays the same width on screen instead of growing into a slab.
                             val w = 2.dp.toPx() / (zoom?.scale ?: 1f)
-                            for (i in 0 until faceBoxes.size / 5) {
-                                val b = i * 5
-                                // The CHOSEN face is drawn twice as thick and opaque; the
-                                // others are dimmed. A selector that picked the wrong
-                                // neighbour and one that picked nothing look identical
-                                // otherwise, and they need different reactions.
-                                val chosen = referenceBox != null &&
-                                    referenceBox.size >= 4 &&
-                                    kotlin.math.abs(referenceBox[0] - faceBoxes[b]) < 1f &&
-                                    kotlin.math.abs(referenceBox[1] - faceBoxes[b + 1]) < 1f
+                            // Red = detected faces to tap (only passed in lips pick
+                            // mode, so no permanent red noise the rest of the time).
+                            val boxes = faceBoxes
+                            if (boxes != null) {
+                                for (i in 0 until boxes.size / 5) {
+                                    val b = i * 5
+                                    drawRect(
+                                        color = FfRed,
+                                        topLeft = Offset(ox + boxes[b] * k,
+                                                         oy + boxes[b + 1] * k),
+                                        size = Size((boxes[b + 2] - boxes[b]) * k,
+                                                    (boxes[b + 3] - boxes[b + 1]) * k),
+                                        style = Stroke(width = w),
+                                    )
+                                }
+                            }
+                            // Green = the lips selection, drawn straight from the
+                            // tap-time boxes: always visible, one per chosen face.
+                            for (lip in lipReferenceBoxes) {
+                                if (lip.size < 4) continue
                                 drawRect(
-                                    color = if (chosen) FfRed
-                                            else FfRed.copy(alpha =
-                                                if (referenceBox != null) 0.35f else 1f),
-                                    topLeft = Offset(ox + faceBoxes[b] * k,
-                                                     oy + faceBoxes[b + 1] * k),
-                                    size = Size((faceBoxes[b + 2] - faceBoxes[b]) * k,
-                                                (faceBoxes[b + 3] - faceBoxes[b + 1]) * k),
-                                    style = Stroke(width = if (chosen) w * 2f else w),
+                                    color = Color(0xFF22C55E),
+                                    topLeft = Offset(ox + lip[0] * k,
+                                                     oy + lip[1] * k),
+                                    size = Size((lip[2] - lip[0]) * k,
+                                                (lip[3] - lip[1]) * k),
+                                    style = Stroke(width = w * 2f),
                                 )
                             }
                         }

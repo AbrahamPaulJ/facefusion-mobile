@@ -10,6 +10,9 @@
 
 #include "ffnn.h"
 
+// TEMP DEBUG (lips target diagnosis): removed once the export-filter issue is fixed.
+#include <android/log.h>
+
 // FFDEBUG=1 prints what each stage actually produced.  Cheap, and the alternative is
 // guessing at a tensor layout from the host side.
 #include <cstdio>
@@ -38,6 +41,9 @@ static const float kTrackMinScore = 0.85f;
 
 namespace ffpipe {
 namespace {
+
+// TEMP DEBUG (lips target diagnosis): frame budget for verbose syncLip logging.
+static int lipDbgFrames = 0;
 
 double nowMs() {
   using namespace std::chrono;
@@ -222,6 +228,12 @@ struct Pipeline::Impl {
   // what upstream's distance is defined over. Not in Config -- see setReferenceFaceAt.
   float refEmbeddingNorm[512]{};
   bool haveReference = false;
+  // The TARGET faces to lip-sync, picked independently with the lips button. Same
+  // representation as the swap reference; read only by syncLip. Empty = sync all.
+  // One entry per tapped person: tapping one again removes it.
+  struct LipRef { float embeddingNorm[512]{}; float box[4]{}; };
+  std::vector<LipRef> lipRefs;
+  static constexpr int kLipRefMax = 16;
 
   /**
    * A content check has RUN on this pipeline and passed -- roadmap 1a.
@@ -1585,6 +1597,84 @@ void Pipeline::clearReferenceFace() { if (p_) p_->haveReference = false; }
 
 bool Pipeline::hasReferenceFace() const { return p_ && p_->haveReference; }
 
+bool Pipeline::addLipReferenceFaceAt(const ffcv::Image& frame, float x, float y,
+                                      float* outBox, int* outIndex) {
+  err_.clear();
+  if (!p_) { err_ = "pipeline not initialised"; return false; }
+  // The FULL analyse: this needs the embedding, which boxesOnly deliberately does not
+  // compute. It is the one place the extra 3.55 ms/face is the whole point.
+  auto faces = analyse(frame);
+  const Face* hit = nullptr;
+  for (const auto& f : faces) {
+    if (x >= f.box[0] && x <= f.box[2] && y >= f.box[1] && y <= f.box[3]) {
+      // The SMALLEST box containing the point wins, as in setReferenceFaceAt.
+      if (!hit || (f.box[2] - f.box[0]) * (f.box[3] - f.box[1]) <
+                  (hit->box[2] - hit->box[0]) * (hit->box[3] - hit->box[1]))
+        hit = &f;
+    }
+  }
+  if (!hit) { err_ = "no face at that point"; return false; }
+  // Always appends: add-vs-remove is the caller's tap decision (hit inside an
+  // existing marker box = remove), never an embedding guess -- two similar
+  // faces must both be listable, and the export matches by identity anyway.
+  if ((int)p_->lipRefs.size() >= Impl::kLipRefMax) { err_ = "lips list is full"; return false; }
+  Impl::LipRef r{};
+  std::memcpy(r.embeddingNorm, hit->embeddingNorm, sizeof(r.embeddingNorm));
+  for (int k = 0; k < 4; ++k) r.box[k] = hit->box[k];
+  p_->lipRefs.push_back(r);
+  if (outBox) for (int k = 0; k < 4; ++k) outBox[k] = hit->box[k];
+  if (outIndex) *outIndex = (int)p_->lipRefs.size() - 1;
+  // TEMP DEBUG: confirm the tap stored an identity on this pipeline.
+  __android_log_print(ANDROID_LOG_INFO, "fflips",
+                      "lip tap added: idx=%d nFaces=%d box=%.0f,%.0f,%.0f,%.0f",
+                      (int)p_->lipRefs.size() - 1, (int)faces.size(),
+                      hit->box[0], hit->box[1], hit->box[2], hit->box[3]);
+  return true;
+}
+
+bool Pipeline::removeLipReferenceAt(int index) {
+  err_.clear();
+  if (!p_) { err_ = "pipeline not initialised"; return false; }
+  if (index < 0 || index >= (int)p_->lipRefs.size()) { err_ = "lips index out of range"; return false; }
+  p_->lipRefs.erase(p_->lipRefs.begin() + index);
+  return true;
+}
+
+int Pipeline::lipReferenceCount() const { return p_ ? (int)p_->lipRefs.size() : 0; }
+
+bool Pipeline::lipReferenceBox(int index, float* outBox) const {
+  if (!p_ || !outBox || index < 0 || index >= (int)p_->lipRefs.size()) return false;
+  for (int k = 0; k < 4; ++k) outBox[k] = p_->lipRefs[(size_t)index].box[k];
+  return true;
+}
+
+bool Pipeline::lipReferenceEmbedding(int index, float* out) const {
+  if (!p_ || !out || index < 0 || index >= (int)p_->lipRefs.size()) return false;
+  std::memcpy(out, p_->lipRefs[(size_t)index].embeddingNorm,
+              sizeof(p_->lipRefs[(size_t)index].embeddingNorm));
+  return true;
+}
+
+void Pipeline::addLipReferenceEmbedding(const float* e) {
+  if (!p_ || !e) return;
+  if ((int)p_->lipRefs.size() >= Impl::kLipRefMax) return;
+  // Appends unconditionally: same-person doubles are refused upstream (the tap
+  // flow refreshes the marker instead, under a strict 0.05 bar), and a loose
+  // threshold here would eat a second, similar face at restore time -- the
+  // "two picked, one synced" shape of bug.
+  Impl::LipRef r{};
+  std::memcpy(r.embeddingNorm, e, sizeof(r.embeddingNorm));
+  p_->lipRefs.push_back(r);
+  // TEMP DEBUG: confirm the export pipeline received a re-applied identity.
+  __android_log_print(ANDROID_LOG_INFO, "fflips", "lip embedding re-applied: n=%d",
+                      (int)p_->lipRefs.size());
+  lipDbgFrames = 0;
+}
+
+void Pipeline::clearLipReferenceFace() { if (p_) p_->lipRefs.clear(); }
+
+bool Pipeline::hasLipReferenceFace() const { return p_ && !p_->lipRefs.empty(); }
+
 void Pipeline::resetStats() {
   msDetect = msLandmark = msRecognise = msSwap = msGeom = msEnhance = msLipSync = 0;
   msLipCrop = msLipMask = msLipPrep = msLipPaste = 0;
@@ -1605,8 +1695,84 @@ bool Pipeline::syncLip(ffcv::Image& frame, const std::vector<Face>& faces,
   const int LS = 512;
   const bool ed = p_->n.lipIsEdtalk;
   const Config& cfg = p_->cfg;
+  // WHO gets the mouth redrawn: the same selection the swapper applies, so a
+  // person the swap left alone (Keep face, largest-only, reference) is left
+  // alone here too. Explicit lips taps win over all of it: each listed identity
+  // dubs only its BEST-matching face in the frame (within referenceDistance),
+  // so one tap moves one mouth even among similar faces, several taps move
+  // several -- and the same face is never dubbed twice. Unset = whoever
+  // swapAll processes. Default (no selection anywhere) is still every face.
+  const bool byLipReference = !p_->lipRefs.empty();
+  const bool byReference = p_->haveReference;
+  const Face* only = nullptr;
+  if (!byLipReference && !byReference && cfg.swapLargestOnly) {
+    float best = -1.f;
+    for (const Face& f : faces) {
+      float a = (f.box[2] - f.box[0]) * (f.box[3] - f.box[1]);
+      if (a > best) { best = a; only = &f; }
+    }
+  }
+  // TEMP DEBUG: first frames of each process show filter state + per-face decision.
+  // Reset on every re-applied embedding (i.e. every init), so the export run's
+  // first frames are always captured even after preview frames consumed the budget.
+  const bool lipDbg = (lipDbgFrames++ < 5);
+  if (lipDbg) {
+    __android_log_print(ANDROID_LOG_INFO, "fflips",
+                        "syncLip: nLip=%d thresh=%.3f nFaces=%d",
+                        (int)p_->lipRefs.size(), cfg.referenceDistance,
+                        (int)faces.size());
+  }
 
-  for (const Face& f : faces) {
+  // For each face, its nearest listed identity (-1 when the list is empty).
+  // A face is dubbed when it is some identity's best match within threshold:
+  // exactly one mouth per tap, never two mouths for one tap, never two dubs
+  // for one mouth.
+  std::vector<int> lipBest(faces.size(), -1);
+  if (byLipReference) {
+    for (size_t fi = 0; fi < faces.size(); ++fi) {
+      float bestD = cfg.referenceDistance;
+      int bestK = -1;
+      for (size_t k = 0; k < p_->lipRefs.size(); ++k) {
+        const float d = faceDistance(faces[fi].embeddingNorm,
+                                     p_->lipRefs[k].embeddingNorm);
+        if (d < bestD) { bestD = d; bestK = (int)k; }
+      }
+      if (bestK >= 0) {
+        // Still the best face for identity bestK? A strict improvement elsewhere
+        // steals it; ties keep the first face, so the choice cannot flicker.
+        bool mine = true;
+        for (size_t gj = 0; gj < faces.size(); ++gj) {
+          if (gj == fi) continue;
+          if (faceDistance(faces[gj].embeddingNorm,
+                           p_->lipRefs[(size_t)bestK].embeddingNorm) < bestD) {
+            mine = false;
+            break;
+          }
+        }
+        if (mine) lipBest[fi] = bestK;
+      }
+      if (lipDbg) {
+        __android_log_print(ANDROID_LOG_INFO, "fflips", "  face best=%d %s",
+                            lipBest[fi], lipBest[fi] >= 0 ? "SYNC" : "SKIP");
+      }
+    }
+  }
+
+  for (size_t fi = 0; fi < faces.size(); ++fi) {
+    const Face& f = faces[fi];
+    if (only && &f != only) continue;
+    if (byReference &&
+        faceDistance(f.embeddingNorm, p_->refEmbeddingNorm) >= cfg.referenceDistance)
+      continue;
+    if (byLipReference) {
+      if (lipBest[fi] < 0) continue;
+    } else {
+      // Same answer as swapAll for this face: Keep face (kNoSource) is honoured
+      // here, otherwise an excluded person would be synced but not swapped.
+      // With assign mode off this returns the active slot and changes nothing.
+      const int six = p_->sourceForFace(f, fi, faces.size(), cfg.referenceDistance);
+      if (six == kNoSource) continue;
+    }
     double t0 = nowMs();
     // warp_face_by_face_landmark_5(frame, landmark_set['5/68'], 'ffhq_512', (512, 512))
     float tmpl[10];

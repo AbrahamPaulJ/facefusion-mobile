@@ -63,8 +63,11 @@ Ruhs. The pipeline, the models, and the option names, defaults and ranges are Fa
   shot except somebody.
 - **Batch**: queue several clips and swap them all in one run, with one source face. Each
   finished clip gets a thumbnail you can tap, and can be saved to your gallery as it lands.
-- **Pick the face**: tap a face on the target to swap only that person. The boxes appear on
-  their own when there is more than one face in the frame.
+- **Pick the lips**: tap the lips button on the target, then tap one face — or several,
+  one after another — to choose who gets the lip sync. Each picked face gets a green frame
+  and the button carries the count; tapping a green face takes it back out, and with none
+  picked every face is synced. The boxes appear on their own when there is more than one
+  face in the frame, and red frames only while picking.
 - The Live preview is mirrored on the front camera, as a selfie camera is, and not on the
   back one. A switch overrides that per lens; when the switch is on, recordings use the same
   selfie-style horizontal flip.
@@ -73,7 +76,10 @@ Ruhs. The pipeline, the models, and the option names, defaults and ranges are Fa
 - Saves to your gallery, or hands a still straight out of the preview.
 - Lip sync, optionally: redraws the mouth to match a voice you pick — a dub, a different
   take, any audio or video file — at about 1-2 ms per frame on the NPU. Play the voice back
-  and trim it first, so only the part you want drives the mouth.
+  and trim it first, so only the part you want drives the mouth. It follows the same
+  selection the swapper uses (a person on **Keep face** keeps their mouth too), unless lips
+  faces were picked, which then select alone — each picked identity dubs only its
+  best-matching face.
 - Shows the swap as it is written: while a video runs, the result pane is the frame going
   into the file, not a re-render of it. The sound arrives with the finished clip.
 - Speaks English, Русский, 简体中文 and 繁體中文.

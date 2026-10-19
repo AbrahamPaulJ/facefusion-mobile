@@ -59,7 +59,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import com.facefusion.mobile.R
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Face
 
 /**
  * Everything the two preview panes need to draw themselves.
@@ -86,8 +85,8 @@ data class PreviewUi(
      * pixel coordinates. Null when the overlay is off or nothing has been asked yet.
      */
     val faceBoxes: FloatArray? = null,
-    /** The face picked as the reference, if any -- drawn solid while the rest dim. */
-    val referenceBox: FloatArray? = null,
+    /** The faces that get the lip sync, if any -- drawn green. */
+    val lipReferenceBoxes: List<FloatArray> = emptyList(),
 )
 
 /**
@@ -202,13 +201,17 @@ fun SwapScreen(
     onRequestModel: (label: String, model: String) -> Unit,
     /** Whether the detector's boxes are drawn over the ORIGINAL pane. */
     showFaceBoxes: Boolean,
-    /** Turn the face overlay on or off. Detection runs only while it is on. */
-    onToggleFaceBoxes: () -> Unit,
     /**
-     * A face in the ORIGINAL pane was tapped, in that image's own pixel coordinates:
-     * upstream's `face_selector_mode = reference`. Tapping the chosen one again clears it.
+     * Lips pick mode: when true, a tap on a face chooses who gets the lip sync.
+     * The button with the lips icon toggles it. Outside this mode taps on faces
+     * do nothing (who gets swapped is Assign per person's job).
      */
-    onPickFace: (Float, Float) -> Unit,
+    lipPickMode: Boolean = false,
+    onToggleLipPickMode: () -> Unit = {},
+    /** A face tapped while [lipPickMode] is on: the lips target. 2nd tap clears. */
+    onPickLipFace: (Float, Float) -> Unit = { _, _ -> },
+    /** A tap that hit no face box while picking. Says so instead of silence. */
+    onPickLipMiss: () -> Unit = {},
     /**
      * The run queue, item one being the VISIBLE target -- roadmap 14.
      *
@@ -871,15 +874,19 @@ fun SwapScreen(
                 onClick = if (idle && !hasTarget) onPickTarget else null,
                 actionIcon = if (hasTarget) null else Icons.Default.Add,
                 zoom = zoom,
-                faceBoxes = preview.faceBoxes,
-                referenceBox = preview.referenceBox,
-                // Only while the overlay is on: picking a face you cannot see is not a
-                // feature, and without the boxes a tap here has always meant "choose a
-                // different target".
-                // ⚠ Not while Assign per person is on. The two are exclusive selectors
-                // and the reference wins inside swapAll, so a tap here would quietly cut
-                // the mode down to the one face it had picked.
-                onPickFace = if (showFaceBoxes && !assignMode && idle) onPickFace else null,
+                // Red candidate boxes only in lips pick mode: the rest of the
+                // time they are visual noise next to the green selection.
+                // Green (the selection itself) always draws when non-empty.
+                faceBoxes = if (lipPickMode) preview.faceBoxes else null,
+                lipReferenceBoxes = preview.lipReferenceBoxes,
+                // Face taps only exist for the lips target, and only while its
+                // pick mode is on: who gets swapped is Assign per person's job.
+                // Works whether or not assign mode is on -- the two selectors
+                // are independent (swapper vs lip syncer).
+                onPickFace = if (showFaceBoxes && idle && lipPickMode) onPickLipFace
+                             else null,
+                onPickMiss = if (showFaceBoxes && idle && lipPickMode) onPickLipMiss
+                             else null,
             ) {
                 // CAMERA, beside the gallery pick, and shown while the pane is EMPTY --
                 // which is when someone deciding what to swap needs it. Two buttons because
@@ -898,16 +905,32 @@ fun SwapScreen(
                     }
                 }
                 if (hasTarget) {
-                    // FACES. Off by default -- an app that draws rectangles over every
-                    // preview has changed how it looks for everyone to answer a question
-                    // most sessions never ask. One tap, on the pane the answer is drawn
-                    // over, and the icon goes red while it is on.
-                    IconButton(onToggleFaceBoxes, enabled = idle,
-                               modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Default.Face, stringResource(R.string.swap_show_faces),
-                             Modifier.size(20.dp),
-                             tint = if (showFaceBoxes) FfRed
-                                    else MaterialTheme.colorScheme.onSurfaceVariant)
+                    // LIPS. Picks who gets the lip sync. Toggles the pick mode;
+                    // a tap on a face adds it, a tap on a green one takes it
+                    // out. Green while on or while faces are listed. The button
+                    // carries the COUNT, so it stays explicit how many faces
+                    // are listed -- green boxes alone proved easy to miss.
+                    val lipCount = preview.lipReferenceBoxes.size
+                    Box {
+                        IconButton(onToggleLipPickMode, enabled = idle,
+                                   modifier = Modifier.size(36.dp)) {
+                            Icon(painterResource(R.drawable.ic_lips),
+                                 stringResource(R.string.swap_lips_pick), Modifier.size(20.dp),
+                                 tint = if (lipPickMode || lipCount > 0)
+                                     Color(0xFF22C55E)
+                                 else MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        if (lipCount > 0) {
+                            Text(
+                                "$lipCount",
+                                color = Color.White,
+                                fontSize = 9.sp,
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .background(FfRed, CircleShape)
+                                    .padding(horizontal = 5.dp, vertical = 1.dp),
+                            )
+                        }
                     }
                     // Icons rather than the word "Change": two actions fit where one word
                     // did, and the pane itself is already the picker, so the word was

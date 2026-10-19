@@ -467,7 +467,7 @@
     <string name="swap_autosaved_to_gallery">Saved to Movies/FaceFusion automatically.</string>
     <string name="swap_batch_add">Add more clips (batch)</string>
     <string name="swap_batch_add_more">Add more clips</string>
-    <string name="status_faces_found">%1$d faces found. Tap one to swap only that face.</string>
+    <string name="status_faces_found">%1$d faces found. Tap the lips button, then a face, to choose who gets the lip sync.</string>
     <string name="status_reference_warming">Preparing the preview. Tap the face again in a moment.</string>
     <string name="status_batch_queued_some">%1$d clips queued. %2$d photos were left out: batches are videos only.</string>
     <string name="status_batch_images_only">Photos are swapped one at a time; the result is already on the pane.</string>
@@ -479,6 +479,14 @@
     <string name="status_reference_set">Swapping this face only. Tap it again for all faces.</string>
     <string name="status_reference_missed">No face at that point.</string>
     <string name="status_reference_cleared">Swapping every face again.</string>
+    <string name="swap_lips_pick">Choose who gets the lip sync</string>
+    <string name="swap_lips_pick_on">Tap faces: they will move their lips. Tap one again to take it out.</string>
+    <string name="swap_lips_pick_off">Lip sync target picker off</string>
+    <string name="status_lips_set">Lip sync on this face only. Tap it again to take it out.</string>
+    <string name="status_lips_set_many">Lip sync on %1$d faces. Tap one again to take it out.</string>
+    <string name="status_lips_cleared">Lip sync on every face again.</string>
+    <string name="status_lips_missed">No face at that point.</string>
+    <string name="status_lips_wait_boxes">No face box under that tap yet — wait for the red frames, then tap a face.</string>
     <string name="live_rec_start">Record</string>
     <string name="live_rec_stop">Stop recording</string>
     <string name="live_fullscreen">Fill the screen</string>
