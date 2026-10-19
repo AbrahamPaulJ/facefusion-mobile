@@ -1944,6 +1944,141 @@ def do_lp_motion():
 	return path
 
 
+def flatten_rank5_gathers(model):
+	"""Gather with a rank-4 index tensor -> 1D index, Gather, Reshape back.
+
+	LivePortrait's decomposed trilinear warp gathers rows of an already-flat volume
+	`[N, C]` with an index of shape `[B, 16, 64, 64]`, so the output is rank 5 and the HTP
+	refuses it (`gather_16_opts.h: Can't gather into an output with rank > 4`). Gathering
+	with the index flattened gives `[n, C]`; the Reshape to the original rank-5 shape is the
+	same tensor.
+	"""
+	g = model.graph
+	inf = shape_inference.infer_shapes(model, strict_mode=False)
+	shp = {}
+	for vi in list(inf.graph.value_info) + list(inf.graph.input):
+		shp[vi.name] = [d.dim_value for d in vi.type.tensor_type.shape.dim]
+	for t in g.initializer:
+		shp[t.name] = list(t.dims)
+	n = 0
+	for node in list(g.node):
+		if node.op_type != 'Gather':
+			continue
+		axis = next((a.i for a in node.attribute if a.name == 'axis'), 0)
+		ish = shp.get(node.input[1], [])
+		dsh = shp.get(node.input[0], [])
+		if axis != 0 or len(ish) < 4 or len(dsh) != 2 or 0 in ish or 0 in dsh:
+			continue
+		flat_shape = node.name + '_flat_shape'
+		back_shape = node.name + '_back_shape'
+		g.initializer.append(numpy_helper.from_array(numpy.array([-1], numpy.int64), flat_shape))
+		g.initializer.append(numpy_helper.from_array(
+			numpy.array(ish + [dsh[1]], numpy.int64), back_shape))
+		idx_flat = node.input[1] + '_flat_' + str(n)
+		raw = node.output[0] + '_rank2'
+		out = node.output[0]
+		i = list(g.node).index(node)
+		g.node.insert(i, helper.make_node('Reshape', [node.input[1], flat_shape], [idx_flat],
+		                                  name=node.name + '_idx_flat'))
+		node.input[1] = idx_flat
+		node.output[0] = raw
+		g.node.insert(i + 2, helper.make_node('Reshape', [raw, back_shape], [out],
+		                                      name=node.name + '_back'))
+		n += 1
+	return n
+
+
+def masks_in_float(model):
+	"""The warp's boolean masks as 0/1 floats: LessOrEqual -> Cast(float), And -> Mul.
+
+	The generator builds its trilinear validity masks as `LessOrEqual(Abs(..), c)`, `And`,
+	`And`, `Unsqueeze`, then `Cast(to=float)` into a `Mul`. Those bool tensors are 5D, and
+	the HTP cannot lay a 5D uint8 tensor out (`could not create op: q::ForceFormat_Crouton`,
+	input `QuantUint8_5D`). On 0/1 values Mul IS And, so casting each comparison at once
+	removes every 5D bool, and the old float Cast becomes an identity and is dropped.
+	"""
+	g = model.graph
+	n_le = n_and = n_cast = 0
+	for node in list(g.node):
+		if node.op_type != 'LessOrEqual':
+			continue
+		b = node.output[0]
+		bf = b + '_f'
+		for other in g.node:
+			for k, x in enumerate(other.input):
+				if x == b:
+					other.input[k] = bf
+		g.node.insert(list(g.node).index(node) + 1,
+		              helper.make_node('Cast', [b], [bf], name=node.name + '_tofloat', to=1))
+		n_le += 1
+	for node in g.node:
+		if node.op_type == 'And':
+			node.op_type = 'Mul'
+			n_and += 1
+	# A Cast(to=float) now fed by float: identity, rewire and delete.
+	inf = shape_inference.infer_shapes(model, strict_mode=False)
+	elem = {vi.name: vi.type.tensor_type.elem_type
+	        for vi in list(inf.graph.value_info) + list(inf.graph.input)}
+	for node in list(g.node):
+		if node.op_type != 'Cast' or node.name.endswith('_tofloat'):
+			continue
+		to = next((a.i for a in node.attribute if a.name == 'to'), None)
+		if to != 1 or elem.get(node.input[0]) != 1:
+			continue
+		src, dst = node.input[0], node.output[0]
+		if dst in {o.name for o in g.output}:
+			continue
+		for other in g.node:
+			for k, x in enumerate(other.input):
+				if x == dst:
+					other.input[k] = src
+		g.node.remove(node)
+		n_cast += 1
+	return n_le, n_and, n_cast
+
+
+def int64_to_int32(model):
+	"""Index arithmetic in int32: the HTP has no int64.
+
+	The generator's warp casts float coordinates to int64 (Floor -> Cast(to=INT64)) and
+	combines them with int64 constants into Gather indices; 198 of those casts have no HTP
+	implementation. Every Cast to int64 becomes a Cast to int32, and every int64 initializer
+	that feeds ARITHMETIC (not a shape, axes or repeats input, which ONNX requires as int64)
+	becomes int32. Indices here are < 1.5e6, far inside int32.
+	"""
+	g = model.graph
+	INT64, INT32 = 7, 6
+	SHAPE_INPUTS = {('Reshape', 1), ('Unsqueeze', 1), ('Squeeze', 1), ('Tile', 1),
+	                ('Expand', 1), ('Slice', 1), ('Slice', 2), ('Slice', 3), ('Slice', 4),
+	                ('ReduceSum', 1), ('ReduceMean', 1), ('Resize', 1), ('Resize', 2),
+	                ('Resize', 3), ('ConstantOfShape', 0), ('Pad', 1), ('TopK', 1)}
+	use = {}
+	for nd in g.node:
+		for k, x in enumerate(nd.input):
+			use.setdefault(x, []).append((nd.op_type, k))
+	casts = 0
+	for nd in g.node:
+		if nd.op_type == 'Cast':
+			for a in nd.attribute:
+				if a.name == 'to' and a.i == INT64:
+					a.i = INT32
+					casts += 1
+	inits = 0
+	for t in list(g.initializer):
+		if t.data_type != INT64:
+			continue
+		uses = use.get(t.name, [])
+		if not uses or any(u in SHAPE_INPUTS for u in uses):
+			continue
+		arr = numpy_helper.to_array(t).astype(numpy.int32)
+		t.CopyFrom(numpy_helper.from_array(arr, t.name))
+		inits += 1
+	for vi in list(g.value_info):
+		if vi.type.tensor_type.elem_type == INT64:
+			g.value_info.remove(vi)
+	return casts, inits
+
+
 def do_lp_generator():
 	"""LivePortrait generator: natively fp16 (194 fp16 initialisers, fp32 I/O behind Casts),
 	the same shape as hyperswap. QAIRT rejects its Tile with `0x232 != 0x216` (fp32 against
@@ -1957,6 +2092,13 @@ def do_lp_generator():
 	checker.check_model(m)
 	left = sum(1 for t in m.graph.initializer if t.data_type == 10)
 	print('  fp16 initialisers remaining: %d (want 0)' % left)
+	print('  %d rank-5 Gathers flattened' % flatten_rank5_gathers(m))
+	print('  masks in float: %d LessOrEqual cast, %d And -> Mul, %d identity Cast dropped'
+	      % masks_in_float(strip_value_info(m)))
+	casts, inits = int64_to_int32(strip_value_info(m))
+	print('  int64 -> int32: %d Casts, %d initialisers' % (casts, inits))
+	m = shape_inference.infer_shapes(strip_value_info(m), strict_mode=False)
+	checker.check_model(m)
 	path = save(m, 'lp_generator')
 	rng = numpy.random.default_rng(1234)
 	# A feature volume in the range the extractor produces, and keypoints near the
