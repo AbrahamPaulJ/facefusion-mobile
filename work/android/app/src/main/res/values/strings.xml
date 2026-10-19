@@ -160,7 +160,7 @@
     <string name="opt_swapper">hyperswap:</string>
     <string name="opt_model_info">About these models</string>
     <string name="swapper_info_title">Face swap models</string>
-    <string name="swapper_info_body">Third-party services describe 1a as the fastest, 1b as balanced and 1c as the most realistic. FaceFusion itself publishes no description of any of them.\n\nOn this phone all three cost the same — measured within half a millisecond of each other — so the speed part does not apply here. They are the same size and the same architecture, and differ only in how they were trained.\n\nTry each on your own footage and keep whichever works.</string>
+    <string name="swapper_info_body">Third-party services describe 1a as the fastest, 1b as balanced and 1c as the most realistic. FaceFusion itself publishes no description of any of them.\n\nOn this phone all three cost the same (measured within half a millisecond of each other), so the speed part does not apply here. They are the same size and the same architecture, and differ only in how they were trained.\n\nTry each on your own footage and keep whichever works.</string>
 
     <string name="opt_face_masker">Face Masker</string>
     <!-- %1$s blur amount, %2$s padding -->
@@ -241,7 +241,7 @@
     <string name="faces_remove_body">Its copy is deleted from this phone. If you have kept it in Saved faces, that copy stays.</string>
     <string name="faces_title">Saved faces</string>
     <string name="faces_use">Use</string>
-    <string name="faces_empty">Nothing kept yet. Load a source face and tap the bookmark to keep it here — kept faces stay even when you clear the row.</string>
+    <string name="faces_empty">Nothing kept yet. Load a source face and tap the bookmark to keep it here. Kept faces stay even when you clear the row.</string>
     <string name="set_delete">Delete</string>
     <string name="set_download">Download</string>
     <string name="set_downloading">Downloading</string>
@@ -555,7 +555,7 @@ Turning it off runs your own Swap settings instead. This is experimental: the en
     <string name="live_assign_on">Nothing changes until you tap a face</string>
     <string name="live_assign_hint">Assign per person: select a source, then tap a face. Untapped faces keep their source.</string>
     <string name="live_assign_set">Source %1$d assigned to this person</string>
-    <string name="live_assign_missed">No face — selection cleared</string>
+    <string name="live_assign_missed">No face, selection cleared</string>
     <string name="live_assign_cleared">Assignments cleared</string>
     <string name="live_assign_clear">Clear</string>
     <string name="live_assign_count">%1$d assigned</string>
@@ -564,7 +564,7 @@ Turning it off runs your own Swap settings instead. This is experimental: the en
     <string name="live_target_locked">Locked while Assign per person is on</string>
     <string name="live_assign_help">How Assign per person works</string>
     <string name="live_assign_help_title">Assign per person</string>
-    <string name="live_assign_help_body">1. Turn the switch on. The feed keeps its current look.\n2. Select a source chip (Source 1, Source 2…).\n3. Tap the person who should have that source — they are now SELECTED (white box) and take that source right away.\n4. While they are selected, changing the chip changes THEM — you can try different sources on one person.\n5. For the next person, tap them (the selection moves), or tap empty space to DESELECT — the person keeps their last source and nothing can change them anymore.\n\nTapped people keep their source for the whole session. Untapped people keep the look from when the mode was switched on.\n\nClear removes all assignments. Turning the switch off goes back to the default behaviour (every face follows the chip).</string>
+    <string name="live_assign_help_body">1. Turn the switch on. The feed keeps its current look.\n2. Select a source chip (Source 1, Source 2…).\n3. Tap the person who should have that source: they are now SELECTED (white box) and take that source right away.\n4. While they are selected, changing the chip changes THEM, so you can try different sources on one person.\n5. For the next person, tap them (the selection moves), or tap empty space to DESELECT. The person keeps their last source and nothing can change them anymore.\n\nTapped people keep their source for the whole session. Untapped people keep the look from when the mode was switched on.\n\nClear removes all assignments. Turning the switch off goes back to the default behaviour (every face follows the chip).</string>
     <string name="live_assign_help_gotit">Got it</string>
     <string name="assign_keep_original">Keep face</string>
     <string name="live_mirror">Mirror the preview</string>
@@ -582,7 +582,7 @@ Turning it off runs your own Swap settings instead. This is experimental: the en
     <string name="swap_assign_kept">Person %1$d keeps their own face</string>
     <string name="swap_assign_cleared">Assignments cleared</string>
     <string name="swap_assign_failed">No face found for person %1$d</string>
-    <string name="swap_assign_not_ready">Still loading — try again in a moment</string>
+    <string name="swap_assign_not_ready">Still loading, try again in a moment</string>
     <string name="player_batch_hint">Play with live swap runs one clip. Clear the queue to use it.</string>
 
     <!-- ==================================== settings: which unit ncnn runs on -->

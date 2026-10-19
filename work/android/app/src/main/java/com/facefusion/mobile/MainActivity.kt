@@ -2619,7 +2619,7 @@ class MainActivity : ComponentActivity() {
             "fan2d" to getString(R.string.model_landmarker),
             "arcface" to getString(R.string.model_recogniser),
             opts.swapper to (getString(R.string.model_swapper) +
-                    " — " + swapperDisplay(opts.swapper)),
+                    ": " + swapperDisplay(opts.swapper)),
         )
         // The content gate is required -- missing() blocks a run without it and
         // ffpipe::init will not come up -- but it is satisfied by EITHER build, so neither
@@ -2641,7 +2641,7 @@ class MainActivity : ComponentActivity() {
             "nsfwq2" to getString(R.string.model_content_checker_quantised),
         )
         val optional = alts.map {
-            it to (getString(R.string.model_swapper) + " — " + swapperDisplay(it))
+            it to (getString(R.string.model_swapper) + ": " + swapperDisplay(it))
         } + listOf(
             // It was absent from BOTH lists, so a 28 MB model that is on the device, that
             // the Advanced panel offers a switch for, and that /health reports as present,

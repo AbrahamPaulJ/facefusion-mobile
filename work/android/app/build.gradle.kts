@@ -478,8 +478,9 @@ android {
         // every content check that can refuse logs its score, and a context that will not
         // load names its QNN error code. Issues #16, #17, #10.
         // 109 = a Support section on the About tab: the coffee link and the other two apps.
-        versionCode = 109
-        versionName = "0.9.37$variantTag"    // "-dev" == NO content gate
+        // 110 = no em dashes left in any app string, in any of the four languages.
+        versionCode = 110
+        versionName = "0.9.38$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }

@@ -395,13 +395,13 @@
     <string name="live_assign_on">点按人脸前不会改变</string>
     <string name="live_assign_hint">按人分配：选择源，再点按人脸。未点按的人脸保持原源。</string>
     <string name="live_assign_set">已为该人分配源 %1$d</string>
-    <string name="live_assign_missed">无人脸 — 已清除选择</string>
+    <string name="live_assign_missed">无人脸，已清除选择</string>
     <string name="live_assign_cleared">已清除分配</string>
     <string name="live_assign_clear">清除</string>
     <string name="live_assign_count">已分配 %1$d 人</string>
     <string name="live_assign_help">按人分配如何使用</string>
     <string name="live_assign_help_title">按人分配</string>
-    <string name="live_assign_help_body">1. 打开开关，画面保持当前效果。\n2. 选择一个源（源 1、源 2…）。\n3. 点按应使用该源的人 — 该人会被选中（白色框）并立即使用该源。\n4. 选中状态下，切换源只会改变该人 — 你可以为同一人尝试不同源。\n5. 为下一个人，点按他（选中会移动），或点按空白处取消选中 — 该人保持其最后的源，不再改变。\n\n被点按的人在整个会话中保持其源。未点按的人保持开启该模式时的效果。\n\n「清除」会移除所有分配。关闭开关则回到默认行为（所有人脸跟随源）。</string>
+    <string name="live_assign_help_body">1. 打开开关，画面保持当前效果。\n2. 选择一个源（源 1、源 2…）。\n3. 点按应使用该源的人，该人会被选中（白色框）并立即使用该源。\n4. 选中状态下，切换源只会改变该人，你可以为同一人尝试不同源。\n5. 为下一个人，点按他（选中会移动），或点按空白处取消选中，该人保持其最后的源，不再改变。\n\n被点按的人在整个会话中保持其源。未点按的人保持开启该模式时的效果。\n\n「清除」会移除所有分配。关闭开关则回到默认行为（所有人脸跟随源）。</string>
     <string name="live_assign_help_gotit">知道了</string>
     <string name="status_live_recording">正在录制实时画面。</string>
     <string name="status_live_rec_saved">录制已保存，共 %1$d 帧。</string>
@@ -446,12 +446,12 @@
     <string name="swap_assign_kept">人物 %1$d 保留本人面孔</string>
     <string name="swap_assign_cleared">已清除分配</string>
     <string name="swap_assign_failed">未找到人物 %1$d 的人脸</string>
-    <string name="swap_assign_not_ready">仍在加载 — 请稍后再试</string>
+    <string name="swap_assign_not_ready">仍在加载，请稍后再试</string>
     <string name="player_batch_hint">实时换脸播放只处理单个片段。清空队列后可用。</string>
 
     <!-- ==================================== settings: which unit ncnn runs on -->
     <string name="set_unit">图形芯片</string>
-    <string name="set_unit_note">有些手机在 GPU 上算错这些模型：应用会把墙壁和家具当成人脸并进行替换。“自动”会将本机 GPU 与其自身 CPU 比对一次，若结果不一致则改用 CPU。若仍然不正常，请手动选择 CPU — 速度较慢，但一定可用。</string>
+    <string name="set_unit_note">有些手机在 GPU 上算错这些模型：应用会把墙壁和家具当成人脸并进行替换。“自动”会将本机 GPU 与其自身 CPU 比对一次，若结果不一致则改用 CPU。若仍然不正常，请手动选择 CPU，速度较慢，但一定可用。</string>
     <string name="set_unit_auto">自动</string>
     <string name="set_unit_gpu">GPU</string>
     <string name="set_unit_cpu">CPU</string>
