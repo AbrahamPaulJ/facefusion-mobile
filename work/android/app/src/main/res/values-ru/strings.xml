@@ -98,6 +98,7 @@
 
     <string name="dl_models_required">Нужны модели</string>
     <string name="dl_not_on_device">Моделей лиц пока нет на этом устройстве.</string>
+    <string name="dl_tier_refused">NPU этого телефона не смог запустить имеющиеся модели %1$s, поэтому нужен набор %2$s. Что не сработало, указано в Настройки, Модели.</string>
     <string name="dl_download">Скачать модели</string>
     <string name="dl_retry">Повторить загрузку</string>
     <string name="dl_progress">%1$d / %2$d МБ   файл %3$d из %4$d</string>
@@ -184,6 +185,8 @@
     <string name="set_models_npu">Модели NPU (%1$s)</string>
     <string name="set_models_gpu">Модели GPU + CPU</string>
     <string name="set_models_inactive_note">Сейчас на этом телефоне не используются. Оставлены, чтобы их можно было удалить или снова задействовать при смене среды выполнения.</string>
+    <string name="set_models_rejected_note">NPU этого телефона не смог запустить этот набор, поэтому приложение перешло на другой. Его можно удалить. Что не сработало: %1$s</string>
+    <string name="set_models_rejected_unknown">не записано</string>
     <string name="set_models_none">ничего не установлено</string>
     <string name="set_this_device">Это устройство</string>
     <string name="set_runtime">Среда выполнения</string>
@@ -430,6 +433,12 @@
     <string name="set_unit_auto">Автоматически</string>
     <string name="set_unit_gpu">GPU</string>
     <string name="set_unit_cpu">CPU</string>
+    <string name="set_lowmem">Мало памяти</string>
+    <string name="set_lowmem_note">Собирает модели так, что им нужно примерно вдвое меньше памяти, но работа примерно втрое медленнее. Автоматически включается на телефонах с памятью меньше 5 ГБ, где с полным набором Android закрывает приложение.</string>
+    <string name="set_lowmem_is_on">Сейчас на этом телефоне включено.</string>
+    <string name="set_lowmem_is_off">Сейчас на этом телефоне выключено.</string>
+    <string name="set_lowmem_on">Вкл.</string>
+    <string name="set_lowmem_off">Выкл.</string>
 
     <string name="swap_lips_pick">Выбрать, кому синхронизировать губы</string>
     <string name="swap_lips_pick_on">Нажимайте на лица: у них будут двигаться губы. Нажмите ещё раз, чтобы убрать.</string>

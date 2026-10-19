@@ -508,7 +508,7 @@ class ApiServer(
                 // The same record the UI keeps. This path can be the FIRST init on a
                 // device driven entirely over the network, and a rejection learned here is
                 // no less true for having been learned without a screen attached.
-                ModelPaths.rejectTier(ctx, NativePipe.rejectedTier())
+                ModelPaths.rejectTier(ctx, NativePipe.rejectedTier(), NativePipe.rejectedReason())
                 if (!ok) {
                     respond(out, 500, "application/json",
                             json("error" to ("init: " + NativePipe.lastError())))

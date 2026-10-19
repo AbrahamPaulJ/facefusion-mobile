@@ -169,6 +169,11 @@ two; if they disagree it stays on the CPU and says so on the Settings **Device**
 can also decide yourself, under **Graphics chip** on that panel: Automatic, GPU or CPU. CPU
 is slower and always works.
 
+The GPU and CPU path needs about 2 GB of memory once its models are loaded, which is more
+than a 4 GB phone can give an app. **Low memory**, on the same panel, builds the models in a
+way that needs about half of that and runs about three times slower. Automatic turns it on
+for phones with less than 5 GB of RAM.
+
 ## Remote API
 
 Turn on **Settings → Remote API** and open the address it shows in a browser on your

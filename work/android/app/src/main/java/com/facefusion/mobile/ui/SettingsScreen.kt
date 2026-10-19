@@ -98,6 +98,11 @@ data class ModelSection(
     val summary: String,
     val rows: List<ModelRow>,
     val active: Boolean,
+    /**
+     * Replaces the "not in use" note on an inactive set. Set when this phone REFUSED the
+     * set, so it is not described as one that could be used again.
+     */
+    val note: String? = null,
 )
 
 /** What the HTP said about itself, already parsed out of `NativePipe.probeDeviceInfo`. */
@@ -159,6 +164,12 @@ fun SettingsScreen(
     ncnnGpu: String = "auto",
     /** Pin that unit. **null when this build has no ncnn backend**, as [onForceBackend]. */
     onNcnnGpu: ((String) -> Unit)? = null,
+    /** "auto" | "on" | "off" -- ncnn without Winograd, for phones with little RAM. */
+    lowMemory: String = "auto",
+    /** What "auto" resolved to on this phone, so the note can say it. */
+    lowMemoryActive: Boolean = false,
+    /** Set it. null when this build has no ncnn backend, as [onNcnnGpu]. */
+    onLowMemory: ((String) -> Unit)? = null,
     /**
      * The manual light/dark choice, or null to follow the system.
      *
@@ -327,7 +338,7 @@ fun SettingsScreen(
                 var open by rememberSaveable(section.title) { mutableStateOf(false) }
                 Accordion(section.title, summary, open, { open = !open }) {
                     Text(
-                        stringResource(R.string.set_models_inactive_note),
+                        section.note ?: stringResource(R.string.set_models_inactive_note),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -527,6 +538,37 @@ fun SettingsScreen(
                                 FilterChip(
                                     selected = ncnnGpu == value,
                                     onClick = { onNcnnGpu(value) },
+                                    label = { Text(label) },
+                                )
+                            }
+                    }
+                }
+            }
+        }
+        // LOW MEMORY. The same card shape as the unit pin above, and shown on the same
+        // condition: it only changes how ncnn builds its models, so on the NPU it would be
+        // a control that does nothing.
+        if (onLowMemory != null && device.backend == "ncnn") {
+            Spacer(Modifier.height(6.dp))
+            Caption(stringResource(R.string.set_lowmem))
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp),
+                       verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        stringResource(R.string.set_lowmem_note) + " " +
+                            stringResource(if (lowMemoryActive) R.string.set_lowmem_is_on
+                                           else R.string.set_lowmem_is_off),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("auto" to stringResource(R.string.set_unit_auto),
+                               "on" to stringResource(R.string.set_lowmem_on),
+                               "off" to stringResource(R.string.set_lowmem_off))
+                            .forEach { (value, label) ->
+                                FilterChip(
+                                    selected = lowMemory == value,
+                                    onClick = { onLowMemory(value) },
                                     label = { Text(label) },
                                 )
                             }

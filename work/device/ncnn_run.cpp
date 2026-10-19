@@ -27,7 +27,28 @@
 #include <string.h>
 #include <vector>
 #include <string>
+#include <time.h>
 #include "net.h"
+
+static double now_ms() {
+    timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1e3 + ts.tv_nsec / 1e6;
+}
+
+// VmRSS and VmHWM (peak RSS) from /proc: what the model costs in memory, which a 4 GB
+// phone decides on before speed ever matters.
+static void print_mem(const char* when) {
+    FILE* f = fopen("/proc/self/status", "r");
+    if (!f) return;
+    char line[256];
+    long rss = -1, hwm = -1;
+    while (fgets(line, sizeof(line), f)) {
+        sscanf(line, "VmRSS: %ld", &rss);
+        sscanf(line, "VmHWM: %ld", &hwm);
+    }
+    fclose(f);
+    fprintf(stderr, "mem %s: rss %.0f MB, peak %.0f MB\n", when, rss / 1024.0, hwm / 1024.0);
+}
 
 // NCHW fp32 straight off disk into an ncnn Mat, honouring the padded channel stride.
 static bool load_raw(ncnn::Mat& m, const char* path)
@@ -109,8 +130,7 @@ int main(int argc, char** argv)
         net.opt.use_fp16_storage = false;
         net.opt.use_fp16_arithmetic = false;
 #else
-        fprintf(stderr, "built without vulkan
-"); return 1;
+        fprintf(stderr, "built without vulkan\n"); return 1;
 #endif
     } else if (mode == "vulkan") {
 #if NCNN_VULKAN
@@ -124,8 +144,16 @@ int main(int argc, char** argv)
 #endif
     } else { fprintf(stderr, "bad mode %s\n", mode.c_str()); return 1; }
 
+    // NOWINO=1: no Winograd. Its kernel transform expands every 3x3 conv's weights
+    // (F(6,3) holds 8x8 per 3x3 kernel), which is what made the app's ncnn path hold
+    // 3.6x its files in memory. This is the switch that measures what turning it off
+    // costs in time and saves in RAM, on one binary.
+    if (getenv("NOWINO")) net.opt.use_winograd_convolution = false;
+    if (getenv("NOSGEMM")) net.opt.use_sgemm_convolution = false;
+
     if (net.load_param(param)) { fprintf(stderr, "load_param failed\n"); return 1; }
     if (net.load_model(bin))   { fprintf(stderr, "load_model failed\n"); return 1; }
+    print_mem("after load");
 
     std::vector<ncnn::Mat> ins;
     for (int i = 5; i < argc; i++) {
@@ -176,6 +204,25 @@ int main(int argc, char** argv)
     fclose(f);
     fprintf(stderr, "%s: out %dx%dx%d (%zu floats) -> %s\n",
             mode.c_str(), out.w, out.h, out.c, out.total(), outp);
+
+    // REPS=n: n more inferences on the same input, min time reported. The first one above
+    // includes first-touch costs and is not a latency.
+    int reps = getenv("REPS") ? atoi(getenv("REPS")) : 0;
+    double best = 1e30;
+    for (int r = 0; r < reps; r++) {
+        ncnn::Extractor ex2 = net.create_extractor();
+        for (size_t i = 0; i < ins.size(); i++) {
+            char name[16]; snprintf(name, sizeof(name), "in%d", (int)i);
+            ex2.input(name, ins[i]);
+        }
+        ncnn::Mat o2;
+        double t0 = now_ms();
+        ex2.extract("out0", o2);
+        double dt = now_ms() - t0;
+        if (dt < best) best = dt;
+    }
+    if (reps > 0) fprintf(stderr, "min of %d: %.1f ms\n", reps, best);
+    print_mem("after run");
 
     }
 #if NCNN_VULKAN

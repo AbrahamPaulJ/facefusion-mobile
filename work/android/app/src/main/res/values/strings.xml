@@ -134,6 +134,7 @@
     <!-- ==================================================== model download overlay -->
     <string name="dl_models_required">Models required</string>
     <string name="dl_not_on_device">The face models are not on this device yet.</string>
+    <string name="dl_tier_refused">This phone\'s NPU would not run the %1$s models it has, so it needs the %2$s set instead. Settings, Models says what failed.</string>
     <string name="dl_download">Download models</string>
     <string name="dl_retry">Retry download</string>
     <!-- %1$d MB done, %2$d MB total, %3$d file index, %4$d file count -->
@@ -270,6 +271,8 @@
     <string name="set_models_npu">NPU models (%1$s)</string>
     <string name="set_models_gpu">GPU + CPU models</string>
     <string name="set_models_inactive_note">Not in use on this phone right now. Kept so it can be deleted, or used again if you switch the runtime.</string>
+    <string name="set_models_rejected_note">This phone\'s NPU would not run this set, so the app moved to another one. It is safe to delete. What failed: %1$s</string>
+    <string name="set_models_rejected_unknown">not recorded</string>
     <string name="set_models_none">nothing installed</string>
 
     <string name="set_this_device">This device</string>
@@ -582,5 +585,11 @@ Turning it off runs your own Swap settings instead. This is experimental: the en
     <string name="set_unit_auto">Automatic</string>
     <string name="set_unit_gpu">GPU</string>
     <string name="set_unit_cpu">CPU</string>
+    <string name="set_lowmem">Low memory</string>
+    <string name="set_lowmem_note">Builds the models in a way that needs about half the memory and is about three times slower. Automatic turns it on for phones with less than 5 GB of RAM, where the full set gets the app closed by Android.</string>
+    <string name="set_lowmem_is_on">It is on for this phone now.</string>
+    <string name="set_lowmem_is_off">It is off for this phone now.</string>
+    <string name="set_lowmem_on">On</string>
+    <string name="set_lowmem_off">Off</string>
 
 </resources>

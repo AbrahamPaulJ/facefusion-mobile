@@ -45,6 +45,18 @@ TIERS="v68:2 v69:8 v73:8 v79:8 v81:8"
 
 emit() {
   local name=$1 arch=$2 vtcm=$3
+  # A shipping arch is emitted at ITS TIER'S VTCM, never at whatever was typed. The tier is
+  # chosen on the phone by VTCM before arch, so a v68 context asking for 8 MB is one that
+  # no phone on the v68 tier can create: hyperswap_1b/1c v68 shipped exactly that way
+  # (issue #10, contextCreateFromBinary on every v68-tier phone). VTCM_OVERRIDE=1 for an
+  # experiment that will not be hosted.
+  local t want=""
+  for t in $TIERS; do [ "${t%%:*}" = "$arch" ] && want=${t##*:}; done
+  if [ -n "$want" ] && [ "$vtcm" != "$want" ] && [ "${VTCM_OVERRIDE:-0}" != "1" ]; then
+    printf '  %-11s %-4s vtcm%-2s  REFUSED: the %s tier is %s MB (VTCM_OVERRIDE=1 to force)\n' \
+        "$name" "$arch" "$vtcm" "$arch" "$want"
+    return
+  fi
   local src=$HOME/ff-build/${name}${BUILD_TAG}
   # $name is the BUILD DIRECTORY, which is not always the graph name: a variant build like
   # `nsfwq` or `hyperswap_fp16src` carries the suffix in its directory while the graph

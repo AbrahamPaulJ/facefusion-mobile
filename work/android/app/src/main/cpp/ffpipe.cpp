@@ -484,6 +484,7 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
     if (!ran) {
       rejected_ = tier_;
       err_ = "tier " + tier_ + " loaded but does not execute: " + report;
+      rejectedWhy_ = err_;
       return false;
     }
 
@@ -498,6 +499,7 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
       rejected_ = tier_;
       err_ = "tier " + tier_ + " loaded but does not execute: " + report +
              ", gate verdict " + (v.ok ? std::string("not finite") : err_);
+      rejectedWhy_ = err_;
       return false;
     }
     return true;

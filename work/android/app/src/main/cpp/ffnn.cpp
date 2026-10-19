@@ -36,6 +36,7 @@ const char* ncnnLastError();
 bool ncnnVariantPresent(const std::string&);
 DeviceInfo ncnnDeviceInfo();
 void ncnnSetGpuPolicy(GpuPolicy);
+void ncnnSetLowMemory(bool);
 #endif
 
 namespace {
@@ -189,6 +190,14 @@ void setGpuPolicy(GpuPolicy p) {
   ncnnSetGpuPolicy(p);
 #else
   (void)p;
+#endif
+}
+
+void setLowMemory(bool on) {
+#ifdef FFNN_HAVE_NCNN
+  ncnnSetLowMemory(on);
+#else
+  (void)on;
 #endif
 }
 

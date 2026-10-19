@@ -86,6 +86,14 @@ enum class GpuPolicy {
 // Set before `init`, or between pipelines. Has no effect on a backend that is not ncnn.
 void setGpuPolicy(GpuPolicy p);
 
+// ncnn without Winograd convolution. Its kernel transform expands every 3x3 conv's
+// weights several times over at load: measured on the S25 CPU, fp16, hyperswap 1a peaks at
+// 1209 MB with it and 703 MB without, and the whole app went from 2.0 GB to about half.
+// A 4 GB phone is killed at the larger number. Costs ~3.5x per frame on the 3x3-heavy
+// graphs and is MORE accurate in fp16, not less. Same timing rule as setGpuPolicy:
+// before init, or between pipelines. No effect off ncnn.
+void setLowMemory(bool on);
+
 struct InitSpec {
   std::string libDir;     // QNN: where libQnnHtp.so lives.  ncnn: unused.
   std::string skelDir;    // QNN: the DSP skels, exported before the backend is dlopen'd.

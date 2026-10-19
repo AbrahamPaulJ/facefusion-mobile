@@ -312,6 +312,8 @@ fun SwapScreen(
     onSwap: () -> Unit,
     onCancel: () -> Unit,
     modelsMissing: Boolean,
+    /** Why the models are missing when it is not simply "never downloaded". */
+    modelsMissingNote: String? = null,
     onDownload: () -> Unit,
     onShareLog: () -> Unit,
     onSave: () -> Unit,
@@ -977,7 +979,7 @@ fun SwapScreen(
                 // The download lives here rather than in a bar of its own: this is the pane
                 // that cannot draw anything without the models, so it is where their absence
                 // is already visible.
-                overlay = if (modelsMissing) { { DownloadOverlay(onDownload) } } else null,
+                overlay = if (modelsMissing) { { DownloadOverlay(onDownload, modelsMissingNote) } } else null,
                 zoom = zoom,
             ) {
                 // Spinner WHILE working, save button when there is something to save. Never
@@ -1626,7 +1628,7 @@ fun SwapScreen(
  * looks like for no reason beyond where the composable happened to live.
  */
 @Composable
-fun DownloadOverlay(onDownload: () -> Unit) {
+fun DownloadOverlay(onDownload: () -> Unit, note: String? = null) {
     Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)) {
         Column(
             Modifier.fillMaxSize().padding(20.dp),
@@ -1659,7 +1661,7 @@ fun DownloadOverlay(onDownload: () -> Unit) {
                          style = MaterialTheme.typography.titleSmall)
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        ModelDownload.error ?: stringResource(R.string.dl_not_on_device),
+                        ModelDownload.error ?: note ?: stringResource(R.string.dl_not_on_device),
                         style = MaterialTheme.typography.bodySmall,
                         textAlign = TextAlign.Center,
                         color = if (ModelDownload.error != null)

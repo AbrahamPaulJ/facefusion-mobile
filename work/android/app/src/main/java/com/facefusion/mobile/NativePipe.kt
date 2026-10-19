@@ -100,6 +100,13 @@ object NativePipe {
      * problem and never appears here; only a tier the chip refused to run does.
      */
     @JvmStatic external fun rejectedTier(): String
+
+    /**
+     * Why [rejectedTier] was refused: which model would not execute, and the backend's
+     * error. "" when nothing was rejected. Kept so a phone that fell back can still say
+     * why after a restart, when the run log that once held it is gone.
+     */
+    @JvmStatic external fun rejectedReason(): String
     @JvmStatic external fun release()
 
     /**
@@ -204,6 +211,14 @@ object NativePipe {
      * changes nothing about a live pipeline.
      */
     @JvmStatic external fun setNcnnGpu(mode: String)
+
+    /**
+     * ncnn without Winograd: about half the memory, ~3.5x the time on the 3x3-heavy graphs,
+     * and slightly MORE accurate in fp16. For phones the full set gets killed on.
+     *
+     * ⚠ Call [release] FIRST, as for [setNcnnGpu]: an open model keeps how it was built.
+     */
+    @JvmStatic external fun setNcnnLowMemory(on: Boolean)
 
     /**
      * One line naming the runtime that is actually running, for the log and the bug report.

@@ -96,10 +96,49 @@ object ModelPaths {
         apply(ctx)
     }
 
+    // -------------------------------------------------------------- low memory
+
+    private const val KEY_LOW_MEM = "low_memory"
+
+    /**
+     * "auto" (the default), "on" or "off": whether ncnn builds its models without
+     * Winograd. See [NativePipe.setNcnnLowMemory].
+     *
+     * The ncnn set holds ~2.0 GB once loaded, measured on the S25 CPU against 0.2 GB on
+     * the NPU. A 4 GB phone has about 2 GB free and was killed for low memory the moment a
+     * photo was added. Off Winograd it is about half, at ~3.5x the time per frame.
+     */
+    fun lowMemory(ctx: Context): String =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_LOW_MEM, "auto")
+            ?: "auto"
+
+    /** Pin it. ⚠ The caller must have released the pipeline first. */
+    fun setLowMemory(ctx: Context, value: String) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(KEY_LOW_MEM, value).apply()
+        apply(ctx)
+    }
+
+    /**
+     * What "auto" means: under 5 GB of RAM. A "4 GB" phone reports ~3.6 GB here and a
+     * "6 GB" one ~5.5, so the line sits between the class that was killed and the next.
+     */
+    fun lowMemoryOn(ctx: Context): Boolean = when (lowMemory(ctx)) {
+        "on" -> true
+        "off" -> false
+        else -> runCatching {
+            val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+            val mi = android.app.ActivityManager.MemoryInfo()
+            am.getMemoryInfo(mi)
+            mi.totalMem < 5L * 1024 * 1024 * 1024
+        }.getOrDefault(false)
+    }
+
     // -------------------------------------------------------------- rejected tiers
 
     private const val KEY_REJECTED = "rejected_tiers"
     private const val KEY_REJECTED_BUILD = "rejected_tiers_build"
+    private const val KEY_REJECTED_WHY = "rejected_why_"
 
     /**
      * Tiers THIS DEVICE has loaded and then failed to execute.
@@ -122,21 +161,35 @@ object ModelPaths {
         return p.getStringSet(KEY_REJECTED, emptySet())?.toSet() ?: emptySet()
     }
 
+    /**
+     * Why [tier] was rejected here, as native reported it, or null.
+     *
+     * Same build key as [rejectedTiers]. Without it a phone that fell back shows its unused
+     * set as "kept so it can be used again", and a bug report sent the next day carries no
+     * trace of which model the chip refused: the run log that held it died with the process.
+     */
+    fun rejectedReason(ctx: Context, tier: String): String? {
+        if (tier !in rejectedTiers(ctx)) return null
+        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_REJECTED_WHY + tier, null)?.takeIf { it.isNotBlank() }
+    }
+
     /** Remember [tier] as unrunnable on this device, for this build. No-op for "". */
-    fun rejectTier(ctx: Context, tier: String) {
+    fun rejectTier(ctx: Context, tier: String, why: String = "") {
         if (tier.isBlank()) return
         val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val now = rejectedTiers(ctx) + tier
-        p.edit()
+        val e = p.edit()
             .putStringSet(KEY_REJECTED, now)
             .putLong(KEY_REJECTED_BUILD, buildCode(ctx))
-            .apply()
+        if (why.isNotBlank()) e.putString(KEY_REJECTED_WHY + tier, why)
+        e.apply()
         // The chain is filtered by this set, so the cached one is now a stale answer to a
         // question whose inputs just changed, and native needs telling too.
         chainCache = null
         NativePipe.setSkipTiers(now.joinToString(","))
         android.util.Log.i("ffmodels", "tier $tier rejected on this device; chain is now " +
-                                       tierChain(ctx).joinToString(","))
+                                       tierChain(ctx).joinToString(",") + "; " + why)
     }
 
     private fun buildCode(ctx: Context): Long = runCatching {
@@ -160,6 +213,7 @@ object ModelPaths {
         // to look at the GPU at all. Setting it afterwards would leave the models that the
         // pipeline opened first on the unit this is meant to move them off.
         NativePipe.setNcnnGpu(ncnnGpu(ctx))
+        NativePipe.setNcnnLowMemory(lowMemoryOn(ctx))
         // Native has its own copy of the chain and its own presence check, so filtering
         // the Kotlin chain alone would only redirect the DOWNLOADER -- init would still
         // load the rejected tier first, fail its probe, and fall back, paying a full

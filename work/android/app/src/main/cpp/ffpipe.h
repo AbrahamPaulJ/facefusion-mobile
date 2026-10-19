@@ -171,6 +171,12 @@ class Pipeline {
    * rejection without having to fail first.
    */
   const std::string& rejectedVariant() const { return rejected_; }
+  /**
+   * WHY [rejectedVariant] was refused: the per-model probe report, which names the model
+   * that would not execute and the backend's error. Kept apart from error(), which a
+   * later tier, or an optional model being absent, overwrites.
+   */
+  const std::string& rejectedReason() const { return rejectedWhy_; }
 
   /**
    * Upstream's content gate on ONE frame (content_analyser.py:detect_with_nsfw_2).
@@ -502,6 +508,7 @@ class Pipeline {
   std::string err_;
   std::string tier_;
   std::string rejected_;
+  std::string rejectedWhy_;
   bool nsfwQuantised_ = false;
 };
 

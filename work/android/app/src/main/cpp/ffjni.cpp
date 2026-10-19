@@ -28,6 +28,7 @@ namespace {
 std::unique_ptr<ffpipe::Pipeline> g_pipe;
 std::string g_err;
 std::string g_rejectedTier;
+std::string g_rejectedWhy;
 std::vector<std::string> g_skipTiers;
 
 /**
@@ -170,6 +171,7 @@ Java_com_facefusion_mobile_NativePipe_initEx(JNIEnv* env, jclass, jstring jLib, 
   // next one work -- that device still wants the rejection remembered, or it pays the
   // failed load again on every launch for the life of the install.
   g_rejectedTier = g_pipe->rejectedVariant();
+  g_rejectedWhy = g_pipe->rejectedReason();
   if (!ok) {
     g_err = g_pipe->error();
     g_pipe.reset();
@@ -219,6 +221,12 @@ Java_com_facefusion_mobile_NativePipe_setOptionsEx(JNIEnv* env, jclass,
 JNIEXPORT jstring JNICALL
 Java_com_facefusion_mobile_NativePipe_rejectedTier(JNIEnv* env, jclass) {
   return env->NewStringUTF(g_rejectedTier.c_str());
+}
+
+// Why that tier was refused, or "". The same lifetime as g_rejectedTier.
+JNIEXPORT jstring JNICALL
+Java_com_facefusion_mobile_NativePipe_rejectedReason(JNIEnv* env, jclass) {
+  return env->NewStringUTF(g_rejectedWhy.c_str());
 }
 
 // Frames between real face detections; 0 disables tracking. Set ONLY around a sequential
@@ -806,6 +814,13 @@ Java_com_facefusion_mobile_NativePipe_setNcnnGpu(JNIEnv* env, jclass, jstring jM
   ffnn::setGpuPolicy(mode == "gpu" ? ffnn::GpuPolicy::Force
                      : mode == "cpu" ? ffnn::GpuPolicy::Off
                                      : ffnn::GpuPolicy::Auto);
+}
+
+// ncnn without Winograd, for phones that cannot hold the transformed weights. See
+// ffnn::setLowMemory. Same rule as setNcnnGpu: release the pipeline first.
+JNIEXPORT void JNICALL
+Java_com_facefusion_mobile_NativePipe_setNcnnLowMemory(JNIEnv*, jclass, jboolean on) {
+  ffnn::setLowMemory(on == JNI_TRUE);
 }
 
 // One line about the runtime that is actually running, for the log box and the bug report.

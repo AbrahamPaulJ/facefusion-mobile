@@ -135,8 +135,8 @@ $staged = "/data/local/tmp/ffinstall.apk"
 # Verified, not assumed. `install` is the one step whose failure leaves everything after it
 # doing correct work on the wrong binary. NAME and CODE both, read separately: 0.9.0 and
 # 0.9.1 both reported versionCode 81 because one bump silently missed.
-$installed = ((& $adb -s $serial shell "dumpsys package $pkg | grep -m1 versionCode") -join "").Trim()
-$name = ((& $adb -s $serial shell "dumpsys package $pkg | grep -m1 versionName") -join "").Trim()
+$installed = ((& $adb -s $serial shell "dumpsys package $pkg 2>/dev/null | grep -m1 versionCode") -join "").Trim()
+$name = ((& $adb -s $serial shell "dumpsys package $pkg 2>/dev/null | grep -m1 versionName") -join "").Trim()
 Write-Output "installed   $name  $installed"
 
 if ($Tier -eq "auto") {

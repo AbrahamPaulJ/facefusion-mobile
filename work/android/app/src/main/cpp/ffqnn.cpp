@@ -554,10 +554,17 @@ Handle load(const std::string& binPath) {
     munmap(map, (size_t)st.st_size); delete m;
     fail("systemContextGetBinaryInfo"); return nullptr;
   }
-  if (g_be.qnn.contextCreateFromBinary(g_be.backend, g_be.device, nullptr, map,
-                                       (uint64_t)st.st_size, &m->context, nullptr) != QNN_SUCCESS) {
+  // The CODE goes into the message. Without it a context built for more VTCM than the chip
+  // has, one from a newer SDK (err 5000, trap #24) and a phone out of memory all read the
+  // same in a bug report -- which is how issue #10 arrived with nothing to tell them apart.
+  const Qnn_ErrorHandle_t cerr = g_be.qnn.contextCreateFromBinary(
+      g_be.backend, g_be.device, nullptr, map, (uint64_t)st.st_size, &m->context, nullptr);
+  if (cerr != QNN_SUCCESS) {
     munmap(map, (size_t)st.st_size); delete m;
-    fail("contextCreateFromBinary " + binPath); return nullptr;
+    fail("contextCreateFromBinary " + binPath + " (err " +
+         std::to_string((unsigned long long)QNN_GET_ERROR_CODE(cerr)) + ", " +
+         std::to_string((long long)st.st_size) + " bytes)");
+    return nullptr;
   }
 
   const QnnSystemContext_GraphInfo_t* graphs = nullptr;

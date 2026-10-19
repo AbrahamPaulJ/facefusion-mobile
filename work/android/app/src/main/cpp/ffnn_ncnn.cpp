@@ -101,6 +101,10 @@ GpuPolicy g_policy = GpuPolicy::Auto;
 // non-Qualcomm device to the CPU on the strength of a file that was never going to be
 // found.
 int g_gpuTrust = 0;
+
+// No Winograd: see ffnn::setLowMemory. Read by openNet, so it reaches every model and the
+// GPU agreement check alike.
+bool g_lowMem = false;
 std::string g_gpuWhy;
 
 void logLine(const char* s) {
@@ -125,6 +129,7 @@ bool openNet(ncnn::Net& net, const Spec& sp, bool gpu, std::string& err) {
   net.opt.use_fp16_packed = true;
   net.opt.use_fp16_storage = true;
   net.opt.use_fp16_arithmetic = true;
+  if (g_lowMem) net.opt.use_winograd_convolution = false;
 
   const std::string base = g_spec.modelDir + "/" + sp.stem + ".ncnn.";
   if (net.load_param((base + "param").c_str()) != 0) {
@@ -409,6 +414,8 @@ DeviceInfo ncnnDeviceInfo() {
                                  : "ncnn, Vulkan available";
   return d;
 }
+
+void ncnnSetLowMemory(bool on) { g_lowMem = on; }
 
 void ncnnSetGpuPolicy(GpuPolicy p) {
   if (p == g_policy) return;

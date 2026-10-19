@@ -90,6 +90,7 @@
 
     <string name="dl_models_required">需要下载模型</string>
     <string name="dl_not_on_device">此设备上还没有人脸模型。</string>
+    <string name="dl_tier_refused">此手机的 NPU 无法运行已有的 %1$s 模型，因此需要 %2$s 这套。失败原因见“设置”中的“模型”。</string>
     <string name="dl_download">下载模型</string>
     <string name="dl_retry">重新下载</string>
     <string name="dl_progress">%1$d / %2$d MB   第 %3$d / %4$d 个文件</string>
@@ -176,6 +177,8 @@
     <string name="set_models_npu">NPU 模型 (%1$s)</string>
     <string name="set_models_gpu">GPU + CPU 模型</string>
     <string name="set_models_inactive_note">这台手机当前没有使用它们。保留在此以便删除，或在切换运行方式后重新使用。</string>
+    <string name="set_models_rejected_note">此手机的 NPU 无法运行这套模型，应用已改用另一套。可以放心删除。失败原因：%1$s</string>
+    <string name="set_models_rejected_unknown">未记录</string>
     <string name="set_models_none">未安装</string>
 
     <string name="set_this_device">本机</string>
@@ -446,6 +449,12 @@
     <string name="set_unit_auto">自动</string>
     <string name="set_unit_gpu">GPU</string>
     <string name="set_unit_cpu">CPU</string>
+    <string name="set_lowmem">低内存</string>
+    <string name="set_lowmem_note">以约一半的内存构建模型，速度约慢三倍。“自动”会在内存小于 5 GB 的手机上开启：在这些手机上加载完整模型会被 Android 关闭应用。</string>
+    <string name="set_lowmem_is_on">此手机当前已开启。</string>
+    <string name="set_lowmem_is_off">此手机当前已关闭。</string>
+    <string name="set_lowmem_on">开</string>
+    <string name="set_lowmem_off">关</string>
 
     <string name="swap_lips_pick">选择口型同步的人脸</string>
     <string name="swap_lips_pick_on">点按人脸：这些人脸的嘴唇会动。再次点按可移除。</string>

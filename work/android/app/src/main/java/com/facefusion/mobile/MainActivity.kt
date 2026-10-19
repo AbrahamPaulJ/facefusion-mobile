@@ -435,6 +435,9 @@ class MainActivity : ComponentActivity() {
     private var forcedBackend by mutableStateOf("")
     /** "auto" | "gpu" | "cpu" -- which UNIT ncnn may use. See [NativePipe.setNcnnGpu]. */
     private var ncnnGpu by mutableStateOf("auto")
+
+    /** "auto" | "on" | "off" -- ncnn without Winograd. See [NativePipe.setNcnnLowMemory]. */
+    private var lowMemory by mutableStateOf("auto")
     /**
      * The user's manual light/dark choice, or null to follow the system.
      *
@@ -1103,6 +1106,8 @@ class MainActivity : ComponentActivity() {
             val bgr = NativePipe.argbToBgr(px, soft.width, soft.height)
             val refusal = withContext(Dispatchers.Default) {
                 val v = ContentGate.inspectStill(bmp)
+                appendLog("live added source score %+.3f".format(v.score) +
+                          (if (v.detail.isNotBlank()) "  [" + v.detail + "]" else ""))
                 if (!v.permitted) ContentGate.message(
                     this@MainActivity, R.string.gate_subject_source_image, v)
                 // The native slots must stay aligned with this list, so the new face is
@@ -1508,9 +1513,15 @@ class MainActivity : ComponentActivity() {
         intent?.getStringExtra("unit")?.let {
             if (it == "auto" || it == "gpu" || it == "cpu") ModelPaths.setNcnnGpu(this, it)
         }
+        // adb: ... --es lowmem auto|on|off   -- the low memory switch, scriptable for the
+        // same reason as the unit pin: it is measured with a bench, not with a finger.
+        intent?.getStringExtra("lowmem")?.let {
+            if (it == "auto" || it == "on" || it == "off") ModelPaths.setLowMemory(this, it)
+        }
         ModelPaths.apply(this)
         forcedBackend = ModelPaths.forcedBackend(this)
         ncnnGpu = ModelPaths.ncnnGpu(this)
+        lowMemory = ModelPaths.lowMemory(this)
         // Restore the manual theme choice (if any) BEFORE the first composition, so a
         // pinned dark mode does not flash the light scheme on launch.
         darkTheme = ThemePrefs.load(this)
@@ -1929,6 +1940,7 @@ class MainActivity : ComponentActivity() {
                                     status = getString(R.string.status_cancelling)
                                 },
                                 modelsMissing = modelsMissing,
+                                modelsMissingNote = refusedTierNote(),
                                 onDownload = { onDownloadTapped() },
                                 onShareLog = { shareBugReport() },
                                 // A still saves the pane; a video saves its file.
@@ -2029,6 +2041,11 @@ class MainActivity : ComponentActivity() {
                                 ncnnGpu = ncnnGpu,
                                 onNcnnGpu =
                                     if (NativePipe.hasNcnnBackend()) ::onNcnnGpu
+                                    else null,
+                                lowMemory = lowMemory,
+                                lowMemoryActive = ModelPaths.lowMemoryOn(this@MainActivity),
+                                onLowMemory =
+                                    if (NativePipe.hasNcnnBackend()) ::onLowMemory
                                     else null,
                                 // The manual theme choice (null = follow the system) and
                                 // the switch that makes one. Saved immediately so a restart
@@ -2282,6 +2299,17 @@ class MainActivity : ComponentActivity() {
         appendLog("ncnn unit: $value")
     }
 
+    /** The low memory switch. Same order as [onNcnnGpu]: release, persist, re-probe. */
+    private fun onLowMemory(value: String) {
+        if (value == lowMemory) return
+        NativePipe.release()
+        ModelPaths.setLowMemory(this, value)
+        lowMemory = value
+        previewOptionsChanged(hard = true)
+        appendLog("low memory: $value (" +
+                  (if (ModelPaths.lowMemoryOn(this)) "on" else "off") + ")")
+    }
+
     // ------------------------------------------------------------------ device
 
     /** Measure the HTP once, off the main thread; the probe brings the backend up. */
@@ -2381,12 +2409,18 @@ class MainActivity : ComponentActivity() {
             "arch v" + d.arch + ", vtcm " + d.vtcmMb + " MB, soc " + d.soc +
                 ", tier " + d.tier + ", fp16 " + d.fp16
         else "not measured"
+        // A tier this phone refused, and why. It is the one fact a "models not on this
+        // device" report needs and the run log no longer has after a restart.
+        val refused = ModelPaths.rejectedTiers(this).sorted().joinToString("; ") {
+            it + ": " + (ModelPaths.rejectedReason(this, it) ?: "reason not recorded")
+        }
+        val npuLine = if (refused.isEmpty()) npu else "$npu\nrefused   : $refused"
         val models = modelDir().listFiles()?.map { it.name + "  " + it.length() + " bytes" }
             ?.sorted().orEmpty()
         // Say so when it does not go. The share used to be fire-and-forget, so a device
         // with nothing that accepts text/plain -- or a report too large for a Binder
         // transaction -- produced a button that did visibly nothing.
-        val err = BugReport.share(this, BugReport.compose(this, log, npu, models, status))
+        val err = BugReport.share(this, BugReport.compose(this, log, npuLine, models, status))
         if (err != null) {
             status = getString(R.string.status_share_failed, err)
             return
@@ -2426,11 +2460,27 @@ class MainActivity : ComponentActivity() {
      * disk -- so the download overlay has to re-ask, or they are left looking at an error
      * with nothing on screen that would act on it.
      */
+    /**
+     * "The v81 set would not run here, so this phone needs the v73 one", or null.
+     *
+     * A phone that fell back has a complete set on disk and is told its models are
+     * missing; without this the overlay reads as the download having failed (#16).
+     */
+    private fun refusedTierNote(): String? {
+        val ignored = modelsVersion
+        val d = ModelPaths.dir(this)
+        val refused = ModelPaths.rejectedTiers(this)
+            .firstOrNull { it != tier && ModelPaths.present(d, it, "yoloface") } ?: return null
+        return getString(R.string.dl_tier_refused, refused, tier)
+    }
+
     private fun noteTierRejection() {
         val bad = NativePipe.rejectedTier()
         if (bad.isBlank() || bad in ModelPaths.rejectedTiers(this)) return
-        appendLog("tier $bad will not execute on this device; falling back")
-        ModelPaths.rejectTier(this, bad)
+        val why = NativePipe.rejectedReason()
+        appendLog("tier $bad will not execute on this device; falling back" +
+                  (if (why.isNotBlank()) " ($why)" else ""))
+        ModelPaths.rejectTier(this, bad, why)
         refreshModelsMissing()
     }
 
@@ -2543,7 +2593,14 @@ class MainActivity : ComponentActivity() {
             if (v == ModelPaths.NCNN_TIER) getString(R.string.set_models_gpu)
             else getString(R.string.set_models_npu, v)
         return listOf(ModelSection(title(active), "", modelRows(active), active = true)) +
-            others.map { ModelSection(title(it), "", modelRows(it), active = false) }
+            others.map {
+                val why = ModelPaths.rejectedReason(this, it)
+                ModelSection(title(it), "", modelRows(it), active = false,
+                             note = if (it in ModelPaths.rejectedTiers(this))
+                                 getString(R.string.set_models_rejected_note,
+                                           why ?: getString(R.string.set_models_rejected_unknown))
+                             else null)
+            }
     }
 
     private fun modelRows(t: String): List<ModelRow> {
@@ -2909,6 +2966,11 @@ class MainActivity : ComponentActivity() {
                 // handle can reach any frame in the clip and this pane displays it.
                 ContentGate.inspectStill(frame).let { v ->
                     if (!v.permitted) {
+                        // Logged with its subject, like every other check: a report that
+                        // shows only the SOURCE score passing cannot say this was the
+                        // refusal on screen (issue #17).
+                        appendLog("preview target frame score %+.3f, refused".format(v.score) +
+                                  (if (v.detail.isNotBlank()) "  [" + v.detail + "]" else ""))
                         previewNote = ContentGate.message(this@MainActivity, R.string.gate_subject_this_frame, v)
                         swappedFrame = null
                         return@launch
@@ -3971,6 +4033,8 @@ class MainActivity : ComponentActivity() {
                     val bmp = decodeOriented(ls.uri)
                         ?: return@withContext "cannot read source ${i + 1}"
                     val verdict = ContentGate.inspectStill(bmp)
+                    appendLog("live source ${i + 1} score %+.3f".format(verdict.score) +
+                              (if (verdict.detail.isNotBlank()) "  [" + verdict.detail + "]" else ""))
                     if (!verdict.permitted)
                         return@withContext ContentGate.message(
                             this@MainActivity, R.string.gate_subject_source_image, verdict)
