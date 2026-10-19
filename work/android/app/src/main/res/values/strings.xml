@@ -331,6 +331,12 @@
     <string name="set_link_upstream">FaceFusion (original) on GitHub</string>
     <string name="set_link_licence">Upstream licence (OpenRAIL-AS)</string>
     <string name="set_licence_note">Model licences differ and are not all permissive: yoloface_8n is GPL-3.0, arcface_w600k_r50 and inswapper_128 are non-commercial, and hyperswap_1a_256 is ResearchRAIL.</string>
+    <string name="set_support">Support</string>
+    <string name="set_support_body">FaceFusion Mobile is free, and I build it on my own. I pay for development out of my own pocket: Claude Code and the hardware the models are converted and tested on are expensive. A donation really helps me keep development moving at a fast pace. Thank you!</string>
+    <string name="set_support_coffee">Buy me a coffee</string>
+    <string name="set_support_more">My other projects</string>
+    <string name="set_support_nightmare">Image and video generation on the phone\'s NPU, offline, built from nodes.</string>
+    <string name="set_support_npuforge">Convert an SD 1.5 or SDXL checkpoint for the NPU on the phone itself, no PC.</string>
 
     <!-- Chip tiers. The tier names and the chip names are identifiers: translate the
          prose around them, never "SM8750", "Snapdragon" or "VTCM". -->

@@ -7,6 +7,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -765,6 +766,51 @@ fun SettingsScreen(
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+
+        // Support (asked for 2026-10-20, as Nightmare's): why it helps, the coffee link and
+        // the author's other two apps. The same Buy Me a Coffee page as the README's Support
+        // section. Links open in the browser; nothing is sent from the app.
+        Caption(stringResource(R.string.set_support))
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    stringResource(R.string.set_support_body),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Button(
+                    { uris.openUri("https://buymeacoffee.com/abrahampaulj") },
+                    Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Filled.Favorite, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.set_support_coffee))
+                }
+                Text(
+                    stringResource(R.string.set_support_more),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                for ((name, body, url) in listOf(
+                    Triple("Nightmare Mobile", R.string.set_support_nightmare,
+                           "https://github.com/AbrahamPaulJ/nightmare-mobile"),
+                    Triple("npuforge", R.string.set_support_npuforge,
+                           "https://github.com/AbrahamPaulJ/npuforge"),
+                )) {
+                    OutlinedCard({ uris.openUri(url) }, Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                            Text(name, style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                stringResource(body),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
             }
         }
 

@@ -232,6 +232,12 @@
     <string name="set_link_upstream">FaceFusion (оригинал) на GitHub</string>
     <string name="set_link_licence">Лицензия оригинала (OpenRAIL-AS)</string>
     <string name="set_licence_note">Лицензии моделей различаются и не все разрешительные: yoloface_8n — GPL-3.0, arcface_w600k_r50 и inswapper_128 — некоммерческие, а hyperswap_1a_256 — ResearchRAIL.</string>
+    <string name="set_support">Поддержка</string>
+    <string name="set_support_body">FaceFusion Mobile бесплатен, и я делаю его один. Разработку я оплачиваю из своего кармана: Claude Code и оборудование, на котором конвертируются и тестируются модели, стоят дорого. Пожертвование очень помогает мне развивать приложение быстро. Спасибо!</string>
+    <string name="set_support_coffee">Угостить кофе</string>
+    <string name="set_support_more">Другие мои проекты</string>
+    <string name="set_support_nightmare">Офлайн-генерация изображений и видео на NPU телефона, из узлов.</string>
+    <string name="set_support_npuforge">Конвертирует чекпоинт SD 1.5 или SDXL для NPU прямо на телефоне, без ПК.</string>
 
     <string name="tier_v68">Snapdragon 888 и старее (v68), 8 Gen 1 (v69) или любой чип с VTCM меньше 8 МБ</string>
     <string name="tier_v73">8 Gen 2 (v73), 8 Gen 3 (v75) и чипы v79, кроме SM8750</string>

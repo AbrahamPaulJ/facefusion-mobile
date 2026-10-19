@@ -254,6 +254,8 @@ like to put something towards it:
 
 **[buymeacoffee.com/abrahampaulj](https://buymeacoffee.com/abrahampaulj)**
 
+The same link is in the app, under **Settings, About, Support**.
+
 Bug reports and pull requests are worth just as much. The fastest way to get something
 fixed is **Share bug report** in Settings, which assembles the device details and the run
 log and contains no media.

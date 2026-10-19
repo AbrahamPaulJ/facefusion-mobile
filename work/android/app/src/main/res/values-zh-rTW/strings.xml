@@ -229,6 +229,12 @@
     <string name="set_link_upstream">FaceFusion（原專案）的 GitHub 頁面</string>
     <string name="set_link_licence">上游授權條款（OpenRAIL-AS）</string>
     <string name="set_licence_note">各模型的授權條款並不相同，也不全是寬鬆授權：yoloface_8n 為 GPL-3.0，arcface_w600k_r50 與 inswapper_128 為非商業用途，hyperswap_1a_256 為 ResearchRAIL。</string>
+    <string name="set_support">支持</string>
+    <string name="set_support_body">FaceFusion Mobile 是免費的，由我一個人開發。開發費用由我自己負擔：Claude Code 以及用於轉換、測試模型的硬體都很昂貴。您的捐助能幫助我保持快速開發。謝謝！</string>
+    <string name="set_support_coffee">請我喝杯咖啡</string>
+    <string name="set_support_more">我的其他專案</string>
+    <string name="set_support_nightmare">在手機 NPU 上離線生成圖片與影片，用節點搭建流程。</string>
+    <string name="set_support_npuforge">在手機上直接把 SD 1.5 或 SDXL 檢查點轉換為 NPU 模型，無需電腦。</string>
 
     <string name="tier_v68">Snapdragon 888 及更早 (v68)、8 Gen 1 (v69)，或 VTCM 小於 8 MB 的晶片</string>
     <string name="tier_v73">8 Gen 2 (v73)、8 Gen 3 (v75)，以及 SM8750 以外的 v79 晶片</string>
