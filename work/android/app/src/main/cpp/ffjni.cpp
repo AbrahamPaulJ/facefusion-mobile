@@ -9,8 +9,6 @@
 
 #include <jni.h>
 #include <android/bitmap.h>
-// TEMP DEBUG (lips target diagnosis).
-#include <android/log.h>
 
 #include <cmath>
 #include <cstdio>    // snprintf, for stageMillis
@@ -182,9 +180,6 @@ Java_com_facefusion_mobile_NativePipe_initEx(JNIEnv* env, jclass, jstring jLib, 
   if (g_refEmbedding.size() == 512)
     g_pipe->setReferenceEmbedding(g_refEmbedding.data());
   // Same for the lips targets: taps in the preview must survive the export run.
-  // TEMP DEBUG: log whether there was anything to re-apply.
-  __android_log_print(ANDROID_LOG_INFO, "fflips", "initEx: lipRefs=%d",
-                      (int)g_lipRefEmbeddings.size());
   for (const auto& e : g_lipRefEmbeddings) {
     if (e.size() == 512) g_pipe->addLipReferenceEmbedding(e.data());
   }

@@ -357,10 +357,6 @@
     <string name="set_theme_desc_light">浅色</string>
     <string name="live_lens_front">前置</string>
     <string name="live_lens_back">后置</string>
-    <string name="swap_show_faces">显示检测到的人脸</string>
-    <string name="status_reference_set">仅替换该人脸。再次点按可替换所有人脸。</string>
-    <string name="status_reference_missed">该位置没有人脸。</string>
-    <string name="status_reference_cleared">已恢复替换所有人脸。</string>
     <string name="opt_reference_distance">匹配所选人脸</string>
     <string name="opt_reference_distance_hint">仅在点选目标人脸后生效。数值越大匹配的人越多；越小则同一个人转头时可能不再匹配。</string>
     <string name="swap_action_batch">替换 %1$d 个片段</string>
@@ -408,7 +404,7 @@
     <string name="status_batch_images_only">照片逐张替换；结果已显示在面板上。</string>
     <string name="swap_batch_add">添加更多片段（批量）</string>
     <string name="swap_batch_add_more">添加更多片段</string>
-    <string name="status_faces_found">检测到 %1$d 张人脸，点按其中一张仅替换该人脸。</string>
+    <string name="status_faces_found">检测到 %1$d 张人脸。点按嘴唇按钮，再点按人脸，选择对谁进行口型同步。</string>
     <string name="status_reference_warming">正在准备预览，请稍后再次点按该人脸。</string>
     <string name="batch_autosave">自动保存到相册</string>
     <string name="batch_output_of">第 %1$d / %2$d 个片段，滑动切换</string>
@@ -451,4 +447,12 @@
     <string name="set_unit_gpu">GPU</string>
     <string name="set_unit_cpu">CPU</string>
 
+    <string name="swap_lips_pick">选择口型同步的人脸</string>
+    <string name="swap_lips_pick_on">点按人脸：这些人脸的嘴唇会动。再次点按可移除。</string>
+    <string name="swap_lips_pick_off">已关闭口型同步人脸选择</string>
+    <string name="status_lips_set">仅对该人脸进行口型同步。再次点按可移除。</string>
+    <string name="status_lips_set_many">对 %1$d 张人脸进行口型同步。再次点按其中一张可移除。</string>
+    <string name="status_lips_cleared">已恢复对所有人脸进行口型同步。</string>
+    <string name="status_lips_missed">该位置没有人脸。</string>
+    <string name="status_lips_wait_boxes">点按处还没有人脸框。请等待红色框出现，再点按人脸。</string>
 </resources>

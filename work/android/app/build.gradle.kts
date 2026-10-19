@@ -472,8 +472,10 @@ android {
         // its confirmation, and the primary action on both screens follows the scroll.
         // 106 = hyperswap_1b/1c became hosted, and OPTIONAL: required they would have
         // put 1.6 GB behind the button a new install taps to get started.
-        versionCode = 106
-        versionName = "0.9.34$variantTag"    // "-dev" == NO content gate
+        // 107 = PR #12, the lips target picker, with its debug logging taken out and the
+        // lips list made safe to change while a render is reading it.
+        versionCode = 107
+        versionName = "0.9.35$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }

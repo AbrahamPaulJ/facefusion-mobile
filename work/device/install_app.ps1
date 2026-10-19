@@ -63,42 +63,81 @@ if (-not $apk) {
 }
 Write-Output ("apk {0:N1} MB  {1}  -> {2}" -f ($apk.Length / 1MB), $apk.Name, $pkg)
 
-# ⚠ NO `2>&1` HERE, and no pipeline. Windows PowerShell 5.1 wraps a native command's
-# stderr in ErrorRecords -- adb writes its progress there -- so the redirect turned a
-# successful install into a NativeCommandError, the pipeline swallowed the result, and the
-# script carried on to push models to a build it had never installed. That is how 0.4.2
-# came to be "installed" while the phone still ran 0.4.1: the screenshots were of the old
-# build and the only clue was one line of PowerShell noise.
-& $adb -s $serial install -r -g $apk.FullName
-
-# Verified, not assumed. `install` is the one step whose failure leaves everything after it
-# doing correct work on the wrong binary.
-$installed = ((& $adb -s $serial shell "dumpsys package $pkg | grep -m1 versionCode") -join "").Trim()
-Write-Output "installed   $installed"
-
-# A COPY IN THE PHONE'S DOWNLOADS, every time. Installing puts the build on this device;
-# the file in Downloads is what gets handed to somebody else -- a friend with an Exynos
-# phone, say -- without a PC in the loop.
+# A COPY IN THE PHONE'S DOWNLOADS FIRST, and the install made FROM it. The file in
+# Downloads is what gets handed to somebody else -- a friend with an Exynos phone, say --
+# without a PC in the loop, and installing from that same file means the build on this
+# device is byte-for-byte the build in Downloads.
 #
-# Verified by hash, never by size. This is the transfer CLAUDE.md warns about: Tailscale
-# drops above ~40 MB and has silently truncated an APK twice, and adb reports success
-# either way -- it took a retry on the very first run of this block.
+# Verified by hash, never by size. Tailscale drops above ~40 MB and has silently truncated
+# an APK more than once, and adb reports success either way. A whole push is tried first
+# (USB takes it in one); when its hash is wrong the file goes up in 20 MB parts, each part
+# hashed on the device and re-pushed until it matches, then joined with `cat` and the
+# WHOLE file hashed again. Done by hand thirteen times before it lived here.
 #
 # Older copies of OUR filename are swept, best effort: anything a different app wrote is
 # owned by that app's uid and `shell` cannot delete it, so `rm -f` fails silently there.
 # The guarantee is that the newest build is present and correct, not that it is alone.
+function Get-RemoteSha([string]$path) {
+    ((& $adb -s $serial shell "sha256sum $path | cut -d' ' -f1") -join "").Trim().ToLower()
+}
+function Push-Verified([string]$local, [string]$remote) {
+    $want = (Get-FileHash $local -Algorithm SHA256).Hash.ToLower()
+    & $adb -s $serial push $local $remote 2>&1 | Out-Null
+    if ((Get-RemoteSha $remote) -eq $want) { return $true }
+    Write-Output "  whole push hash mismatch; sending in 20 MB parts"
+    $part = 20MB
+    $bytes = [System.IO.File]::ReadAllBytes($local)
+    $n = [int][math]::Ceiling($bytes.Length / $part)
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("ffpush_" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $tmp | Out-Null
+    $names = @()
+    try {
+        for ($i = 0; $i -lt $n; $i++) {
+            $len = [math]::Min($part, $bytes.Length - $i * $part)
+            $chunk = New-Object byte[] $len
+            [Array]::Copy($bytes, $i * $part, $chunk, 0, $len)
+            $f = Join-Path $tmp ("part{0:D3}" -f $i)
+            [System.IO.File]::WriteAllBytes($f, $chunk)
+            $h = (Get-FileHash $f -Algorithm SHA256).Hash.ToLower()
+            $r = "$remote.part{0:D3}" -f $i
+            $done = $false
+            foreach ($try in 1..5) {
+                & $adb -s $serial push $f $r 2>&1 | Out-Null
+                if ((Get-RemoteSha $r) -eq $h) { $done = $true; break }
+            }
+            if (-not $done) { Write-Output "  part $i failed 5 times"; return $false }
+            $names += $r
+        }
+    } finally { Remove-Item -Recurse -Force $tmp }
+    & $adb -s $serial shell ("cat " + ($names -join " ") + " > $remote; rm -f " + ($names -join " "))
+    return ((Get-RemoteSha $remote) -eq $want)
+}
+
 $dl = "/sdcard/Download"
 & $adb -s $serial shell "rm -f $dl/facefusion-mobile-*.apk" 2>&1 | Out-Null
-$want = (Get-FileHash $apk.FullName -Algorithm SHA256).Hash.ToLower()
+$onPhone = "$dl/$($apk.Name)"
 $ok = $false
-foreach ($try in 1..3) {
-    & $adb -s $serial push $apk.FullName "$dl/$($apk.Name)" 2>&1 | Out-Null
-    $got = ((& $adb -s $serial shell "sha256sum $dl/$($apk.Name) | cut -d' ' -f1") -join "").Trim()
-    if ($got -eq $want) { $ok = $true; break }
-    Write-Output "  Downloads copy truncated, retrying ($try)"
+foreach ($r in (Push-Verified $apk.FullName $onPhone)) { if ($r -is [bool]) { $ok = $r } else { Write-Output $r } }
+if ($ok) { Write-Output "Downloads   $onPhone  sha256 ok" }
+else {
+    Write-Output "Downloads   FAILED -- do not hand this file to anyone, and nothing was installed"
+    exit 1
 }
-if ($ok) { Write-Output "Downloads   $dl/$($apk.Name)  sha256 ok" }
-else      { Write-Output "Downloads   FAILED after 3 tries -- do not hand this file to anyone" }
+
+# `pm` cannot always read shared storage, so it installs from a copy in /data/local/tmp.
+# ⚠ NO `2>&1` on the install and no pipeline: Windows PowerShell 5.1 wraps a native
+# command's stderr in ErrorRecords, which once turned a successful install into an error
+# and, the other way round, let a script carry on to push models to a build it had never
+# installed (0.4.2 "installed" while the phone ran 0.4.1).
+$staged = "/data/local/tmp/ffinstall.apk"
+& $adb -s $serial shell "cp $onPhone $staged && pm install -r -g $staged; rm -f $staged"
+
+# Verified, not assumed. `install` is the one step whose failure leaves everything after it
+# doing correct work on the wrong binary. NAME and CODE both, read separately: 0.9.0 and
+# 0.9.1 both reported versionCode 81 because one bump silently missed.
+$installed = ((& $adb -s $serial shell "dumpsys package $pkg | grep -m1 versionCode") -join "").Trim()
+$name = ((& $adb -s $serial shell "dumpsys package $pkg | grep -m1 versionName") -join "").Trim()
+Write-Output "installed   $name  $installed"
 
 if ($Tier -eq "auto") {
     $remote = "/data/local/tmp/ff"

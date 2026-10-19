@@ -3637,6 +3637,10 @@ class MainActivity : ComponentActivity() {
                 }
                 // FIVE floats: the box plus the new index in the lips list.
                 val prevCount = lipBoxes.size
+                // The tap runs the full analyse on the WARM pipeline without taking
+                // PipeGuard (taking it would read as another holder and force a reload),
+                // so at least do not start it on top of a render already in flight.
+                while (previewBusy) delay(50)
                 val got = withContext(Dispatchers.Default) {
                     runCatching {
                         val soft = frame.asArgb8888()
@@ -4343,15 +4347,11 @@ class MainActivity : ComponentActivity() {
                     val restored = restoreSwapAssignments()
                     // Same for the lips targets: N faces when set, all faces when not.
                     // Logged so a run that syncs everyone says whether it had a choice.
-                    // TEMP DEBUG: also toasted, so the answer is on screen with no log
-                    // reading needed. Removed once the export-filter issue is fixed.
                     val lipsN = pushLipSelection()
-                    val lipsMsg = "lips target: " +
-                        (if (lipsN > 0) "$lipsN face" + (if (lipsN > 1) "s" else "")
-                         else "all faces") +
-                        ", match %.2f".format(opts.referenceDistance)
-                    appendLog(lipsMsg)
-                    runOnUiThread { toast("DEBUG " + lipsMsg) }
+                    if (opts.lipSync)
+                        appendLog("lips target: " +
+                            (if (lipsN > 0) "$lipsN face" + (if (lipsN > 1) "s" else "")
+                             else "all faces"))
                     appendLog("source ready (${prepared.slots[0].width}x" +
                               "${prepared.slots[0].height}, ${prepared.slots.size} source" +
                               (if (prepared.slots.size == 1) "" else "s") +

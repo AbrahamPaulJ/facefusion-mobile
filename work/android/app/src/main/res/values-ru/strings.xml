@@ -341,10 +341,6 @@
     <string name="set_theme_desc_light">Светлая</string>
     <string name="live_lens_front">ФРОНТ</string>
     <string name="live_lens_back">ТЫЛ</string>
-    <string name="swap_show_faces">Показать найденные лица</string>
-    <string name="status_reference_set">Меняется только это лицо. Нажмите ещё раз для всех лиц.</string>
-    <string name="status_reference_missed">В этой точке лица нет.</string>
-    <string name="status_reference_cleared">Снова меняются все лица.</string>
     <string name="opt_reference_distance">Совпадение с выбранным лицом</string>
     <string name="opt_reference_distance_hint">Работает только после выбора лица на цели. Больше: совпадает больше людей; меньше: тот же человек может перестать совпадать, когда отвернётся.</string>
     <string name="swap_action_batch">Обработать %1$d клипов</string>
@@ -392,7 +388,7 @@
     <string name="status_batch_images_only">Фото обрабатывается по одному; результат уже на панели.</string>
     <string name="swap_batch_add">Добавить клипы (пакет)</string>
     <string name="swap_batch_add_more">Добавить ещё клипы</string>
-    <string name="status_faces_found">Найдено лиц: %1$d. Нажмите на одно, чтобы заменить только его.</string>
+    <string name="status_faces_found">Найдено лиц: %1$d. Нажмите кнопку губ, затем лицо, чтобы выбрать, кому синхронизировать губы.</string>
     <string name="status_reference_warming">Готовится предпросмотр. Нажмите на лицо ещё раз через мгновение.</string>
     <string name="batch_autosave">Сохранять каждый клип в галерею сразу</string>
     <string name="batch_output_of">Клип %1$d из %2$d, проведите пальцем</string>
@@ -435,4 +431,12 @@
     <string name="set_unit_gpu">GPU</string>
     <string name="set_unit_cpu">CPU</string>
 
+    <string name="swap_lips_pick">Выбрать, кому синхронизировать губы</string>
+    <string name="swap_lips_pick_on">Нажимайте на лица: у них будут двигаться губы. Нажмите ещё раз, чтобы убрать.</string>
+    <string name="swap_lips_pick_off">Выбор лиц для синхронизации губ выключен</string>
+    <string name="status_lips_set">Синхронизация губ только на этом лице. Нажмите ещё раз, чтобы убрать.</string>
+    <string name="status_lips_set_many">Синхронизация губ на лицах: %1$d. Нажмите на одно ещё раз, чтобы убрать.</string>
+    <string name="status_lips_cleared">Синхронизация губ снова на всех лицах.</string>
+    <string name="status_lips_missed">В этой точке лица нет.</string>
+    <string name="status_lips_wait_boxes">Под касанием пока нет рамки лица. Дождитесь красных рамок и нажмите на лицо.</string>
 </resources>

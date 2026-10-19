@@ -7,11 +7,9 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <mutex>
 
 #include "ffnn.h"
-
-// TEMP DEBUG (lips target diagnosis): removed once the export-filter issue is fixed.
-#include <android/log.h>
 
 // FFDEBUG=1 prints what each stage actually produced.  Cheap, and the alternative is
 // guessing at a tensor layout from the host side.
@@ -41,9 +39,6 @@ static const float kTrackMinScore = 0.85f;
 
 namespace ffpipe {
 namespace {
-
-// TEMP DEBUG (lips target diagnosis): frame budget for verbose syncLip logging.
-static int lipDbgFrames = 0;
 
 double nowMs() {
   using namespace std::chrono;
@@ -233,6 +228,10 @@ struct Pipeline::Impl {
   // One entry per tapped person: tapping one again removes it.
   struct LipRef { float embeddingNorm[512]{}; float box[4]{}; };
   std::vector<LipRef> lipRefs;
+  // The list is written from UI threads (tap, restore, clear) while a render reads it
+  // in syncLip; a push_back that reallocates under that loop is a use-after-free.
+  // Every access takes this, and syncLip reads a COPY taken under it.
+  mutable std::mutex lipMu;
   static constexpr int kLipRefMax = 16;
 
   /**
@@ -1617,6 +1616,7 @@ bool Pipeline::addLipReferenceFaceAt(const ffcv::Image& frame, float x, float y,
   // Always appends: add-vs-remove is the caller's tap decision (hit inside an
   // existing marker box = remove), never an embedding guess -- two similar
   // faces must both be listable, and the export matches by identity anyway.
+  std::lock_guard<std::mutex> lk(p_->lipMu);
   if ((int)p_->lipRefs.size() >= Impl::kLipRefMax) { err_ = "lips list is full"; return false; }
   Impl::LipRef r{};
   std::memcpy(r.embeddingNorm, hit->embeddingNorm, sizeof(r.embeddingNorm));
@@ -1624,32 +1624,36 @@ bool Pipeline::addLipReferenceFaceAt(const ffcv::Image& frame, float x, float y,
   p_->lipRefs.push_back(r);
   if (outBox) for (int k = 0; k < 4; ++k) outBox[k] = hit->box[k];
   if (outIndex) *outIndex = (int)p_->lipRefs.size() - 1;
-  // TEMP DEBUG: confirm the tap stored an identity on this pipeline.
-  __android_log_print(ANDROID_LOG_INFO, "fflips",
-                      "lip tap added: idx=%d nFaces=%d box=%.0f,%.0f,%.0f,%.0f",
-                      (int)p_->lipRefs.size() - 1, (int)faces.size(),
-                      hit->box[0], hit->box[1], hit->box[2], hit->box[3]);
   return true;
 }
 
 bool Pipeline::removeLipReferenceAt(int index) {
   err_.clear();
   if (!p_) { err_ = "pipeline not initialised"; return false; }
+  std::lock_guard<std::mutex> lk(p_->lipMu);
   if (index < 0 || index >= (int)p_->lipRefs.size()) { err_ = "lips index out of range"; return false; }
   p_->lipRefs.erase(p_->lipRefs.begin() + index);
   return true;
 }
 
-int Pipeline::lipReferenceCount() const { return p_ ? (int)p_->lipRefs.size() : 0; }
+int Pipeline::lipReferenceCount() const {
+  if (!p_) return 0;
+  std::lock_guard<std::mutex> lk(p_->lipMu);
+  return (int)p_->lipRefs.size();
+}
 
 bool Pipeline::lipReferenceBox(int index, float* outBox) const {
-  if (!p_ || !outBox || index < 0 || index >= (int)p_->lipRefs.size()) return false;
+  if (!p_ || !outBox) return false;
+  std::lock_guard<std::mutex> lk(p_->lipMu);
+  if (index < 0 || index >= (int)p_->lipRefs.size()) return false;
   for (int k = 0; k < 4; ++k) outBox[k] = p_->lipRefs[(size_t)index].box[k];
   return true;
 }
 
 bool Pipeline::lipReferenceEmbedding(int index, float* out) const {
-  if (!p_ || !out || index < 0 || index >= (int)p_->lipRefs.size()) return false;
+  if (!p_ || !out) return false;
+  std::lock_guard<std::mutex> lk(p_->lipMu);
+  if (index < 0 || index >= (int)p_->lipRefs.size()) return false;
   std::memcpy(out, p_->lipRefs[(size_t)index].embeddingNorm,
               sizeof(p_->lipRefs[(size_t)index].embeddingNorm));
   return true;
@@ -1657,6 +1661,7 @@ bool Pipeline::lipReferenceEmbedding(int index, float* out) const {
 
 void Pipeline::addLipReferenceEmbedding(const float* e) {
   if (!p_ || !e) return;
+  std::lock_guard<std::mutex> lk(p_->lipMu);
   if ((int)p_->lipRefs.size() >= Impl::kLipRefMax) return;
   // Appends unconditionally: same-person doubles are refused upstream (the tap
   // flow refreshes the marker instead, under a strict 0.05 bar), and a loose
@@ -1665,15 +1670,19 @@ void Pipeline::addLipReferenceEmbedding(const float* e) {
   Impl::LipRef r{};
   std::memcpy(r.embeddingNorm, e, sizeof(r.embeddingNorm));
   p_->lipRefs.push_back(r);
-  // TEMP DEBUG: confirm the export pipeline received a re-applied identity.
-  __android_log_print(ANDROID_LOG_INFO, "fflips", "lip embedding re-applied: n=%d",
-                      (int)p_->lipRefs.size());
-  lipDbgFrames = 0;
 }
 
-void Pipeline::clearLipReferenceFace() { if (p_) p_->lipRefs.clear(); }
+void Pipeline::clearLipReferenceFace() {
+  if (!p_) return;
+  std::lock_guard<std::mutex> lk(p_->lipMu);
+  p_->lipRefs.clear();
+}
 
-bool Pipeline::hasLipReferenceFace() const { return p_ && !p_->lipRefs.empty(); }
+bool Pipeline::hasLipReferenceFace() const {
+  if (!p_) return false;
+  std::lock_guard<std::mutex> lk(p_->lipMu);
+  return !p_->lipRefs.empty();
+}
 
 void Pipeline::resetStats() {
   msDetect = msLandmark = msRecognise = msSwap = msGeom = msEnhance = msLipSync = 0;
@@ -1702,7 +1711,12 @@ bool Pipeline::syncLip(ffcv::Image& frame, const std::vector<Face>& faces,
   // so one tap moves one mouth even among similar faces, several taps move
   // several -- and the same face is never dubbed twice. Unset = whoever
   // swapAll processes. Default (no selection anywhere) is still every face.
-  const bool byLipReference = !p_->lipRefs.empty();
+  std::vector<Impl::LipRef> lipRefs;
+  {
+    std::lock_guard<std::mutex> lk(p_->lipMu);
+    lipRefs = p_->lipRefs;
+  }
+  const bool byLipReference = !lipRefs.empty();
   const bool byReference = p_->haveReference;
   const Face* only = nullptr;
   if (!byLipReference && !byReference && cfg.swapLargestOnly) {
@@ -1712,17 +1726,6 @@ bool Pipeline::syncLip(ffcv::Image& frame, const std::vector<Face>& faces,
       if (a > best) { best = a; only = &f; }
     }
   }
-  // TEMP DEBUG: first frames of each process show filter state + per-face decision.
-  // Reset on every re-applied embedding (i.e. every init), so the export run's
-  // first frames are always captured even after preview frames consumed the budget.
-  const bool lipDbg = (lipDbgFrames++ < 5);
-  if (lipDbg) {
-    __android_log_print(ANDROID_LOG_INFO, "fflips",
-                        "syncLip: nLip=%d thresh=%.3f nFaces=%d",
-                        (int)p_->lipRefs.size(), cfg.referenceDistance,
-                        (int)faces.size());
-  }
-
   // For each face, its nearest listed identity (-1 when the list is empty).
   // A face is dubbed when it is some identity's best match within threshold:
   // exactly one mouth per tap, never two mouths for one tap, never two dubs
@@ -1732,9 +1735,9 @@ bool Pipeline::syncLip(ffcv::Image& frame, const std::vector<Face>& faces,
     for (size_t fi = 0; fi < faces.size(); ++fi) {
       float bestD = cfg.referenceDistance;
       int bestK = -1;
-      for (size_t k = 0; k < p_->lipRefs.size(); ++k) {
+      for (size_t k = 0; k < lipRefs.size(); ++k) {
         const float d = faceDistance(faces[fi].embeddingNorm,
-                                     p_->lipRefs[k].embeddingNorm);
+                                     lipRefs[k].embeddingNorm);
         if (d < bestD) { bestD = d; bestK = (int)k; }
       }
       if (bestK >= 0) {
@@ -1744,16 +1747,12 @@ bool Pipeline::syncLip(ffcv::Image& frame, const std::vector<Face>& faces,
         for (size_t gj = 0; gj < faces.size(); ++gj) {
           if (gj == fi) continue;
           if (faceDistance(faces[gj].embeddingNorm,
-                           p_->lipRefs[(size_t)bestK].embeddingNorm) < bestD) {
+                           lipRefs[(size_t)bestK].embeddingNorm) < bestD) {
             mine = false;
             break;
           }
         }
         if (mine) lipBest[fi] = bestK;
-      }
-      if (lipDbg) {
-        __android_log_print(ANDROID_LOG_INFO, "fflips", "  face best=%d %s",
-                            lipBest[fi], lipBest[fi] >= 0 ? "SYNC" : "SKIP");
       }
     }
   }
