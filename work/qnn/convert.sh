@@ -129,6 +129,26 @@ case "$NAME" in
     DIMS=(--input_dim target 1,3,128,128 --input_dim source 1,512)
     PRESERVE=(--preserve_io layout target output)
     ;;
+  # LivePortrait (docs/roadmap.md 10), STILLS ONLY. The feature volume is 5D NCDHW
+  # [1,32,16,64,64] between the two; preserve_io keeps it in the layout the next graph and
+  # the host reference both read. The keypoint tensors [1,21,3] have no image semantics and
+  # are left out of preserve_io, as hyperswap's `source` is (trap #23).
+  lp_feature)
+    ONNX=${ONNX:-$FF/work/onnx/lp_feature.onnx}
+    DIMS=(--input_dim input 1,3,256,256)
+    PRESERVE=(--preserve_io layout input feature_volume)
+    ;;
+  lp_motion)
+    ONNX=${ONNX:-$FF/work/onnx/lp_motion.onnx}
+    DIMS=(--input_dim input 1,3,256,256)
+    PRESERVE=(--preserve_io layout input)
+    ;;
+  lp_generator)
+    ONNX=${ONNX:-$FF/work/onnx/lp_generator.onnx}
+    DIMS=(--input_dim feature_volume 1,32,16,64,64 --input_dim source 1,21,3
+          --input_dim target 1,21,3)
+    PRESERVE=(--preserve_io layout feature_volume output)
+    ;;
   *) echo "unknown model: $NAME"; exit 1 ;;
 esac
 

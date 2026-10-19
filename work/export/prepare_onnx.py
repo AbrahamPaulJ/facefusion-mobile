@@ -355,6 +355,18 @@ def demote_fp16_to_fp32(model):
 	FP16, FP32 = 10, 1
 	stats = {'init': 0, 'const': 0, 'value_info': 0, 'cast': 0}
 
+	# What each Cast is fed, read BEFORE anything is rewritten. A Cast from an INTEGER
+	# tensor to fp16 is a real conversion, not part of the fp16 shell: LivePortrait's
+	# generator casts int64 grid indices that way, and deleting those left `Sub(float,
+	# int64)` for ORT to refuse. They are kept and retargeted to fp32 instead. hyperswap has
+	# none, so its demoted graph is unchanged by this.
+	elem = {}
+	inferred = shape_inference.infer_shapes(model, strict_mode=False)
+	for vi in list(inferred.graph.value_info) + list(inferred.graph.input):
+		elem[vi.name] = vi.type.tensor_type.elem_type
+	for t in g.initializer:
+		elem[t.name] = t.data_type
+
 	for t in g.initializer:
 		if t.data_type == FP16:
 			arr = numpy_helper.to_array(t).astype(numpy.float32)
@@ -382,6 +394,13 @@ def demote_fp16_to_fp32(model):
 			continue
 		to = next((a.i for a in node.attribute if a.name == 'to'), None)
 		if to not in (FP16, FP32):
+			continue
+		if elem.get(node.input[0], FP32) not in (FP16, FP32):
+			for a in node.attribute:
+				if a.name == 'to':
+					a.i = FP32
+			stats.setdefault('cast_kept', 0)
+			stats['cast_kept'] += 1
 			continue
 		src, dst = node.input[0], node.output[0]
 		# a Cast feeding a graph output must keep that output's name, so rename instead
@@ -1701,7 +1720,259 @@ def do_edtalk():
 	return path
 
 
+def batchnorm_to_affine(model):
+	"""Every BatchNormalization as a 1x1(x1) Conv with a diagonal weight.
+
+	The HTP rejects BatchNormalization on a 5D tensor (`Failed to validate op ..._norm1_
+	BatchNormalization with error 0xc26`, LivePortrait's feature extractor, 2.49). In
+	inference BN is exactly `x * s + b` with `s = gamma / sqrt(var + eps)` and
+	`b = beta - mean * s`, and elementwise ops are rank-agnostic. Pre-activation here (fed by
+	Reshape / Add), so there is no preceding conv to fold into.
+	"""
+	g = model.graph
+	init = {t.name: t for t in g.initializer}
+	shapes = {}
+	inferred = shape_inference.infer_shapes(model, strict_mode=False)
+	for vi in list(inferred.graph.value_info) + list(inferred.graph.input):
+		shapes[vi.name] = len(vi.type.tensor_type.shape.dim)
+	n = 0
+	for node in list(g.node):
+		if node.op_type != 'BatchNormalization':
+			continue
+		eps = next((a.f for a in node.attribute if a.name == 'epsilon'), 1e-5)
+		gamma, beta, mean, var = (numpy_helper.to_array(init[i]).astype(numpy.float64)
+		                          for i in node.input[1:5])
+		s = gamma / numpy.sqrt(var + eps)
+		b = beta - mean * s
+		rank = shapes.get(node.input[0], 5)
+		c = len(s)
+		# A 1x1x1 Conv with a DIAGONAL weight, not Mul + Add. The converter lays 5D
+		# activations out channel-last and left [1,C,1,1,1] constants as they were, so Mul +
+		# Add broadcast along the wrong axis (`Dimension at index 1 cannot be broadcast between
+		# in[0] (16) and in[1] (32)`). A Conv is laid out with every other Conv. C*C MACs per
+		# voxel: 0.4 GMAC over all six here, against 32 for the graph.
+		w = numpy.zeros((c, c) + (1,) * (rank - 2), numpy.float32)
+		for k in range(c):
+			w[(k, k) + (0,) * (rank - 2)] = s[k]
+		wn, bn = node.name + '_w', node.name + '_b'
+		g.initializer.append(numpy_helper.from_array(w, wn))
+		g.initializer.append(numpy_helper.from_array(b.astype(numpy.float32), bn))
+		idx = list(g.node).index(node)
+		g.node.insert(idx, helper.make_node(
+			'Conv', [node.input[0], wn, bn], [node.output[0]], name=node.name + '_conv',
+			kernel_shape=[1] * (rank - 2)))
+		g.node.remove(node)
+		n += 1
+	# gamma/beta/mean/var are now read by nothing; ORT warns about every one of them.
+	used = {i for nd in g.node for i in nd.input}
+	for t in [t for t in g.initializer if t.name not in used]:
+		g.initializer.remove(t)
+	return n
+
+
+def _ort_compare(path_a, path_b, feeds):
+	"""SNR of model b against model a on the same feeds, every output, worst first."""
+	import onnxruntime as ort
+	so = ort.SessionOptions()
+	so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+	ra = ort.InferenceSession(path_a, so, providers=['CPUExecutionProvider']).run(None, feeds)
+	rb = ort.InferenceSession(path_b, so, providers=['CPUExecutionProvider']).run(None, feeds)
+	worst = float('inf')
+	for x, y in zip(ra, rb):
+		x = numpy.asarray(x, numpy.float64).ravel(); y = numpy.asarray(y, numpy.float64).ravel()
+		noise = ((x - y) ** 2).sum()
+		snr = float('inf') if noise == 0 else 10 * numpy.log10((x ** 2).sum() / noise)
+		worst = min(worst, snr)
+	return worst
+
+
+def do_lp_feature():
+	"""LivePortrait feature extractor: 5D BatchNorm -> diagonal Conv. Verified against the
+	original on a seeded [0,1] crop."""
+	m = load('live_portrait_feature_extractor')
+	n = batchnorm_to_affine(strip_value_info(m))
+	print('  %d BatchNormalization -> diagonal 1x1x1 Conv' % n)
+	m = shape_inference.infer_shapes(strip_value_info(m), strict_mode=False)
+	checker.check_model(m)
+	path = save(m, 'lp_feature')
+	rng = numpy.random.default_rng(1234)
+	feeds = {'input': rng.random((1, 3, 256, 256), dtype=numpy.float32)}
+	print('  vs original: %.2f dB' % _ort_compare(
+		os.path.join(MODELS, 'live_portrait_feature_extractor.onnx'), path, feeds))
+	return path
+
+
+def derange_squares(model, limit=4096.0):
+	"""Keep every square inside fp16 range, exactly, for an fp32 graph the HTP runs in fp16.
+
+	LivePortrait's motion extractor (ConvNeXt-V2) came back from the HTP as NaN and +-60000.
+	With every intermediate exposed in onnxruntime, the only tensors past fp16's 65504 are
+	the decomposed LayerNorms' `Pow(x - mean, 2)` (up to 4.3e7) and the variance after it.
+	GRN's ReduceL2 squares INTERNALLY, invisible to that scan, and its output reached 349,
+	so a sum of squares of 1.2e5. Both are scale-invariant, as gpen's PixelNorm was
+	(work/ncnn/pnnx_prep.py, derange_pixelnorm):
+
+	  LayerNorm  d' = k * (x - mean),  eps' = k^2 * eps:  d' / sqrt(mean(d'^2) + eps') is the
+	             same function, with the square k^2 smaller.
+	  ReduceL2   ReduceL2(k * x) / k.
+
+	k is a power of two (an exact rescale), chosen per site from the maximum measured over
+	the calibration crops so the largest square lands under `limit` (16x headroom).
+	"""
+	import glob
+	import onnxruntime as ort
+	g = model.graph
+	prod = {o: n for n in g.node for o in n.output}
+	cons = {}
+	for n in g.node:
+		for i in n.input:
+			cons.setdefault(i, []).append(n)
+	init = {t.name: t for t in g.initializer}
+
+	def const_of(name):
+		if name in init:
+			return numpy_helper.to_array(init[name])
+		n = prod.get(name)
+		if n is not None and n.op_type == 'Constant':
+			return numpy_helper.to_array(n.attribute[0].t)
+		return None
+
+	# LayerNorm sites: d = Sub(x, mean); Pow(d, 2) -> ReduceMean -> Add(eps) -> Sqrt; Div(d, .)
+	sites = []
+	for p in g.node:
+		if p.op_type != 'Pow':
+			continue
+		d = p.input[0]
+		sub = prod.get(d)
+		e = const_of(p.input[1])
+		if sub is None or sub.op_type != 'Sub' or e is None or float(e) != 2.0:
+			continue
+		rm = [c for c in cons.get(p.output[0], []) if c.op_type == 'ReduceMean']
+		add = [c for c in cons.get(rm[0].output[0], []) if c.op_type == 'Add'] if rm else []
+		div = [c for c in cons.get(d, []) if c.op_type == 'Div' and c.input[0] == d]
+		if len(rm) == 1 and len(add) == 1 and len(div) == 1:
+			sites.append(('ln', p, add[0], div[0]))
+	for r in g.node:
+		if r.op_type == 'ReduceL2':
+			sites.append(('l2', r, None, None))
+
+	# Measure: the Pow output for a LayerNorm, the ReduceL2 output (squared) for a GRN.
+	probe = onnx.ModelProto()
+	probe.CopyFrom(model)
+	for kind, n, _, _ in sites:
+		probe.graph.output.append(helper.make_tensor_value_info(n.output[0], 1, None))
+	sess = ort.InferenceSession(probe.SerializeToString(), providers=['CPUExecutionProvider'])
+	names = [o.name for o in sess.get_outputs()]
+	peak = {}
+	for c in sorted(glob.glob(os.path.join(ROOT, 'calib', 'edtalk_target', '*.raw'))):
+		x = numpy.fromfile(c, numpy.float32).reshape(1, 3, 256, 256)
+		for nm, v in zip(names, sess.run(None, {'input': x})):
+			peak[nm] = max(peak.get(nm, 0.0), float(numpy.abs(v).max()) if numpy.size(v) else 0.0)
+
+	ln = l2 = 0
+	for kind, n, add, div in sites:
+		sq = peak.get(n.output[0], 0.0)
+		if kind == 'l2':
+			sq = sq * sq
+		if sq <= limit:
+			continue
+		k = 2.0 ** -int(numpy.ceil(0.5 * numpy.log2(sq / limit)))
+		kn = n.name + '_derange_k'
+		g.initializer.append(numpy_helper.from_array(numpy.array(k, numpy.float32), kn))
+		if kind == 'ln':
+			d = n.input[0]
+			dk = d + '_derange'
+			g.node.insert(list(g.node).index(n), helper.make_node(
+				'Mul', [d, kn], [dk], name=n.name + '_derange'))
+			n.input[0] = dk
+			div.input[0] = dk
+			ei = 1 if const_of(add.input[1]) is not None else 0
+			eps = float(const_of(add.input[ei]))
+			en = n.name + '_derange_eps'
+			g.initializer.append(numpy_helper.from_array(numpy.array(eps * k * k, numpy.float32), en))
+			add.input[ei] = en
+			ln += 1
+		else:
+			xk = n.input[0] + '_derange_' + str(l2)
+			g.node.insert(list(g.node).index(n), helper.make_node(
+				'Mul', [n.input[0], kn], [xk], name=n.name + '_derange_in'))
+			n.input[0] = xk
+			out = n.output[0]
+			raw = out + '_derange_raw'
+			n.output[0] = raw
+			inv = n.name + '_derange_inv'
+			g.initializer.append(numpy_helper.from_array(numpy.array(1.0 / k, numpy.float32), inv))
+			g.node.insert(list(g.node).index(n) + 1, helper.make_node(
+				'Mul', [raw, inv], [out], name=n.name + '_derange_out'))
+			l2 += 1
+	return ln, l2
+
+
+def do_lp_motion():
+	"""LivePortrait motion extractor: pitch / yaw / roll are RANK-0 outputs, and QNN wants
+	rank >= 1 (docs/roadmap.md 10). Each gets a Reshape to [1] under its own name."""
+	m = load('live_portrait_motion_extractor')
+	g = strip_value_info(m).graph
+	shape1 = numpy_helper.from_array(numpy.array([1], numpy.int64), 'lp_rank1_shape')
+	g.initializer.append(shape1)
+	n = 0
+	for o in g.output:
+		if len(o.type.tensor_type.shape.dim) != 0:
+			continue
+		inner = o.name + '_rank0'
+		for nd in g.node:
+			for k, x in enumerate(nd.output):
+				if x == o.name:
+					nd.output[k] = inner
+			for k, x in enumerate(nd.input):
+				if x == o.name:
+					nd.input[k] = inner
+		g.node.append(helper.make_node('Reshape', [inner, 'lp_rank1_shape'], [o.name],
+		                               name=o.name + '_to_rank1'))
+		o.type.tensor_type.shape.dim.add().dim_value = 1
+		n += 1
+	print('  %d rank-0 outputs -> [1]' % n)
+	ln, l2 = derange_squares(m)
+	print('  fp16 range: %d LayerNorm and %d ReduceL2 rescaled' % (ln, l2))
+	m = shape_inference.infer_shapes(m, strict_mode=False)
+	checker.check_model(m)
+	path = save(m, 'lp_motion')
+	rng = numpy.random.default_rng(1234)
+	feeds = {'input': rng.random((1, 3, 256, 256), dtype=numpy.float32)}
+	print('  vs original: %.2f dB' % _ort_compare(
+		os.path.join(MODELS, 'live_portrait_motion_extractor.onnx'), path, feeds))
+	return path
+
+
+def do_lp_generator():
+	"""LivePortrait generator: natively fp16 (194 fp16 initialisers, fp32 I/O behind Casts),
+	the same shape as hyperswap. QAIRT rejects its Tile with `0x232 != 0x216` (fp32 against
+	fp16), exactly the hyperswap failure, so it gets the same demotion. Verified against the
+	fp16 original, which is the less precise of the two: expect a finite, high SNR, not inf."""
+	m = load('live_portrait_generator')
+	stats = demote_fp16_to_fp32(strip_value_info(m))
+	print('  fp16 -> fp32: %d initialisers, %d constant attrs, %d value_info, %d Cast removed'
+		  % (stats['init'], stats['const'], stats['value_info'], stats['cast']))
+	m = shape_inference.infer_shapes(strip_value_info(m), strict_mode=False)
+	checker.check_model(m)
+	left = sum(1 for t in m.graph.initializer if t.data_type == 10)
+	print('  fp16 initialisers remaining: %d (want 0)' % left)
+	path = save(m, 'lp_generator')
+	rng = numpy.random.default_rng(1234)
+	# A feature volume in the range the extractor produces, and keypoints near the
+	# canonical ones (|x| < 0.5), offset slightly so the warp actually moves something.
+	kp = (rng.random((1, 21, 3), dtype=numpy.float32) - 0.5) * 0.6
+	feeds = {'feature_volume': (rng.random((1, 32, 16, 64, 64), dtype=numpy.float32) - 0.5),
+	         'source': kp + 0.02, 'target': kp}
+	print('  vs fp16 original: %.2f dB' % _ort_compare(
+		os.path.join(MODELS, 'live_portrait_generator.onnx'), path, feeds))
+	return path
+
+
 TASKS = {
+	'lp_feature': do_lp_feature,
+	'lp_generator': do_lp_generator,
+	'lp_motion': do_lp_motion,
 	'arcface': do_arcface,
 	'2dfan4': do_2dfan4,
 	'yoloface': do_yoloface,
@@ -1735,7 +2006,7 @@ if __name__ == '__main__':
 	args = ap.parse_args()
 	# Experiments, not the shipping set -- ask for these by name.  `hyperswap_fp32` was
 	# here until it was promoted (2026-08-24); it is now what convert.sh reads.
-	EXPERIMENTAL = ('yoloface_slicefix', 'wav2lip_nogan', 'edtalk')
+	EXPERIMENTAL = ('yoloface_slicefix', 'wav2lip_nogan', 'edtalk', 'lp_feature', 'lp_generator', 'lp_motion')
 	names = [n for n in TASKS if n not in EXPERIMENTAL] if 'all' in args.models else args.models
 	for n in names:
 		print(n + ':')
