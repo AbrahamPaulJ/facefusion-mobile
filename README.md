@@ -81,13 +81,22 @@ Ruhs. The pipeline, the models, and the option names, defaults and ranges are Fa
   faces were picked, which then select alone: each picked identity dubs only its
   best-matching face.
 - Face editor, optionally: upstream's `face_editor`, on LivePortrait. Fourteen sliders move
-  the eyebrows, gaze, eyes, lips, smile and mouth, and turn, nod or tilt the head. It edits
-  the face that will be shown, the swapped one, on photos and on video, where every frame
-  gets the same edit. About 0.2 s per face on an 8 Elite, so a video takes several times
-  longer with it on; every slider at zero costs nothing.
-- Swapping is optional, as in FaceFusion: turn face_swapper off while the face editor, the
-  enhancer or the lip syncer is on and that stage works on the target alone, with no source
-  face needed.
+  the eyebrows, gaze, eyes, lips, smile and mouth, and turn, nod or tilt the head. The
+  sliders are offsets: smile +0.5 adds that much smile to whatever the face is doing, so on
+  a video every frame gets the same edit while the person moves as filmed. It edits the face
+  that will be shown, the swapped one when swapping. About 0.2 s per face on an 8 Elite;
+  every slider at zero costs nothing.
+- Face animator, optionally: a photo's face moves like the face in a driver video you pick,
+  head, eyes and expression, and the run makes a video. Upstream FaceFusion does not have
+  this; it is LivePortrait's own use, on the face editor's models. It takes a photo target
+  and never swaps (animating a swapped photo is animating a different photo).
+- Talking photo: lip sync on a photo with a voice makes a video the voice's length, with
+  only the mouth moving. With the animator on as well, the head follows the driver and the
+  mouth the voice.
+- Every processor is optional, as in FaceFusion, as long as one is on. They run in the
+  order the chips are drawn: face_swapper or face_animator, face_editor, lip_syncer,
+  face_enhancer. The screen asks only for what the processors that are on need: a source
+  face for the swapper, a driver for the animator, a voice for the lip syncer.
 - Shows the swap as it is written: while a video runs, the result pane is the frame going
   into the file, not a re-render of it. The sound arrives with the finished clip.
 - Speaks English, Русский, 简体中文 and 繁體中文.
@@ -95,8 +104,8 @@ Ruhs. The pipeline, the models, and the option names, defaults and ranges are Fa
 - Can be driven from a browser on your PC over the local network, if you turn that on.
 
 Optional extras, each a separate download: a face enhancer (`gpen_bfr_256`, about 2.5 ms
-more per face, 25 MB), a lip syncer (`edtalk_256`, 60 MB), the face editor (LivePortrait,
-about 150 MB, Snapdragon only), the alternative swappers
+more per face, 25 MB), a lip syncer (`edtalk_256`, 60 MB), the face editor and animator
+(LivePortrait, about 150 MB, Snapdragon only), the alternative swappers
 `hyperswap_1b` and `hyperswap_1c` (about 200 MB each, and neither is faster or slower than
 the one that ships), and pixel boost, which renders the swapped face at 512, 768 or 1024
 instead of 256 at a proportional cost in time.
@@ -222,7 +231,7 @@ using, modifying or redistributing this.
 
 The models are converted from FaceFusion's and are not uniformly permissive.
 `yoloface_8n` is GPL-3.0, `arcface_w600k_r50` and `inswapper_128` are Non-Commercial, and
-`hyperswap_1a_256` is ResearchRAIL. LivePortrait (the face editor) is MIT, by Kuaishou's
+`hyperswap_1a_256` is ResearchRAIL. LivePortrait (the face editor and animator) is MIT, by Kuaishou's
 KwaiVGI. See the
 [model repository](https://huggingface.co/AbrahamPJ/facefusion-mobile-models) for details.
 
