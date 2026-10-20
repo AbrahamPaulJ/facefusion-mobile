@@ -57,6 +57,26 @@
           "name": "hyperswap_1c_v68.bin",
           "bytes": 204956024,
           "sha256": "4cb0eab46c661ce3d40e8e006a9de5803363dd8ee857634de517870a6218f027"
+        },
+        {
+          "name": "lp_feature_v68.bin",
+          "bytes": 1841656,
+          "sha256": "819fb070f7a8ecd185b50dd8bcaa4d546e36ce975b1c91efe83faab58528ebe0"
+        },
+        {
+          "name": "lp_motion_v68.bin",
+          "bytes": 39719360,
+          "sha256": "c41da42c0e7358fe5299a5d6c3a5e2703634d0898748f7707e211441226a110f"
+        },
+        {
+          "name": "lp_gencut_v68.bin",
+          "bytes": 124687256,
+          "sha256": "c1ba997af5e31fd63da6c302f7d07dce289d5db3b6e72396e4cb9747c0177127"
+        },
+        {
+          "name": "lp_mlp_v68.bin",
+          "bytes": 909184,
+          "sha256": "9873ae3399a2b38e98bcebc1ed20f6c5cb045b75a407e63c9368c8a2253beecd"
         }
       ],
       "bytes": 422519280
@@ -117,6 +137,26 @@
           "name": "hyperswap_1c_v73.bin",
           "bytes": 205689208,
           "sha256": "5fc2a92948ffbb623bdf4d72443047122dfe5fdd78b0ee68338ac7e078aebff2"
+        },
+        {
+          "name": "lp_feature_v73.bin",
+          "bytes": 1579512,
+          "sha256": "14973c02e81af7ebecdf822fd6d1a88a70b2c95abce61fe273dd24586994e837"
+        },
+        {
+          "name": "lp_motion_v73.bin",
+          "bytes": 31015360,
+          "sha256": "3289126e5d940150d692c2efcf2cc7a661a2fbc90ed920a016ad1744110ba00d"
+        },
+        {
+          "name": "lp_gencut_v73.bin",
+          "bytes": 118158232,
+          "sha256": "643209bb5e5ca879beb64951a8971a14a3af4e0f2bd9da6e32302c0d498343c5"
+        },
+        {
+          "name": "lp_mlp_v73.bin",
+          "bytes": 909184,
+          "sha256": "9873ae3399a2b38e98bcebc1ed20f6c5cb045b75a407e63c9368c8a2253beecd"
         }
       ],
       "bytes": 420905456
@@ -172,6 +212,26 @@
           "name": "hyperswap_1c_v79.bin",
           "bytes": 205767072,
           "sha256": "34a0ecfeb4601df69b8d2f7fbe9ab46b53b6ee4a6a3d311e33db86a13159da1c"
+        },
+        {
+          "name": "lp_feature_v79.bin",
+          "bytes": 1600032,
+          "sha256": "d1989bac4c3e4af4f818848011b09241de4a0d7d020d46f18c9f069c85b97275"
+        },
+        {
+          "name": "lp_motion_v79.bin",
+          "bytes": 31060448,
+          "sha256": "f58eae7d8797fe78e7764fb129aa67c2edcc208cb53cdc7fb4a3988d4a5ae07a"
+        },
+        {
+          "name": "lp_gencut_v79.bin",
+          "bytes": 119284664,
+          "sha256": "1511195d188a67a0e3cde24dd50d53d7af34cbab23ae8990d1322b4313ddde2c"
+        },
+        {
+          "name": "lp_mlp_v79.bin",
+          "bytes": 909184,
+          "sha256": "9873ae3399a2b38e98bcebc1ed20f6c5cb045b75a407e63c9368c8a2253beecd"
         }
       ],
       "bytes": 421483296
@@ -227,6 +287,26 @@
           "name": "hyperswap_1c_v81.bin",
           "bytes": 206651768,
           "sha256": "71ba591265852ae610755c90caa777f85df6f4a4f2bd3848d223e2482f11a6b6"
+        },
+        {
+          "name": "lp_feature_v81.bin",
+          "bytes": 1677816,
+          "sha256": "3072c08ee424386bf1ac4a2ed1a6cf88048b34963553a5460c090c9bc6aafa8e"
+        },
+        {
+          "name": "lp_motion_v81.bin",
+          "bytes": 31367616,
+          "sha256": "ad0fd0174f2a108fc0d099c80e385a0e63ba3ab93528610078879ea0d120e4db"
+        },
+        {
+          "name": "lp_gencut_v81.bin",
+          "bytes": 124097432,
+          "sha256": "7d4c2db45b9b99397eb636da6b4f5d99a425d824eb0f36c1070abd35b6fc439e"
+        },
+        {
+          "name": "lp_mlp_v81.bin",
+          "bytes": 909184,
+          "sha256": "9873ae3399a2b38e98bcebc1ed20f6c5cb045b75a407e63c9368c8a2253beecd"
         }
       ],
       "bytes": 416098840
@@ -277,6 +357,26 @@
           "name": "hyperswap_1c_v81s97.bin",
           "bytes": 206299552,
           "sha256": "b9325d76004b5c88eac67b171f79bde0bd3165c2658c5229236e858a21d37cad"
+        },
+        {
+          "name": "lp_feature_v81s97.bin",
+          "bytes": 1595936,
+          "sha256": "f1e26d40bde8922a32ffc5bf92c068d58529bb0390a0465763bc61b44d23133c"
+        },
+        {
+          "name": "lp_motion_v81s97.bin",
+          "bytes": 31056352,
+          "sha256": "6c42d92190aa8ee65f46481cdafef818f13f96e44277982d461d295b3afd689c"
+        },
+        {
+          "name": "lp_gencut_v81s97.bin",
+          "bytes": 118412216,
+          "sha256": "f624f8f508e60b05d49715ee5addb611c930ff9ed260f453d31e942cc809898d"
+        },
+        {
+          "name": "lp_mlp_v81s97.bin",
+          "bytes": 909184,
+          "sha256": "9873ae3399a2b38e98bcebc1ed20f6c5cb045b75a407e63c9368c8a2253beecd"
         }
       ],
       "bytes": 371010824
