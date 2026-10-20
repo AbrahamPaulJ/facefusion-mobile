@@ -32,4 +32,17 @@ echo "built $(stat -c%s "$OUT/libffaudio.so") bytes (ffaudio)"
 cd "$HERE" && python test_ffaudio.py
 audio=$?
 
-exit $(( geometry || audio ))
+# LivePortrait's dense-motion front end (the CPU half of lp_gencut), against the ONNX
+# oracle from work/pipeline/lp_hg_reference.py.
+g++ -O2 -fPIC -shared -std=c++17 \
+    "$HERE/ffportrait_capi.cpp" \
+    "$HERE/../android/app/src/main/cpp/ffportrait.cpp" \
+    -o "$OUT/libffportrait.so" 2>&1 | head -30
+[ -f "$OUT/libffportrait.so" ] || { echo "ffportrait BUILD FAILED"; exit 1; }
+cp "$OUT/libffportrait.so" "$HERE/libffportrait.so"
+echo "built $(stat -c%s "$OUT/libffportrait.so") bytes (ffportrait)"
+
+cd "$HERE" && python test_ffportrait.py
+portrait=$?
+
+exit $(( geometry || audio || portrait ))
