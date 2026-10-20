@@ -127,6 +127,11 @@ bool execute(Handle h, const std::vector<std::string>& names,
 
 std::vector<std::vector<int>> outputShapes(Handle h);
 
+// The graph's output names, in the order `execute` returns them. For a graph whose outputs
+// a converter is free to reorder (LivePortrait's motion extractor has seven), so the caller
+// matches by name rather than by position. Empty on ncnn, which runs no such graph.
+std::vector<std::string> outputNames(Handle h);
+
 // What this graph WANTS, asked of the graph rather than assumed by the caller.
 //
 // Exists for the tier probe: proving a context executes means feeding it something, and a

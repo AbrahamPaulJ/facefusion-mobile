@@ -251,9 +251,21 @@ object ModelPaths {
         if (tier == NCNN_TIER) {
             val stem = NCNN_STEMS[name] ?: return emptyList()
             listOf("$stem.ncnn.param", "$stem.ncnn.bin")
+        } else if (name == LIVEPORTRAIT) {
+            LIVEPORTRAIT_FILES.map { it + "_" + tier + ".bin" }
         } else {
             listOf(name + "_" + tier + ".bin")
         }
+
+    /**
+     * The face editor is ONE model to the user and four files on disk: LivePortrait's
+     * feature extractor, motion extractor and generator (from its hourglass on), and the
+     * keypoint MLPs that run on the CPU. Native opens them as one set and refuses a partial
+     * one, so [present] asks for all four. QNN only -- [NCNN_STEMS] has no entry, so ncnn
+     * resolves it to nothing and the editor is simply not offered there.
+     */
+    const val LIVEPORTRAIT = "liveportrait"
+    private val LIVEPORTRAIT_FILES = listOf("lp_feature", "lp_motion", "lp_gencut", "lp_mlp")
 
     const val NCNN_TIER = "ncnn"
 

@@ -99,6 +99,13 @@ struct Config {
   // model sees it. See syncLip in ffpipe.cpp for where each is applied.
   float lipSyncWeight = 0.5f;
 
+  // --face-editor (face_editor/core.py), LivePortrait. OFF by default: three more graphs
+  // per face (~160 ms on an 8 Elite) and a separate download. The 14 sliders are
+  // face_editor's, each [-1, 1], in ffportrait::Slider order; all zero is the identity and
+  // costs nothing, because the stage is skipped.
+  bool faceEdit = false;
+  float faceEditor[14] = {};
+
   // content_analyser.py:detect_with_nsfw_2 -- `logit[0] - logit[1] > 0.25` flags a frame.
   float nsfwThreshold = 0.25f;
 
@@ -155,6 +162,10 @@ class Pipeline {
    */
   void updateConfig(const Config& c);
 
+  // The live configuration, for a caller that changes ONE field and pushes the rest back
+  // unchanged through updateConfig (the face editor's JNI setter). Default before init.
+  const Config& config() const;
+
   // The tier init() chose. Empty until init() has run.
   const std::string& tier() const { return tier_; }
 
@@ -201,6 +212,15 @@ class Pipeline {
   // reason: offering a model that is not on the device turns a missing file into a
   // failed run at the worst possible moment.
   bool hasEnhancer() const;
+
+  // Whether the face editor can run: lp_feature, lp_motion and lp_gencut all loaded AND
+  // executed at init, and lp_mlp_<tier>.bin parsed. Same rule as hasEnhancer -- a switch
+  // is offered only for a stage that will run. ⚠ Unlike every other optional model, a
+  // LivePortrait graph that loads and will not EXECUTE drops the editor, not the tier: it
+  // is the heaviest graph here, and an older chip refusing it must not cost the swap.
+  // faceEditorError() says why it is absent.
+  bool hasFaceEditor() const;
+  const std::string& faceEditorError() const { return editWhy_; }
 
   // Every face in one frame, fully analysed (detector + landmarker + recogniser).
   //
@@ -472,6 +492,21 @@ class Pipeline {
    */
   bool enhance(ffcv::Image& frame, const std::vector<Face>& faces);
 
+  /**
+   * face_editor/core.py:edit_face on every face, in place: crop ffhq_512 at 512 around
+   * landmark-5 scaled 1.5 about the nose, LivePortrait at 256, paste the 512 result back
+   * through a box mask. Called straight after `swapAll`, so it edits the face that will be
+   * shown -- the swapped one when the swapper ran -- and before the lip syncer and the
+   * enhancer, which then work on the edited face.
+   *
+   * Honours the same faces the swapper does (Keep face, largest-only, reference), for the
+   * enhancer's reason: a person left alone must be left alone by every pass.
+   *
+   * A no-op returning true when `cfg.faceEdit` is off, every slider is zero, or the editor
+   * is not loaded -- "absent is not a failure", as for syncLip and enhance.
+   */
+  bool editFaces(ffcv::Image& frame, const std::vector<Face>& faces);
+
   const std::string& error() const { return err_; }
   // Cumulative per-stage milliseconds, for the CLI's report.
   double msDetect = 0, msLandmark = 0, msRecognise = 0, msSwap = 0, msGeom = 0;
@@ -480,6 +515,9 @@ class Pipeline {
   double msEnhance = 0;
   // Likewise separate: the lip syncer is optional and its cost has to be attributable.
   double msLipSync = 0;
+  // The face editor's graphs (feature + motion + generator) and its CPU half (keypoints +
+  // hourglassInput), split, for the same reason. Its crop and paste go to msGeom.
+  double msEdit = 0, msEditCpu = 0;
   // syncLip's GEOMETRY, split, because the first device measurement of it said the
   // stage is 94% geometry and could not say which part. These four sum to the
   // msGeom that syncLip contributes; the swapper's own geometry is not in them.
@@ -509,6 +547,7 @@ class Pipeline {
   std::string tier_;
   std::string rejected_;
   std::string rejectedWhy_;
+  std::string editWhy_;
   bool nsfwQuantised_ = false;
 };
 

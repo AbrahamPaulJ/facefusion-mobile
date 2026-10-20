@@ -471,4 +471,25 @@
     <string name="status_lips_cleared">已恢复对所有人脸进行口型同步。</string>
     <string name="status_lips_missed">该位置没有人脸。</string>
     <string name="status_lips_wait_boxes">点按处还没有人脸框。请等待红色框出现，再点按人脸。</string>
+    <string name="swap_proc_face_editor">face_editor</string>
+    <string name="model_face_editor">面部编辑器</string>
+    <string name="opt_edit_group_eyes">眼睛</string>
+    <string name="opt_edit_group_mouth">嘴巴</string>
+    <string name="opt_edit_group_head">头部</string>
+    <string name="opt_edit_eyebrow_direction">眉毛方向</string>
+    <string name="opt_edit_eye_gaze_horizontal">视线左右</string>
+    <string name="opt_edit_eye_gaze_vertical">视线上下</string>
+    <string name="opt_edit_eye_open_ratio">睁眼程度</string>
+    <string name="opt_edit_lip_open_ratio">张嘴程度</string>
+    <string name="opt_edit_mouth_grim">撇嘴</string>
+    <string name="opt_edit_mouth_pout">嘟嘴</string>
+    <string name="opt_edit_mouth_purse">抿嘴</string>
+    <string name="opt_edit_mouth_smile">微笑</string>
+    <string name="opt_edit_mouth_position_horizontal">嘴巴左右</string>
+    <string name="opt_edit_mouth_position_vertical">嘴巴上下</string>
+    <string name="opt_edit_head_pitch">点头</string>
+    <string name="opt_edit_head_yaw">转头</string>
+    <string name="opt_edit_head_roll">歪头</string>
+    <string name="opt_edit_note">LivePortrait，与上游的 face_editor 相同。所有滑块为 0 时脸部保持不变，也不会额外运行。在 8 Elite 上每张脸约 0.2 秒，开启后视频处理会慢好几倍。</string>
+    <string name="opt_edit_reset">重置滑块</string>
 </resources>

@@ -1,6 +1,7 @@
 #include "ffpipe.h"
 
 #include "ffaudio.h"
+#include "ffportrait.h"
 
 #include <algorithm>
 #include <array>
@@ -58,6 +59,8 @@ struct Nets {
   ffnn::Handle nsfw = nullptr;
   // Optional, like fan685: absent simply means the enhancer cannot be offered.
   ffnn::Handle enh = nullptr;
+  // The face editor (LivePortrait): optional as a SET -- all three, or the editor is off.
+  ffnn::Handle lpFeat = nullptr, lpMotion = nullptr, lpGen = nullptr;
 };
 
 // One clip's audio, reduced to what the lip syncer eats: a mel window per OUTPUT frame.
@@ -145,6 +148,10 @@ struct Pipeline::Impl {
   Nets n;
   AudioState audio;
   Config cfg;
+  // The face editor's CPU half: its three keypoint MLPs, and the 29 MB hourglass input,
+  // kept so a video does not allocate it per face per frame.
+  ffportrait::Mlps lpMlps;
+  std::vector<float> lpHg;
   float srcEmbedding[512]{};
   float srcEmbeddingNorm[512]{};
   bool haveSource = false;
@@ -372,10 +379,12 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
 
   auto dropNets = [&]() {
     for (ffnn::Handle* h : {&p_->n.det, &p_->n.fan, &p_->n.fan685, &p_->n.arc, &p_->n.lip,
-                            &p_->n.swap, &p_->n.nsfw, &p_->n.enh}) {
+                            &p_->n.swap, &p_->n.nsfw, &p_->n.enh, &p_->n.lpFeat,
+                            &p_->n.lpMotion, &p_->n.lpGen}) {
       if (*h) ffnn::release(*h);
       *h = nullptr;
     }
+    p_->lpMlps = ffportrait::Mlps();
     nsfwQuantised_ = false;
   };
 
@@ -419,6 +428,19 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
     // which shipped wrong once already.
     p_->n.lip = open("edtalk");
     p_->n.lipIsEdtalk = (p_->n.lip != nullptr);
+
+    // The face editor: three graphs and a weights file, all or nothing. Opened with plain
+    // ffnn::open, not `open`, so an install without it does not leave "open lp_feature"
+    // in err_ for a later, unrelated failure to be reported as.
+    p_->n.lpFeat = ffnn::open("lp_feature");
+    p_->n.lpMotion = p_->n.lpFeat ? ffnn::open("lp_motion") : nullptr;
+    p_->n.lpGen = p_->n.lpMotion ? ffnn::open("lp_gencut") : nullptr;
+    editWhy_.clear();
+    if (!p_->n.lpGen) {
+      editWhy_ = "not installed for " + tier_;
+    } else if (!p_->lpMlps.load(modelDir + "/lp_mlp_" + tier_ + ".bin", &editWhy_)) {
+      // a set without its MLPs cannot edit; the graphs go too
+    }
 
     // The content gate is MANDATORY, because it blocks. A gate that silently does not run
     // is worse than no gate: it reports "checked" to every caller above it.
@@ -488,6 +510,27 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
       return false;
     }
 
+    // The face editor proves itself SEPARATELY, and a failure drops the editor rather
+    // than the tier (see hasFaceEditor): the generator is the heaviest graph in the app,
+    // the likeliest one for an older HTP to refuse, and the swap must not depend on it.
+    if (p_->n.lpGen && p_->lpMlps.loaded()) {
+      for (const Probe& pr : {Probe{"lp_feature", p_->n.lpFeat}, Probe{"lp_motion", p_->n.lpMotion},
+                              Probe{"lp_gencut", p_->n.lpGen}}) {
+        std::string why;
+        if (!probeExecutes(pr.h, &why)) {
+          editWhy_ = pr.name + " does not execute on " + tier_ + ": " + why;
+          break;
+        }
+      }
+    }
+    if (!editWhy_.empty()) {
+      for (ffnn::Handle* h : {&p_->n.lpFeat, &p_->n.lpMotion, &p_->n.lpGen}) {
+        if (*h) ffnn::release(*h);
+        *h = nullptr;
+      }
+      p_->lpMlps = ffportrait::Mlps();
+    }
+
     // The gate a second time, through its REAL path. The sweep above proves the context
     // executes; this proves the thing the gate is actually asked for -- a finite decision
     // statistic out of checkContent's own preprocessing -- and it is the one model where
@@ -522,6 +565,9 @@ bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
 }
 
 bool Pipeline::hasEnhancer() const { return p_ && p_->n.enh != nullptr; }
+bool Pipeline::hasFaceEditor() const {
+  return p_ && p_->n.lpGen != nullptr && p_->lpMlps.loaded();
+}
 bool Pipeline::hasLipSyncer() const { return p_ && p_->n.lip != nullptr; }
 
 bool Pipeline::setAudio(const int16_t* pcm, size_t frames, int channels, int inRate,
@@ -578,6 +624,11 @@ int Pipeline::melWindowTotal() const {
   return p_ ? (int)p_->audio.windows.size() : 0;
 }
 
+const Config& Pipeline::config() const {
+  static const Config kDefault;
+  return p_ ? p_->cfg : kDefault;
+}
+
 void Pipeline::updateConfig(const Config& c) {
   if (!p_) return;
   Config& live = p_->cfg;
@@ -596,6 +647,8 @@ void Pipeline::updateConfig(const Config& c) {
   live.faceEnhance       = c.faceEnhance;
   live.faceEnhancerBlend = c.faceEnhancerBlend;
   live.lipSyncWeight     = c.lipSyncWeight;
+  live.faceEdit          = c.faceEdit;
+  for (int i = 0; i < 14; ++i) live.faceEditor[i] = c.faceEditor[i];
 }
 
 // ------------------------------------------------------------ content gate
@@ -1688,6 +1741,7 @@ bool Pipeline::hasLipReferenceFace() const {
 
 void Pipeline::resetStats() {
   msDetect = msLandmark = msRecognise = msSwap = msGeom = msEnhance = msLipSync = 0;
+  msEdit = msEditCpu = 0;
   msLipCrop = msLipMask = msLipPrep = msLipPaste = 0;
   msGeomDetPrep = msGeomWarp = msGeomTensor = msGeomMask = msGeomPaste = 0;
   framesDone = facesDone = 0;
@@ -2121,6 +2175,145 @@ bool Pipeline::enhance(ffcv::Image& frame, const std::vector<Face>& faces) {
 
     t0 = nowMs();
     ffcv::pasteBack(frame, outF, mask, am);
+    msGeom += nowMs() - t0;
+  }
+  return true;
+}
+
+
+// ------------------------------------------------------------- face editor (LivePortrait)
+//
+// face_editor/core.py:edit_face. Three graphs on the NPU -- lp_feature, lp_motion and
+// lp_gencut, the generator from its dense-motion hourglass on -- and on the CPU the slider
+// arithmetic (ffportrait::editKeypoints) and the hourglass's input, which on the HTP cost
+// 1.7 s of the full generator's time and here is ~18 ms (ffportrait::hourglassInput).
+
+bool Pipeline::editFaces(ffcv::Image& frame, const std::vector<Face>& faces) {
+  if (!hasFaceEditor()) return true;   // absent is not a failure, matches enhance
+  const Config& cfg = p_->cfg;
+  if (!cfg.faceEdit || !ffportrait::anyEdit(cfg.faceEditor)) return true;
+  static_assert(ffportrait::kSliderCount == 14, "Config::faceEditor is 14 sliders");
+
+  // model options: ffhq_512 at 512, the graphs at half that (prepare_crop_frame).
+  constexpr int CS = 512, MS = 256;
+  float tmpl[10];
+  const float* T = ffcv::warpTemplate(2);   // ffhq_512
+  for (int i = 0; i < 10; ++i) tmpl[i] = T[i] * CS;
+  // create_box_mask(crop, face_mask_blur, (0, 0, 0, 0)) -- the editor ignores the padding.
+  const int noPadding[4] = {0, 0, 0, 0};
+  ffcv::MatF mask = ffcv::createBoxMask(CS, CS, cfg.maskBlur, noPadding);
+
+  const Face* only = nullptr;
+  if (cfg.swapLargestOnly) {
+    float best = -1.f;
+    for (const Face& f : faces) {
+      float a = (f.box[2] - f.box[0]) * (f.box[3] - f.box[1]);
+      if (a > best) { best = a; only = &f; }
+    }
+  }
+
+  using namespace ffportrait;
+  std::vector<std::string> motionNames = ffnn::outputNames(p_->n.lpMotion);
+  std::vector<float> in((size_t)3 * MS * MS);
+  p_->lpHg.resize((size_t)kVoxels * kHourglassChannels);
+  for (size_t fi = 0; fi < faces.size(); ++fi) {
+    const Face& f = faces[fi];
+    if (only && &f != only) continue;
+    if (p_->sourceForFace(f, fi, faces.size(), cfg.referenceDistance) == kNoSource) continue;
+
+    // scale_face_landmark_5(landmark_set['5/68'], 1.5): about the nose, point 2.
+    double t0 = nowMs();
+    float lm5[10];
+    const float nx = f.landmark5_68[4], ny = f.landmark5_68[5];
+    for (int i = 0; i < 5; ++i) {
+      lm5[i * 2] = (f.landmark5_68[i * 2] - nx) * 1.5f + nx;
+      lm5[i * 2 + 1] = (f.landmark5_68[i * 2 + 1] - ny) * 1.5f + ny;
+    }
+    ffcv::Affine am = ffcv::umeyama(lm5, tmpl, 5);
+    ffcv::Image crop = ffcv::warpAffine(frame, am, CS, CS, ffcv::BORDER_REPLICATE);
+    // cv2.INTER_AREA at exactly 2x, which resizeLinear reproduces bit for bit (edtalk).
+    ffcv::Image small = ffcv::resizeLinear(crop, MS, MS);
+    for (int y = 0; y < MS; ++y) {
+      const uint8_t* row = small.row(y);
+      for (int x = 0; x < MS; ++x)
+        for (int c = 0; c < 3; ++c)   // BGR -> RGB planes, / 255
+          in[(size_t)(2 - c) * MS * MS + (size_t)y * MS + x] = row[x * 3 + c] / 255.0f;
+    }
+    msGeom += nowMs() - t0;
+
+    t0 = nowMs();
+    std::vector<std::vector<float>> fo, mo, go;
+    if (!ffnn::execute(p_->n.lpFeat, {"input"}, {in.data()}, fo) ||
+        !ffnn::execute(p_->n.lpMotion, {"input"}, {in.data()}, mo)) {
+      err_ = std::string("face editor: ") + ffnn::lastError();
+      return false;
+    }
+    msEdit += nowMs() - t0;
+    if (fo.empty() || fo[0].size() != (size_t)kFeatureChannels * kVoxels ||
+        mo.size() != motionNames.size()) {
+      err_ = "face editor: unexpected extractor output";
+      return false;
+    }
+
+    t0 = nowMs();
+    Motion m;
+    bool complete = true;
+    auto take = [&](const char* name, float* dst, size_t n) {
+      for (size_t i = 0; i < motionNames.size(); ++i)
+        if (motionNames[i] == name && mo[i].size() == n) {
+          std::copy(mo[i].begin(), mo[i].end(), dst);
+          return;
+        }
+      complete = false;
+    };
+    take("pitch", &m.pitch, 1);
+    take("yaw", &m.yaw, 1);
+    take("roll", &m.roll, 1);
+    take("scale", &m.scale, 1);
+    take("translation", m.translation, 3);
+    take("expression", m.expression, kKeypoints * 3);
+    take("motion_points", m.points, kKeypoints * 3);
+    if (!complete) {
+      err_ = "face editor: motion extractor outputs do not match";
+      return false;
+    }
+    float source[kKeypoints * 3], target[kKeypoints * 3];
+    editKeypoints(m, cfg.faceEditor, f.landmark68, p_->lpMlps, source, target);
+    hourglassInput(fo[0].data(), source, target, p_->lpHg.data());
+    msEditCpu += nowMs() - t0;
+
+    t0 = nowMs();
+    if (!ffnn::execute(p_->n.lpGen, {"feature_volume", "source", "target", "hg_input"},
+                       {fo[0].data(), source, target, p_->lpHg.data()}, go)) {
+      err_ = std::string("face editor: ") + ffnn::lastError();
+      return false;
+    }
+    msEdit += nowMs() - t0;
+    // By name: a build carrying diagnostic taps puts them before `output`.
+    const std::vector<std::string> genNames = ffnn::outputNames(p_->n.lpGen);
+    const std::vector<float>* gen = nullptr;
+    for (size_t i = 0; i < genNames.size() && i < go.size(); ++i)
+      if (genNames[i] == "output") gen = &go[i];
+    if (!gen || gen->size() != (size_t)3 * CS * CS) {
+      err_ = "face editor: unexpected generator output";
+      return false;
+    }
+
+    // normalize_crop_frame: clip to [0, 1], * 255, astype(uint8) -- which TRUNCATES --
+    // and RGB back to BGR; then paste_back through the box mask.
+    t0 = nowMs();
+    const float* g = gen->data();
+    ffcv::MatF out(CS, CS, 3);
+    for (int y = 0; y < CS; ++y) {
+      float* orow = out.row(y);
+      for (int x = 0; x < CS; ++x)
+        for (int c = 0; c < 3; ++c) {
+          float v = g[(size_t)c * CS * CS + (size_t)y * CS + x];
+          v = v < 0.f ? 0.f : (v > 1.f ? 1.f : v);
+          orow[x * 3 + (2 - c)] = std::floor(v * 255.0f);
+        }
+    }
+    ffcv::pasteBack(frame, out, mask, am);
     msGeom += nowMs() - t0;
   }
   return true;

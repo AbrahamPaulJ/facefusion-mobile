@@ -156,6 +156,25 @@ data class SwapOptions(
     val lipSyncWeight: Float = 0.5f,
 
     /**
+     * `--processors face_editor`, LivePortrait. Off by default.
+     *
+     * Three more graphs per face (~160 ms on an 8 Elite) and its own download, so asking for
+     * it does not mean getting it: the pipeline skips the stage when the set is absent, and
+     * the UI offers the switch only when it is installed. Snapdragon only -- there is no
+     * ncnn build of it.
+     */
+    val faceEdit: Boolean = false,
+
+    /**
+     * face_editor's sliders, each -1..1, in [EDITOR_SLIDERS] order. All zero is the
+     * identity, and the stage is then skipped rather than run to no effect.
+     *
+     * A List, not a FloatArray: this class is compared by VALUE to decide whether the
+     * preview needs a refresh, and an array compares by identity.
+     */
+    val editor: List<Float> = List(EDITOR_SLIDERS.size) { 0f },
+
+    /**
      * Output frame rate. **0 means "same as the input"**, which is the default and the only
      * value that cannot be wrong -- every other choice is a resample.
      *
@@ -199,6 +218,8 @@ data class SwapOptions(
             .putFloat(K_ENHANCE_BLEND, enhanceBlend)
             .putBoolean(K_LIP_SYNC, lipSync)
             .putFloat(K_LIP_SYNC_WEIGHT, lipSyncWeight)
+            .putBoolean(K_FACE_EDIT, faceEdit)
+            .putString(K_EDITOR, editor.joinToString(","))
             .apply()
     }
 
@@ -219,6 +240,35 @@ data class SwapOptions(
         private const val K_ENHANCE_BLEND = "face_enhance_blend"
         private const val K_LIP_SYNC = "lip_sync"
         private const val K_LIP_SYNC_WEIGHT = "lip_sync_weight"
+        private const val K_FACE_EDIT = "face_edit"
+        private const val K_EDITOR = "face_editor"
+
+        /**
+         * face_editor's sliders, in the order the native side reads them
+         * (ffportrait::Slider) -- upstream's own option names, minus the prefix.
+         */
+        val EDITOR_SLIDERS = listOf(
+            "eyebrow_direction", "eye_gaze_horizontal", "eye_gaze_vertical", "eye_open_ratio",
+            "lip_open_ratio", "mouth_grim", "mouth_pout", "mouth_purse", "mouth_smile",
+            "mouth_position_horizontal", "mouth_position_vertical", "head_pitch", "head_yaw",
+            "head_roll",
+        )
+
+        /**
+         * "mouth_smile=1,head_yaw=-0.5" -> the 14 sliders, clamped; unnamed ones 0, unknown
+         * names and unparsable values ignored. The one parser for every scripted way in --
+         * the adb self-test and the API's `edit` parameter -- so they cannot disagree on
+         * what a spec means.
+         */
+        fun parseEditor(spec: String): List<Float> {
+            val v = MutableList(EDITOR_SLIDERS.size) { 0f }
+            for (kv in spec.split(",")) {
+                val i = EDITOR_SLIDERS.indexOf(kv.substringBefore("=").trim())
+                val x = kv.substringAfter("=", "").trim().toFloatOrNull()
+                if (i >= 0 && x != null && x.isFinite()) v[i] = x.coerceIn(-1f, 1f)
+            }
+            return v
+        }
 
         private fun prefs(context: Context) =
             context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -232,6 +282,11 @@ data class SwapOptions(
                 p.getString(K_PADDING, null)?.split(",")?.map { it.trim().toInt() }
                     ?.takeIf { it.size == 4 }
             }.getOrNull() ?: d.maskPadding
+            val editor = runCatching {
+                p.getString(K_EDITOR, null)?.split(",")
+                    ?.map { it.trim().toFloat().coerceIn(-1f, 1f) }
+                    ?.takeIf { it.size == EDITOR_SLIDERS.size }
+            }.getOrNull() ?: d.editor
             return SwapOptions(
                 swapper = (p.getString(K_SWAPPER, d.swapper) ?: d.swapper)
                     .let { if (it == "inswapper") "hyperswap" else it },
@@ -249,6 +304,8 @@ data class SwapOptions(
                 enhanceBlend = p.getFloat(K_ENHANCE_BLEND, d.enhanceBlend),
                 lipSync = p.getBoolean(K_LIP_SYNC, d.lipSync),
                 lipSyncWeight = p.getFloat(K_LIP_SYNC_WEIGHT, d.lipSyncWeight),
+                faceEdit = p.getBoolean(K_FACE_EDIT, d.faceEdit),
+                editor = editor,
             )
         }
     }

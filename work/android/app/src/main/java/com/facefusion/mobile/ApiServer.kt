@@ -336,6 +336,7 @@ class ApiServer(
             "busy" to (PipeGuard.holder != null),
             "holder" to PipeGuard.holder,
             "enhancer" to ModelPaths.present(ModelPaths.dir(ctx), tier, "gpen"),
+            "face_editor" to ModelPaths.present(ModelPaths.dir(ctx), tier, ModelPaths.LIVEPORTRAIT),
         ))
     }
 
@@ -604,6 +605,14 @@ private fun SwapOptions.overrides(q: Map<String, String>): SwapOptions {
         largestOnly = b("largest") ?: largestOnly,
         faceEnhance = b("enhancer") ?: faceEnhance,
         lipSync = b("lip_sync") ?: lipSync,
+        // `edit=mouth_smile=1,head_yaw=-0.5` switches the face editor on with those sliders;
+        // `face_edit=0` switches it off. SwapOptions.parseEditor is the one parser.
+        // Decoded here because nothing else in this parser decodes: the other values are
+        // bare numbers, this one carries `=` and `,`, which a careful client escapes.
+        faceEdit = b("face_edit") ?: (q["edit"]?.let { true } ?: faceEdit),
+        editor = q["edit"]?.let {
+            SwapOptions.parseEditor(runCatching { java.net.URLDecoder.decode(it, "UTF-8") }.getOrDefault(it))
+        } ?: editor,
         enhanceBlend = f("enhance_blend")?.coerceIn(0f, 1f) ?: enhanceBlend,
         outputFps = i("fps")?.coerceIn(0, 240) ?: outputFps,
         swapper = q["swapper"]?.takeIf { it == "hyperswap" || it == "hyperswap_1b" || it == "hyperswap_1c" } ?: swapper,

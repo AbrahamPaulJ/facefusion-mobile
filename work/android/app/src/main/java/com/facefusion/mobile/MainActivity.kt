@@ -1478,6 +1478,15 @@ class MainActivity : ComponentActivity() {
         // now refuses is worse than saying the model is missing.
         get() = ModelPaths.present(modelDir(), tier, "edtalk")
 
+    /**
+     * Whether the face editor's set (LivePortrait, four files) is on the device. Same rule
+     * as [hasEnhancer]: the filesystem decides whether the chip is drawn, the native side
+     * whether the stage runs -- and on a chip that refuses one of its graphs native says
+     * no while this says yes, which the run log reports (see NativePipe.hasFaceEditor).
+     */
+    private val hasFaceEditor: Boolean
+        get() = ModelPaths.present(modelDir(), tier, ModelPaths.LIVEPORTRAIT)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         BugReport.install(this)
@@ -1563,6 +1572,13 @@ class MainActivity : ComponentActivity() {
             }
             flag("enhance")?.let { opts = opts.copy(faceEnhance = it) }
             flag("lipsync")?.let { opts = opts.copy(lipSync = it) }
+            // `--es edit mouth_smile=1,head_yaw=-0.5`: the face editor with these sliders
+            // (upstream's names, SwapOptions.EDITOR_SLIDERS); `--es edit 0` forces it OFF.
+            // Same three-state rule as above, for the same reason.
+            intent?.getStringExtra("edit")?.let { spec ->
+                opts = if (spec == "0") opts.copy(faceEdit = false)
+                       else opts.copy(faceEdit = true, editor = SwapOptions.parseEditor(spec))
+            }
             // `--es voice <name>`: a driving-audio file under the app's own files dir (or
             // /sdcard/Download), scriptable over adb without going through the SAF picker.
             // Bench-only wiring for `VideoSwapper.voicePath` -- see `runSwap`'s doc for why
@@ -1654,6 +1670,7 @@ class MainActivity : ComponentActivity() {
                             if (ModelPaths.present(modelDir(), tier, m)) when (m) {
                                 "gpen" -> applyOpts(opts.copy(faceEnhance = true))
                                 "edtalk" -> applyOpts(opts.copy(lipSync = true))
+                                ModelPaths.LIVEPORTRAIT -> applyOpts(opts.copy(faceEdit = true))
                             }
                         }
                         enableAfterDownload = null
@@ -1829,6 +1846,7 @@ class MainActivity : ComponentActivity() {
                                 hasHyperswap1c = hasHyperswap1c,
                                 hasEnhancer = hasEnhancer,
                                 hasLipSyncer = hasLipSyncer,
+                                hasFaceEditor = hasFaceEditor,
                                 onRequestModel = { label, model ->
                                     confirmModel = label to model
                                 },
@@ -2658,6 +2676,7 @@ class MainActivity : ComponentActivity() {
             // claim. A device that still holds the file keeps a dead ~44 MB until the
             // app's data is cleared.
             "edtalk" to getString(R.string.model_lip_syncer_256),
+            ModelPaths.LIVEPORTRAIT to getString(R.string.model_face_editor),
             "fan685" to getString(R.string.model_landmark_refiner),
         )
         // What can be fetched is whatever the MANIFEST publishes for this tier -- asked
@@ -5057,6 +5076,11 @@ class MainActivity : ComponentActivity() {
                     say("INIT FAILED: ${NativePipe.lastError()}"); return@launch
                 }
                 say("$backend init OK")
+                if (opts.faceEdit)
+                    say("face editor: " + (if (NativePipe.hasFaceEditor())
+                        SwapOptions.EDITOR_SLIDERS.zip(opts.editor).filter { it.second != 0f }
+                            .joinToString(",") { it.first + "=" + it.second }
+                        else "NOT LOADED (" + NativePipe.faceEditorError() + ")"))
                 // AFTER init on purpose: the GPU agreement check runs on the first open that
                 // wants the GPU, so before this line the note still says "Vulkan available"
                 // on a device whose Vulkan is about to be refused.

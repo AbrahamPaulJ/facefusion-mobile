@@ -56,6 +56,32 @@ for path in cases:
 	failures += not ok
 	print('case %s  heatmap max|err| %.2e  warped max|err| %.2e  %s'
 	      % (n, eh, ew, 'ok' if ok else 'FAIL'))
-print('ffportrait: %d of %d cases FAILED' % (failures, len(cases)) if failures
-      else 'ffportrait: all %d cases pass' % len(cases))
+
+# face_editor's keypoints against lp_editor.apply_edit. The ops are the same float32 ops in
+# the same order, except the three MLPs (a dot product summed in a different order from
+# onnxruntime's GEMM) and the rotation matrix (scipy's quaternion path against a direct
+# Euler product, both rounded to float32): measured 2.4e-7 on keypoints of magnitude ~1.
+TOL_EDIT = 1e-6
+MLP = os.path.join(ROOT, 'work', 'onnx', 'lp_mlp.bin')
+ff.ff_lp_edit_keypoints.argtypes = [P, P, P, ctypes.c_char_p, P, P]
+ff.ff_lp_edit_keypoints.restype = ctypes.c_int
+edits = sorted(glob.glob(os.path.join(ORACLE, 'edit_motion_*.raw')))
+worst = 0.0
+for path in edits:
+	n = os.path.basename(path)[12:15]
+	load = lambda k: numpy.fromfile(os.path.join(ORACLE, 'edit_%s_%s.raw' % (k, n)), numpy.float32)
+	src, tgt = numpy.empty(63, numpy.float32), numpy.empty(63, numpy.float32)
+	if not ff.ff_lp_edit_keypoints(ptr(load('motion')), ptr(load('sliders')), ptr(load('lm68')),
+	                               MLP.encode(), ptr(src), ptr(tgt)):
+		sys.exit('cannot load %s -- run work/export/lp_mlp_export.py' % MLP)
+	e = max(float(numpy.abs(src - load('source')).max()), float(numpy.abs(tgt - load('target')).max()))
+	worst = max(worst, e)
+	if e > TOL_EDIT:
+		failures += 1
+		print('edit %s  max|err| %.2e  FAIL' % (n, e))
+print('editKeypoints: %d cases, worst max|err| %.2e  %s'
+      % (len(edits), worst, 'ok' if worst <= TOL_EDIT else 'FAIL'))
+total = len(cases) + len(edits)
+print('ffportrait: %d of %d cases FAILED' % (failures, total) if failures
+      else 'ffportrait: all %d cases pass' % total)
 sys.exit(1 if failures else 0)

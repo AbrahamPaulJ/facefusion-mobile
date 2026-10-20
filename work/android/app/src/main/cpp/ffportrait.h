@@ -21,6 +21,8 @@
 //     of face_editor's. Pass the graph's own `source` and `target` here, unchanged.
 
 #pragma once
+#include <string>
+#include <vector>
 
 namespace ffportrait {
 
@@ -43,5 +45,54 @@ constexpr int kHourglassChannels = kMotions * (1 + kCompress);   // 110
  */
 void hourglassInput(const float* featureVolume, const float* source, const float* target,
                     float* out);
+
+// ------------------------------------------------------------------ face_editor
+//
+// face_editor/core.py:apply_edit's keypoint arithmetic, op for op. The oracle is
+// work/pipeline/lp_editor.py, which test_ffportrait.py checks this against.
+
+// face_editor's sliders, each in [-1, 1], in this order (lp_editor.SLIDERS).
+enum Slider {
+  kEyebrowDirection, kEyeGazeHorizontal, kEyeGazeVertical, kEyeOpenRatio, kLipOpenRatio,
+  kMouthGrim, kMouthPout, kMouthPurse, kMouthSmile, kMouthPositionHorizontal,
+  kMouthPositionVertical, kHeadPitch, kHeadYaw, kHeadRoll, kSliderCount
+};
+
+// The motion extractor's seven outputs for one face.
+struct Motion {
+  float pitch = 0, yaw = 0, roll = 0, scale = 0;
+  float translation[3] = {};
+  float expression[kKeypoints * 3] = {};
+  float points[kKeypoints * 3] = {};
+};
+
+// The eye retargeter, the lip retargeter and the stitcher: Gemm+ReLU MLPs, from the flat
+// file work/export/lp_mlp_export.py writes (lp_mlp_<tier>.bin).
+class Mlps {
+ public:
+  bool load(const std::string& path, std::string* err);
+  bool loaded() const { return !nets_[2].empty(); }
+  // net 0 eye, 1 lip, 2 stitcher. `in` is that net's input width.
+  std::vector<float> run(int net, const float* in) const;
+
+ private:
+  struct Layer { int out = 0, in = 0; std::vector<float> w, b; };
+  std::vector<Layer> nets_[3];
+};
+
+// calculate_distance_ratio on the 68-point landmarks (x, y pairs, any scale).
+float distanceRatio(const float* landmark68, int top, int bottom, int left, int right);
+
+// True when at least one slider is non-zero -- with none set the edit is the identity and
+// the whole generator can be skipped.
+bool anyEdit(const float* sliders);
+
+/**
+ * apply_edit's keypoints: `source` is the EDITED face and `target` the face as it is,
+ * each [21][3] -- the generator's own `source` / `target` inputs (see hourglassInput).
+ * `landmark68` is the face's 68 points, for the eye and lip openers' ratios.
+ */
+void editKeypoints(const Motion& m, const float* sliders, const float* landmark68,
+                   const Mlps& mlps, float* source, float* target);
 
 }  // namespace ffportrait

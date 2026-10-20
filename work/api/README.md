@@ -66,7 +66,13 @@ Bodies are raw bytes, not multipart — the client is `curl --data-binary @file`
 
 Options default to whatever the app's processor settings are set to, per-request overrides in the
 query string: `weight`, `blur`, `detector`, `boost` (1-4), `largest`, `enhancer`,
-`enhance_blend`, `fps`, `swapper`, `lip_sync`.
+`enhance_blend`, `fps`, `swapper`, `lip_sync`, `edit`, `face_edit`.
+
+`edit` turns the face editor on with the sliders it names, upstream's `face_editor` option names
+without the prefix, each -1 to 1: `edit=mouth_smile=1,head_yaw=-0.5` (URL-encode the `=` and `,`
+as `%3D` and `%2C` if your client does not). Sliders it does not name are 0. `face_edit=0` turns
+the editor off. It works on `/swap` and `/swap_video`, and like the enhancer it is a separate
+model download; `GET /health` reports `face_editor` as installed or not.
 
 `lip_sync=1` applies only to `/swap_video`, and only when the clip HAS AN AUDIO TRACK: the
 lip syncer redraws the mouth to match speech, so a silent clip and a still image have

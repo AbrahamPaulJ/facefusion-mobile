@@ -481,8 +481,10 @@ android {
         // 110 = no em dashes left in any app string, in any of the four languages.
         // 111 = an 8 Gen 5 (soc 97) gets its own v81s97 set instead of the SM8850-scheduled
         // v81 one, which loads there and dies at its first execute. Issue #16.
-        versionCode = 111
-        versionName = "0.9.39$variantTag"    // "-dev" == NO content gate
+        // 112 = the face editor: LivePortrait, upstream's face_editor with its 14 sliders, as an
+        // optional processor and its own download.
+        versionCode = 112
+        versionName = "0.9.40$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }

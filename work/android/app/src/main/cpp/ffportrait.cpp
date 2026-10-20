@@ -3,6 +3,9 @@
 #include "ffportrait.h"
 
 #include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <vector>
 
 namespace ffportrait {
@@ -181,6 +184,273 @@ void hourglassInput(const float* featureVolume, const float* source, const float
         }
       }
     }
+  }
+}
+
+
+// ------------------------------------------------------------------ face_editor
+
+namespace {
+
+// processors/live_portrait.py: EXPRESSION_MIN / EXPRESSION_MAX, limit_expression's clip.
+constexpr float kExpressionMin[kKeypoints * 3] = {
+    -2.88067125e-02f, -8.12731311e-02f, -1.70541159e-03f, -4.88598682e-02f, -3.32196616e-02f, -1.67431499e-04f,
+    -6.75425082e-02f, -4.28681746e-02f, -1.98950816e-04f, -7.23103955e-02f, -3.28503326e-02f, -7.31324719e-04f,
+    -3.87073644e-02f, -6.01546466e-02f, -5.50269964e-04f, -6.38048723e-02f, -2.23840728e-01f, -7.13261834e-04f,
+    -3.02710701e-02f, -3.93195450e-02f, -8.24086510e-06f, -2.95799859e-02f, -5.39318882e-02f, -1.74219604e-04f,
+    -2.92359516e-02f, -1.53050944e-02f, -6.30460854e-05f, -5.56493877e-03f, -2.34344602e-02f, -1.26858242e-04f,
+    -4.37593013e-02f, -2.77768299e-02f, -2.70503685e-02f, -1.76926646e-02f, -1.91676542e-02f, -1.15090821e-04f,
+    -8.34268332e-03f, -3.99775570e-03f, -3.27481248e-05f, -3.40162888e-02f, -2.81868968e-02f, -1.96679524e-04f,
+    -2.91855410e-02f, -3.97511162e-02f, -2.81230678e-05f, -1.50395725e-02f, -2.49494594e-02f, -9.42573533e-05f,
+    -1.67938769e-02f, -2.00953931e-02f, -4.00750607e-04f, -1.86435618e-02f, -2.48535164e-02f, -2.74416432e-02f,
+    -4.61211195e-03f, -1.21660791e-02f, -2.93173041e-04f, -4.10017073e-02f, -7.43824020e-02f, -4.42762971e-02f,
+    -1.90370996e-02f, -3.74363363e-02f, -1.34740388e-02f};
+constexpr float kExpressionMax[kKeypoints * 3] = {
+    4.46682945e-02f, 7.08772913e-02f, 4.08344204e-04f, 2.14308221e-02f, 6.15894832e-02f, 4.85319615e-05f,
+    3.02363783e-02f, 4.45043296e-02f, 1.28298725e-05f, 3.05869691e-02f, 3.79812494e-02f, 6.57040102e-04f,
+    4.45670523e-02f, 3.97259220e-02f, 7.10966764e-04f, 9.43699256e-02f, 9.85926315e-02f, 2.02551950e-04f,
+    1.61131397e-02f, 2.92906128e-02f, 3.44733417e-06f, 5.23825921e-02f, 1.07065082e-01f, 6.61510974e-04f,
+    2.85718683e-03f, 8.32320191e-03f, 2.39314613e-04f, 2.57947259e-02f, 1.60935968e-02f, 2.41853559e-05f,
+    4.90833223e-02f, 3.43903080e-02f, 3.22353356e-02f, 1.44766076e-02f, 3.39248963e-02f, 1.42291479e-04f,
+    8.75749043e-04f, 6.82212645e-03f, 2.76097053e-05f, 1.86958015e-02f, 3.84016186e-02f, 7.33085908e-05f,
+    2.01714113e-02f, 4.90544215e-02f, 2.34028921e-05f, 2.46518422e-02f, 3.29151377e-02f, 3.48571630e-05f,
+    2.22457591e-02f, 1.21796541e-02f, 1.56396593e-04f, 1.72109623e-02f, 3.01626958e-02f, 1.36556877e-02f,
+    1.83460284e-02f, 1.61141958e-02f, 2.87440169e-04f, 3.57594155e-02f, 1.80554688e-01f, 2.75554154e-02f,
+    2.17450950e-02f, 8.66811201e-02f, 3.34241726e-02f};
+
+// numpy.interp(v, [-1, 1], [lo, hi]), in double as numpy does it.
+double interp(double v, double lo, double hi) {
+  if (v <= -1.0) return lo;
+  if (v >= 1.0) return hi;
+  return lo + (v + 1.0) * 0.5 * (hi - lo);
+}
+
+// expression[0, k, axis] += d, where expression is float32 and d a numpy float64: the sum
+// is taken in double and stored back as float, exactly as numpy's in-place add does.
+void add(float* e, int k, int axis, double d) {
+  float& x = e[k * 3 + axis];
+  x = (float)((double)x + d);
+}
+
+// face_editor's expression edits, in its order: gaze, grim, position, pout, purse, smile,
+// eyebrow (lp_editor.edit_expression).
+void editExpression(float* e, const float* s) {
+  double g = s[kEyeGazeHorizontal];
+  if (g > 0) { add(e, 11, 0, interp(g, -0.015, 0.015)); add(e, 15, 0, interp(g, -0.020, 0.020)); }
+  else { add(e, 11, 0, interp(g, -0.020, 0.020)); add(e, 15, 0, interp(g, -0.015, 0.015)); }
+  double v = s[kEyeGazeVertical];
+  add(e, 1, 1, interp(v, -0.0025, 0.0025)); add(e, 2, 1, -interp(v, -0.0025, 0.0025));
+  add(e, 11, 1, -interp(v, -0.010, 0.010)); add(e, 13, 1, -interp(v, -0.005, 0.005));
+  add(e, 15, 1, -interp(v, -0.010, 0.010)); add(e, 16, 1, -interp(v, -0.005, 0.005));
+  double m = s[kMouthGrim];
+  if (m > 0) {
+    add(e, 17, 2, -interp(m, -0.005, 0.005)); add(e, 19, 2, interp(m, -0.01, 0.01));
+    add(e, 20, 1, -interp(m, -0.06, 0.06)); add(e, 20, 2, -interp(m, -0.03, 0.03));
+  } else {
+    add(e, 19, 1, -interp(m, -0.05, 0.05)); add(e, 19, 2, -interp(m, -0.02, 0.02));
+    add(e, 20, 2, -interp(m, -0.03, 0.03));
+  }
+  double h = s[kMouthPositionHorizontal];
+  v = s[kMouthPositionVertical];
+  add(e, 19, 0, interp(h, -0.05, 0.05)); add(e, 20, 0, interp(h, -0.04, 0.04));
+  if (v > 0) { add(e, 19, 1, -interp(v, -0.04, 0.04)); add(e, 20, 1, -interp(v, -0.02, 0.02)); }
+  else { add(e, 19, 1, -interp(v, -0.05, 0.05)); add(e, 20, 1, -interp(v, -0.04, 0.04)); }
+  double p = s[kMouthPout];
+  if (p > 0) {
+    add(e, 19, 1, -interp(p, -0.022, 0.022)); add(e, 19, 2, interp(p, -0.025, 0.025));
+    add(e, 20, 2, -interp(p, -0.002, 0.002));
+  } else {
+    add(e, 19, 1, interp(p, -0.022, 0.022)); add(e, 19, 2, interp(p, -0.025, 0.025));
+    add(e, 20, 2, -interp(p, -0.002, 0.002));
+  }
+  p = s[kMouthPurse];
+  if (p > 0) { add(e, 19, 1, -interp(p, -0.04, 0.04)); add(e, 19, 2, -interp(p, -0.02, 0.02)); }
+  else {
+    add(e, 14, 1, -interp(p, -0.02, 0.02)); add(e, 17, 2, interp(p, -0.01, 0.01));
+    add(e, 19, 2, -interp(p, -0.015, 0.015)); add(e, 20, 2, -interp(p, -0.002, 0.002));
+  }
+  m = s[kMouthSmile];
+  if (m > 0) {
+    add(e, 20, 1, -interp(m, -0.015, 0.015)); add(e, 14, 1, -interp(m, -0.025, 0.025));
+    add(e, 17, 1, interp(m, -0.01, 0.01)); add(e, 17, 2, interp(m, -0.004, 0.004));
+    add(e, 3, 1, -interp(m, -0.0045, 0.0045)); add(e, 7, 1, -interp(m, -0.0045, 0.0045));
+  } else {
+    add(e, 14, 1, -interp(m, -0.02, 0.02)); add(e, 17, 1, interp(m, -0.003, 0.003));
+    add(e, 19, 1, interp(m, -0.02, 0.02)); add(e, 19, 2, -interp(m, -0.005, 0.005));
+    add(e, 20, 2, interp(m, -0.01, 0.01)); add(e, 3, 1, interp(m, -0.0045, 0.0045));
+    add(e, 7, 1, interp(m, -0.0045, 0.0045));
+  }
+  double b = s[kEyebrowDirection];
+  if (b > 0) { add(e, 1, 1, interp(b, -0.015, 0.015)); add(e, 2, 1, -interp(b, -0.020, 0.020)); }
+  else {
+    add(e, 1, 0, -interp(b, -0.015, 0.015)); add(e, 2, 0, interp(b, -0.020, 0.020));
+    add(e, 1, 1, interp(b, -0.005, 0.005)); add(e, 2, 1, -interp(b, -0.005, 0.005));
+  }
+}
+
+// scipy Rotation.from_euler('xyz', [pitch, yaw, roll], degrees=True).as_matrix(), cast
+// to float32. Lower-case 'xyz' is EXTRINSIC, so R = Rz(roll) * Ry(yaw) * Rx(pitch).
+void rotation(double pitch, double yaw, double roll, float* r) {
+  const double d = 3.14159265358979323846 / 180.0;
+  const double cx = std::cos(pitch * d), sx = std::sin(pitch * d);
+  const double cy = std::cos(yaw * d), sy = std::sin(yaw * d);
+  const double cz = std::cos(roll * d), sz = std::sin(roll * d);
+  const double m[9] = {
+      cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx,
+      sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx,
+      -sy,     cy * sx,                cy * cx};
+  for (int i = 0; i < 9; ++i) r[i] = (float)m[i];
+}
+
+// points @ r.T, float32 as numpy does it.
+void rotate(const float* pts, const float* r, float* out) {
+  for (int k = 0; k < kKeypoints; ++k)
+    for (int i = 0; i < 3; ++i)
+      out[k * 3 + i] = pts[k * 3] * r[i * 3] + pts[k * 3 + 1] * r[i * 3 + 1] +
+                       pts[k * 3 + 2] * r[i * 3 + 2];
+}
+
+double clip(double v, double lo, double hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+}  // namespace
+
+bool Mlps::load(const std::string& path, std::string* err) {
+  FILE* f = std::fopen(path.c_str(), "rb");
+  if (!f) {
+    if (err) *err = "cannot open " + path;
+    return false;
+  }
+  auto fail = [&](const char* why) {
+    std::fclose(f);
+    for (auto& n : nets_) n.clear();
+    if (err) *err = path + ": " + why;
+    return false;
+  };
+  char magic[8];
+  if (std::fread(magic, 1, 8, f) != 8 || std::memcmp(magic, "LPMLP1\0\0", 8) != 0)
+    return fail("not an LPMLP1 file");
+  // eye 66 -> 63, lip 65 -> 63, stitcher 126 -> 65: checked, so a wrong file fails here and
+  // not as a silently garbled keypoint set.
+  const int wantIn[3] = {kKeypoints * 3 + 3, kKeypoints * 3 + 2, kKeypoints * 6};
+  const int wantOut[3] = {kKeypoints * 3, kKeypoints * 3, kKeypoints * 3 + 2};
+  for (int n = 0; n < 3; ++n) {
+    uint32_t layers = 0;
+    if (std::fread(&layers, 4, 1, f) != 1 || layers == 0 || layers > 16)
+      return fail("bad layer count");
+    int prev = wantIn[n];
+    for (uint32_t l = 0; l < layers; ++l) {
+      uint32_t dims[2];
+      if (std::fread(dims, 4, 2, f) != 2 || (int)dims[1] != prev || dims[0] == 0 || dims[0] > 4096)
+        return fail("bad layer shape");
+      Layer L;
+      L.out = (int)dims[0];
+      L.in = (int)dims[1];
+      L.w.resize((size_t)L.out * L.in);
+      L.b.resize(L.out);
+      if (std::fread(L.w.data(), 4, L.w.size(), f) != L.w.size() ||
+          std::fread(L.b.data(), 4, L.b.size(), f) != L.b.size())
+        return fail("short read");
+      prev = L.out;
+      nets_[n].push_back(std::move(L));
+    }
+    if (prev != wantOut[n]) return fail("bad output width");
+  }
+  std::fclose(f);
+  return true;
+}
+
+std::vector<float> Mlps::run(int net, const float* in) const {
+  const std::vector<Layer>& layers = nets_[net];
+  std::vector<float> x(in, in + layers.front().in), y;
+  for (size_t l = 0; l < layers.size(); ++l) {
+    const Layer& L = layers[l];
+    y.assign(L.out, 0.0f);
+    for (int o = 0; o < L.out; ++o) {
+      const float* w = L.w.data() + (size_t)o * L.in;
+      float acc = 0.0f;
+      for (int i = 0; i < L.in; ++i) acc += w[i] * x[i];
+      acc += L.b[o];
+      y[o] = (l + 1 < layers.size() && acc < 0.0f) ? 0.0f : acc;
+    }
+    x.swap(y);
+  }
+  return x;
+}
+
+float distanceRatio(const float* lm, int top, int bottom, int left, int right) {
+  const double vx = lm[top * 2] - lm[bottom * 2], vy = lm[top * 2 + 1] - lm[bottom * 2 + 1];
+  const double hx = lm[left * 2] - lm[right * 2], hy = lm[left * 2 + 1] - lm[right * 2 + 1];
+  return (float)(std::sqrt(vx * vx + vy * vy) / (std::sqrt(hx * hx + hy * hy) + 1e-6));
+}
+
+bool anyEdit(const float* s) {
+  for (int i = 0; i < kSliderCount; ++i)
+    if (s[i] != 0.0f) return true;
+  return false;
+}
+
+void editKeypoints(const Motion& m, const float* s, const float* lm68, const Mlps& mlps,
+                   float* source, float* target) {
+  constexpr int N = kKeypoints * 3;
+  float r[9], tmp[N];
+  // motion_points_target = scale * (motion_points @ R.T + expression) + translation
+  rotation(m.pitch, m.yaw, m.roll, r);
+  rotate(m.points, r, tmp);
+  for (int i = 0; i < N; ++i)
+    target[i] = m.scale * (tmp[i] + m.expression[i]) + m.translation[i % 3];
+
+  float e[N];
+  std::memcpy(e, m.expression, sizeof e);
+  editExpression(e, s);
+  for (int i = 0; i < N; ++i)
+    e[i] = e[i] < kExpressionMin[i] ? kExpressionMin[i] : (e[i] > kExpressionMax[i] ? kExpressionMax[i] : e[i]);
+
+  // edit_head_rotation + limit_angle (calculate_euler_limits)
+  const double p = m.pitch, y = m.yaw, ro = m.roll;
+  const double ep = p + interp(s[kHeadPitch], 20, -20);
+  const double ey = y + interp(s[kHeadYaw], 60, -60);
+  const double er = ro + interp(s[kHeadRoll], -15, 15);
+  double pmin = -30, pmax = 30, ymin = -60, ymax = 60, rmin = -20, rmax = 20;
+  if (p < 0) pmin = std::fmin(p, pmin); else pmax = std::fmax(p, pmax);
+  if (y < 0) ymin = std::fmin(y, ymin); else ymax = std::fmax(y, ymax);
+  if (ro < 0) rmin = std::fmin(ro, rmin); else rmax = std::fmax(ro, rmax);
+  rotation(clip(ep, pmin, pmax), clip(ey, ymin, ymax), clip(er, rmin, rmax), r);
+  rotate(m.points, r, source);
+  for (int i = 0; i < N; ++i) source[i] += e[i];
+  for (int i = 0; i < N; ++i) source[i] *= m.scale;
+  for (int i = 0; i < N; ++i) source[i] += m.translation[i % 3];
+
+  // edit_eye_open / edit_lip_open: retargeter(target, ratios, goal) * |slider|. A slider
+  // at zero adds exactly zero upstream too, so the MLP is skipped then.
+  float in[N + 3];
+  if (s[kEyeOpenRatio] != 0.0f) {
+    std::memcpy(in, target, sizeof(float) * N);
+    in[N] = distanceRatio(lm68, 37, 40, 39, 36);
+    in[N + 1] = distanceRatio(lm68, 43, 46, 45, 42);
+    in[N + 2] = s[kEyeOpenRatio] < 0 ? 0.0f : 0.6f;
+    std::vector<float> d = mlps.run(0, in);
+    const float a = std::fabs(s[kEyeOpenRatio]);
+    for (int i = 0; i < N; ++i) source[i] += d[i] * a;
+  }
+  if (s[kLipOpenRatio] != 0.0f) {
+    std::memcpy(in, target, sizeof(float) * N);
+    in[N] = distanceRatio(lm68, 62, 66, 54, 48);
+    in[N + 1] = s[kLipOpenRatio] < 0 ? 0.0f : 1.0f;
+    std::vector<float> d = mlps.run(1, in);
+    const float a = std::fabs(s[kLipOpenRatio]);
+    for (int i = 0; i < N; ++i) source[i] += d[i] * a;
+  }
+
+  // forward_stitch_motion_points: delta = mlp(cat(target, source)); source + delta[:63],
+  // then x and y of every keypoint + delta[63:65].
+  float st[2 * N];
+  std::memcpy(st, target, sizeof(float) * N);
+  std::memcpy(st + N, source, sizeof(float) * N);
+  std::vector<float> d = mlps.run(2, st);
+  for (int k = 0; k < kKeypoints; ++k) {
+    source[k * 3] = (source[k * 3] + d[k * 3]) + d[N];
+    source[k * 3 + 1] = (source[k * 3 + 1] + d[k * 3 + 1]) + d[N + 1];
+    source[k * 3 + 2] = source[k * 3 + 2] + d[k * 3 + 2];
   }
 }
 

@@ -17,10 +17,14 @@
 //          [--enhance]         # gpen_bfr_256 on the swapped crop; needs gpen_<tier>.bin
 //          [--enhance-blend 0.8]
 //          [--largest]         # swap only the largest face
+//          [--edit k=v,...]    # face_editor sliders, e.g. mouth_smile=1,head_yaw=-0.5
+//                              # (lp_editor.SLIDERS names); needs the lp_* set
+//          [--no-swap]         # skip the swapper, e.g. to judge the editor alone
 //
 //   ffswap --lib DIR --skel DIR --probe [--canary DIR]
 //          # measure the HTP and exit: arch, VTCM, soc_model, the fp16 verdict and the
 //          # context tier those imply.  Loads no model, needs no --models.
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -56,6 +60,8 @@ int main(int argc, char** argv) {
   bool largestOnly = false;
   bool enhance = false;
   float enhanceBlend = 0.8f;
+  bool noSwap = false;
+  std::string editSpec;
 
   // The loop used to stop at argc-1 so a value-taking flag in last position could not read
   // past the end.  That also silently ignored any flag that appeared last -- fine while
@@ -87,6 +93,8 @@ int main(int argc, char** argv) {
     else if (a == "--largest") largestOnly = true;
     else if (a == "--enhance") enhance = true;
     else if (a == "--enhance-blend") enhanceBlend = (float)atof(v().c_str());
+    else if (a == "--edit") editSpec = v();
+    else if (a == "--no-swap") noSwap = true;
   }
   if (libDir.empty() || (!probe && (modelDir.empty() || srcPath.empty() || tgtPath.empty()))) {
     fprintf(stderr, "missing arguments; see the header of ffswap_main.cpp\n");
@@ -208,6 +216,30 @@ int main(int argc, char** argv) {
   // absent, and the banner prints what actually loaded rather than what was asked.
   cfg.faceEnhance = enhance;
   cfg.faceEnhancerBlend = enhanceBlend;
+  // --edit mouth_smile=1,head_yaw=-0.5: face_editor's slider names, in Config order.
+  if (!editSpec.empty()) {
+    static const char* kNames[14] = {
+        "eyebrow_direction", "eye_gaze_horizontal", "eye_gaze_vertical", "eye_open_ratio",
+        "lip_open_ratio", "mouth_grim", "mouth_pout", "mouth_purse", "mouth_smile",
+        "mouth_position_horizontal", "mouth_position_vertical", "head_pitch", "head_yaw",
+        "head_roll"};
+    size_t at = 0;
+    while (at < editSpec.size()) {
+      size_t end = editSpec.find(',', at);
+      if (end == std::string::npos) end = editSpec.size();
+      std::string kv = editSpec.substr(at, end - at);
+      size_t eq = kv.find('=');
+      int k = 0;
+      while (k < 14 && (eq == std::string::npos || std::strlen(kNames[k]) != eq ||
+                        kv.compare(0, eq, kNames[k]) != 0))
+        ++k;
+      if (k == 14) { fprintf(stderr, "unknown --edit slider: %s\n", kv.c_str()); return 2; }
+      cfg.faceEditor[k] = std::fmin(1.f, std::fmax(-1.f, (float)atof(kv.c_str() + eq + 1)));
+      at = end + 1;
+    }
+    cfg.faceEdit = true;
+  }
+  cfg.swapEnabled = !noSwap;
   if (swapper == "inswapper") {
     cfg.swapSize = 128; cfg.swapMean = 0.f; cfg.swapStd = 1.f;
     cfg.swapDenorm = false; cfg.swapperIsHyperswap = false;
@@ -260,6 +292,10 @@ int main(int argc, char** argv) {
          largestOnly ? "  largest face only" : "");
   // Asked-for is not loaded. Saying which avoids reading an unchanged image as
   // "the enhancer did nothing" when in fact it never ran.
+  if (!editSpec.empty())
+    printf("face editor: %s\n", pipe.hasFaceEditor()
+           ? editSpec.c_str()
+           : ("REQUESTED BUT NOT LOADED -- " + pipe.faceEditorError()).c_str());
   if (enhance)
     printf("enhancer: %s\n", pipe.hasEnhancer()
            ? "gpen_bfr_256"
@@ -337,6 +373,10 @@ int main(int argc, char** argv) {
       fprintf(stderr, "swap: %s\n", pipe.error().c_str());
       return 1;
     }
+    if (!faces.empty() && !pipe.editFaces(frame, faces)) {
+      fprintf(stderr, "edit: %s\n", pipe.error().c_str());
+      return 1;
+    }
     if (fo) fwrite(frame.data.data(), 1, frameBytes, fo);
     if (frames > 1 && (i + 1) % 10 == 0) { printf("  %d/%d\n", i + 1, frames); fflush(stdout); }
   }
@@ -353,6 +393,9 @@ int main(int argc, char** argv) {
   printf("  %-12s %8.1f ms\n", "swapper", pipe.msSwap);
   if (pipe.msEnhance > 0)
     printf("  %-12s %8.1f ms\n", "enhancer", pipe.msEnhance);
+  if (pipe.msEdit > 0)
+    printf("  %-12s %8.1f ms  (+ %.1f ms CPU: keypoints + hourglass input)\n", "editor",
+           pipe.msEdit, pipe.msEditCpu);
   printf("  %-12s %8.1f ms  <- CPU geometry\n", "geometry", pipe.msGeom);
   // Itemised, because "geometry" is four unrelated pieces of work and optimising it
   // blind is how 0.4.26 removed a 786432-pixel conversion and moved nothing. Per FRAME,
@@ -371,7 +414,7 @@ int main(int argc, char** argv) {
            "paste", pipe.msGeomPaste / n);
   }
   double npu = pipe.msDetect + pipe.msLandmark + pipe.msRecognise + pipe.msSwap +
-               pipe.msEnhance;
+               pipe.msEnhance + pipe.msEdit;
   // "NPU" was hardcoded and printed over an ncnn run as `NPU 996.6 ms (94%)`, which is
   // exactly the kind of confident wrong label that costs an afternoon later.
   const char* unit = ffnn::active() == ffnn::Backend::Qnn ? "NPU" : "ncnn";

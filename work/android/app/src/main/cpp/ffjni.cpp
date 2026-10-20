@@ -105,6 +105,19 @@ inline uint8_t clamp8(int v) { return (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v))
  * Touches nothing derived from WHICH SWAPPER is loaded -- swapSize and the normalisation
  * belong to the model, not to the sliders.
  */
+/**
+ * The face editor's switch and its 14 sliders, PUSHED rather than passed, like the
+ * reference face: NativePipe.init/setOptions send them on every call, and initEx re-applies
+ * them to the pipeline it just built, so no path into init can leave the editor out.
+ */
+bool g_faceEdit = false;
+float g_faceEditor[14] = {};
+
+void applyFaceEditor(ffpipe::Config& cfg) {
+  cfg.faceEdit = g_faceEdit;
+  for (int i = 0; i < 14; ++i) cfg.faceEditor[i] = g_faceEditor[i];
+}
+
 void tunables(JNIEnv* env, ffpipe::Config& cfg, jfloat weight, jfloat maskBlur,
               jintArray jPadding, jfloat detScore, jfloat lmkScore, jint pixelBoost,
               jboolean largestOnly, jboolean faceEnhance, jfloat enhanceBlend,
@@ -122,6 +135,7 @@ void tunables(JNIEnv* env, ffpipe::Config& cfg, jfloat weight, jfloat maskBlur,
   cfg.faceEnhancerBlend = std::fmin(1.f, std::fmax(0.f, enhanceBlend));
   cfg.lipSyncWeight = std::fmin(1.f, std::fmax(0.f, lipSyncWeight));
   cfg.referenceDistance = std::fmin(1.f, std::fmax(0.f, referenceDistance));
+  applyFaceEditor(cfg);
   if (jPadding && env->GetArrayLength(jPadding) == 4) {
     jint pad[4];
     env->GetIntArrayRegion(jPadding, 0, 4, pad);
@@ -214,6 +228,40 @@ Java_com_facefusion_mobile_NativePipe_setOptionsEx(JNIEnv* env, jclass,
            largestOnly, faceEnhance, enhanceBlend, lipSyncWeight, referenceDistance);
   g_pipe->updateConfig(cfg);
   return JNI_TRUE;
+}
+
+/**
+ * The face editor: on/off and face_editor's 14 sliders, each clamped to [-1, 1]. Stored
+ * here and applied to the live pipeline if there is one; initEx applies the stored copy, so
+ * the order of this and init does not matter. A wrong-length array switches the editor off
+ * rather than reading past it.
+ */
+JNIEXPORT void JNICALL
+Java_com_facefusion_mobile_NativePipe_setFaceEditor(JNIEnv* env, jclass, jboolean enabled,
+                                                    jfloatArray jSliders) {
+  g_faceEdit = false;
+  if (enabled == JNI_TRUE && jSliders && env->GetArrayLength(jSliders) == 14) {
+    env->GetFloatArrayRegion(jSliders, 0, 14, g_faceEditor);
+    for (float& v : g_faceEditor) v = std::isfinite(v) ? std::fmin(1.f, std::fmax(-1.f, v)) : 0.f;
+    g_faceEdit = true;
+  }
+  if (g_pipe) {
+    ffpipe::Config cfg = g_pipe->config();
+    applyFaceEditor(cfg);
+    g_pipe->updateConfig(cfg);
+  }
+}
+
+// Whether the face editor's set loaded AND executed at init (Pipeline::hasFaceEditor).
+JNIEXPORT jboolean JNICALL
+Java_com_facefusion_mobile_NativePipe_hasFaceEditor(JNIEnv*, jclass) {
+  return (g_pipe && g_pipe->hasFaceEditor()) ? JNI_TRUE : JNI_FALSE;
+}
+
+// Why it did not, or "" -- "not installed", a missing MLP file, or a graph this HTP refused.
+JNIEXPORT jstring JNICALL
+Java_com_facefusion_mobile_NativePipe_faceEditorError(JNIEnv* env, jclass) {
+  return env->NewStringUTF(g_pipe ? g_pipe->faceEditorError().c_str() : "");
 }
 
 // The tier that loaded and would not execute, or "". Survives the failed init that
@@ -907,6 +955,7 @@ Java_com_facefusion_mobile_NativePipe_processFrame(JNIEnv* env, jclass, jbyteArr
   auto faces = g_pipe->analyse(img);
   if (!faces.empty()) {
     if (!g_pipe->swapAll(img, faces)) { g_err = g_pipe->error(); return -1; }
+    if (!g_pipe->editFaces(img, faces)) { g_err = g_pipe->error(); return -1; }
     // No lip sync on this path (see processFrameAt), so this is straight after the swap
     // -- still its own pass, never fused; see Pipeline::enhance's doc.
     if (!g_pipe->enhance(img, faces)) { g_err = g_pipe->error(); return -1; }
@@ -968,6 +1017,8 @@ Java_com_facefusion_mobile_NativePipe_processFrameAt(JNIEnv* env, jclass, jbyteA
   auto faces = g_pipe->analyse(img);
   if (!faces.empty()) {
     if (!g_pipe->swapAll(img, faces)) { g_err = g_pipe->error(); return -1; }
+    // The editor before the lip syncer and the enhancer, which then work on the edited face.
+    if (!g_pipe->editFaces(img, faces)) { g_err = g_pipe->error(); return -1; }
     if (frameIndex >= 0 && g_pipe->hasLipSyncer() && g_pipe->melWindowTotal() > 0) {
       if (!g_pipe->syncLip(img, faces, g_pipe->melWindow(frameIndex))) {
         g_err = g_pipe->error();
@@ -998,12 +1049,13 @@ Java_com_facefusion_mobile_NativePipe_stageMillis(JNIEnv* env, jclass) {
   char buf[512];
   std::snprintf(buf, sizeof(buf),
                 "ms/frame over %d: detect %.2f landmark %.2f recognise %.2f swap %.2f "
-                "enhance %.2f lipsync-graph %.2f geometry %.2f "
+                "enhance %.2f lipsync-graph %.2f edit %.2f (cpu %.2f) geometry %.2f "
                 "[lip crop %.2f mask %.2f prep %.2f paste %.2f] "
                 "[geom detprep %.2f warp %.2f tensor %.2f mask %.2f paste %.2f]",
                 g_pipe->framesDone, g_pipe->msDetect / n, g_pipe->msLandmark / n,
                 g_pipe->msRecognise / n, g_pipe->msSwap / n, g_pipe->msEnhance / n,
-                g_pipe->msLipSync / n, g_pipe->msGeom / n,
+                g_pipe->msLipSync / n, g_pipe->msEdit / n, g_pipe->msEditCpu / n,
+                g_pipe->msGeom / n,
                 g_pipe->msLipCrop / n, g_pipe->msLipMask / n,
                 g_pipe->msLipPrep / n, g_pipe->msLipPaste / n,
                 g_pipe->msGeomDetPrep / n, g_pipe->msGeomWarp / n,
@@ -1375,6 +1427,7 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
 
   if (!faces.empty()) {
     if (!g_pipe->swapAll(frame, faces)) { g_err = g_pipe->error(); return -1; }
+    if (!g_pipe->editFaces(frame, faces)) { g_err = g_pipe->error(); return -1; }
     // Its own pass, after the swap, never fused -- see Pipeline::enhance's doc.
     if (!g_pipe->enhance(frame, faces)) { g_err = g_pipe->error(); return -1; }
   }

@@ -1,11 +1,13 @@
 """Dump the oracle for work/native/test_ffportrait.py: lp_gencut's hg_input from the fp32
 lp_generator.onnx itself (its dense-motion Reshape_12), channels-last, for the held-out
 generator cases plus two with large keypoint moves, so grid_sample's zero padding (taps off
-the volume's edge) is exercised and not only the interior.
+the volume's edge) is exercised and not only the interior. Also face_editor's keypoint
+arithmetic (lp_editor.apply_edit) on real motion, for ffportrait::editKeypoints.
 
     py -3.10 work/pipeline/lp_hg_reference.py      -> work/assets/lpref/
 """
 import os
+import sys
 
 import numpy
 import onnx
@@ -43,6 +45,42 @@ def main():
 		numpy.ascontiguousarray(hg.transpose(0, 2, 3, 4, 1)).tofile(os.path.join(out, 'hg_%03d.raw' % n))
 		print('case %d  |source - target| max %.3f  hg range [%.3f, %.3f]'
 		      % (n, float(numpy.abs(src - tgt).max()), float(hg.min()), float(hg.max())))
+	editor(out)
+
+
+def editor(out):
+	"""face_editor's keypoints (lp_editor.apply_edit) on the held-out crops' real motion,
+	for ffportrait::editKeypoints. Each case: motion packed as test_ffportrait.py reads it,
+	the 14 sliders, a 68-point landmark set (synthetic: only its eye and lip RATIOS are
+	read, and those are computed here the same way), and the expected source / target.
+	Case 0 has every slider at zero; the rest set 1-14 sliders at up to full strength."""
+	import glob as g
+	sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+	import lp_editor
+	me = lp_editor.session('motion_extractor')
+	crops = sorted(g.glob(os.path.join(ROOT, 'calib', 'edtalk_target_heldout', '*.raw')))
+	rng = numpy.random.default_rng(11)
+	n = 0
+	for c in crops:
+		motion = me.run(None, {'input': numpy.fromfile(c, numpy.float32).reshape(1, 3, 256, 256)})
+		for j in range(4):
+			s = ({k: 0.0 for k in lp_editor.SLIDERS} if n == 0 else
+			     lp_editor.random_sliders(rng, active=int(rng.integers(1, 15))))
+			lm = (rng.random((68, 2)) * 200 + 100).astype(numpy.float32)
+			ratio = lambda t, b, l, r: float(numpy.linalg.norm(lm[t] - lm[b]) /
+			                                 (numpy.linalg.norm(lm[l] - lm[r]) + 1e-6))
+			src, tgt = lp_editor.apply_edit(motion, s, (ratio(37, 40, 39, 36), ratio(43, 46, 45, 42)),
+			                                ratio(62, 66, 54, 48))
+			pitch, yaw, roll, scale, translation, expression, mp = [numpy.ravel(x).astype(numpy.float32) for x in motion]
+			numpy.concatenate([pitch, yaw, roll, scale, translation, expression, mp]).tofile(
+				os.path.join(out, 'edit_motion_%03d.raw' % n))
+			numpy.array([s[k] for k in lp_editor.SLIDERS], numpy.float32).tofile(
+				os.path.join(out, 'edit_sliders_%03d.raw' % n))
+			lm.tofile(os.path.join(out, 'edit_lm68_%03d.raw' % n))
+			src.tofile(os.path.join(out, 'edit_source_%03d.raw' % n))
+			tgt.tofile(os.path.join(out, 'edit_target_%03d.raw' % n))
+			n += 1
+	print('editor: %d cases' % n)
 
 
 if __name__ == '__main__':

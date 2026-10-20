@@ -80,6 +80,11 @@ Ruhs. The pipeline, the models, and the option names, defaults and ranges are Fa
   selection the swapper uses (a person on **Keep face** keeps their mouth too), unless lips
   faces were picked, which then select alone: each picked identity dubs only its
   best-matching face.
+- Face editor, optionally: upstream's `face_editor`, on LivePortrait. Fourteen sliders move
+  the eyebrows, gaze, eyes, lips, smile and mouth, and turn, nod or tilt the head. It edits
+  the face that will be shown, the swapped one, on photos and on video, where every frame
+  gets the same edit. About 0.2 s per face on an 8 Elite, so a video takes several times
+  longer with it on; every slider at zero costs nothing.
 - Shows the swap as it is written: while a video runs, the result pane is the frame going
   into the file, not a re-render of it. The sound arrives with the finished clip.
 - Speaks English, Русский, 简体中文 and 繁體中文.
@@ -87,7 +92,8 @@ Ruhs. The pipeline, the models, and the option names, defaults and ranges are Fa
 - Can be driven from a browser on your PC over the local network, if you turn that on.
 
 Optional extras, each a separate download: a face enhancer (`gpen_bfr_256`, about 2.5 ms
-more per face, 25 MB), a lip syncer (`edtalk_256`, 60 MB), the alternative swappers
+more per face, 25 MB), a lip syncer (`edtalk_256`, 60 MB), the face editor (LivePortrait,
+about 150 MB, Snapdragon only), the alternative swappers
 `hyperswap_1b` and `hyperswap_1c` (about 200 MB each, and neither is faster or slower than
 the one that ships), and pixel boost, which renders the swapped face at 512, 768 or 1024
 instead of 256 at a proportional cost in time.
@@ -184,8 +190,8 @@ you say otherwise.
 ## Roadmap
 
 - Show the faces detected in the target, so you can see what will be swapped.
-- Live portrait, for stills only. The generator costs nine times the entire current frame,
-  which turns a 10 second clip into about four minutes.
+- Expression restorer: upstream's other LivePortrait processor, which puts the target's own
+  expression back on the swapped face. It reuses the face editor's models.
 
 ## Content policy
 
@@ -213,7 +219,8 @@ using, modifying or redistributing this.
 
 The models are converted from FaceFusion's and are not uniformly permissive.
 `yoloface_8n` is GPL-3.0, `arcface_w600k_r50` and `inswapper_128` are Non-Commercial, and
-`hyperswap_1a_256` is ResearchRAIL. See the
+`hyperswap_1a_256` is ResearchRAIL. LivePortrait (the face editor) is MIT, by Kuaishou's
+KwaiVGI. See the
 [model repository](https://huggingface.co/AbrahamPJ/facefusion-mobile-models) for details.
 
 The app icon is FaceFusion's, used with permission.

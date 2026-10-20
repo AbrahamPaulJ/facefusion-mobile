@@ -151,6 +151,15 @@ std::vector<std::vector<int>> outputShapes(Handle h) {
   return ffqnn::outputShapes(r->inner);
 }
 
+std::vector<std::string> outputNames(Handle h) {
+  if (!h) return {};
+  HandleRec* r = static_cast<HandleRec*>(h);
+#ifdef FFNN_HAVE_NCNN
+  if (r->backend == Backend::Ncnn) return {};
+#endif
+  return ffqnn::outputNames(r->inner);
+}
+
 std::vector<std::string> inputNames(Handle h) {
   if (!h) return {};
   HandleRec* r = static_cast<HandleRec*>(h);

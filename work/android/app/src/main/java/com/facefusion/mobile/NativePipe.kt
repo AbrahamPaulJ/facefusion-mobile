@@ -33,13 +33,33 @@ object NativePipe {
 
     /** Load the pipeline with [opts] applied. */
     fun init(libDir: String, skelDir: String, modelDir: String,
-             opts: SwapOptions = SwapOptions()): Boolean =
-        initEx(libDir, skelDir, modelDir, opts.swapper,
-               opts.weight, opts.maskBlur, opts.maskPadding.toIntArray(),
-               opts.detectorScore, opts.landmarkerScore,
-               opts.pixelBoost, opts.largestOnly,
-               opts.faceEnhance, opts.enhanceBlend, opts.lipSyncWeight,
-               opts.referenceDistance)
+             opts: SwapOptions = SwapOptions()): Boolean {
+        pushFaceEditor(opts)
+        return initEx(libDir, skelDir, modelDir, opts.swapper,
+                      opts.weight, opts.maskBlur, opts.maskPadding.toIntArray(),
+                      opts.detectorScore, opts.landmarkerScore,
+                      opts.pixelBoost, opts.largestOnly,
+                      opts.faceEnhance, opts.enhanceBlend, opts.lipSyncWeight,
+                      opts.referenceDistance)
+    }
+
+    /**
+     * The face editor's switch and sliders, PUSHED: native keeps them and applies them to
+     * every pipeline it builds, the reference face's pattern. [init] and [setOptions] call
+     * this, so every path that loads or retunes a pipeline carries the editor with it.
+     */
+    @JvmStatic external fun setFaceEditor(enabled: Boolean, sliders: FloatArray)
+
+    private fun pushFaceEditor(opts: SwapOptions) =
+        setFaceEditor(opts.faceEdit, opts.editor.toFloatArray())
+
+    /**
+     * Whether the face editor (lp_feature, lp_motion, lp_gencut + lp_mlp) loaded AND ran
+     * at the last init. ⚠ A graph this chip refuses drops the EDITOR, not the tier, so this
+     * can be false on a device where everything else works; [faceEditorError] says why.
+     */
+    @JvmStatic external fun hasFaceEditor(): Boolean
+    @JvmStatic external fun faceEditorError(): String
 
     /**
      * Tiers to skip at the next [init], comma-separated; "" clears.
@@ -81,12 +101,14 @@ object NativePipe {
 
     /** [setOptionsEx] from a [SwapOptions]. `swapper` and `outputFps` are not sent: the
      *  first needs a reload, the second never reaches the pipeline at all. */
-    fun setOptions(opts: SwapOptions): Boolean =
-        setOptionsEx(opts.weight, opts.maskBlur, opts.maskPadding.toIntArray(),
-                     opts.detectorScore, opts.landmarkerScore,
-                     opts.pixelBoost, opts.largestOnly,
-                     opts.faceEnhance, opts.enhanceBlend, opts.lipSyncWeight,
-                     opts.referenceDistance)
+    fun setOptions(opts: SwapOptions): Boolean {
+        pushFaceEditor(opts)
+        return setOptionsEx(opts.weight, opts.maskBlur, opts.maskPadding.toIntArray(),
+                            opts.detectorScore, opts.landmarkerScore,
+                            opts.pixelBoost, opts.largestOnly,
+                            opts.faceEnhance, opts.enhanceBlend, opts.lipSyncWeight,
+                            opts.referenceDistance)
+    }
 
     /**
      * The tier that LOADED and then would not execute, or "".

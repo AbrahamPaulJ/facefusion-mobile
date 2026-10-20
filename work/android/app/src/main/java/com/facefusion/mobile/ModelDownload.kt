@@ -162,7 +162,8 @@ object ModelDownload {
     // these two are named here because they are alternatives to a swapper the app already
     // has, not additions to the set it needs.
     private val OPTIONAL_MODELS =
-        listOf("gpen", "edtalk", "wav2lip", "hyperswap_1b", "hyperswap_1c")
+        listOf("gpen", "edtalk", "wav2lip", "hyperswap_1b", "hyperswap_1c",
+               ModelPaths.LIVEPORTRAIT)
 
     /** Which of [entries] are not already present and correct in [dir]. */
     fun missing(dir: File, entries: List<Entry>): List<Entry> =

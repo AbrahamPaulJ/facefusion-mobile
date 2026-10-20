@@ -51,6 +51,7 @@ import com.facefusion.mobile.ModelDownload
 import com.facefusion.mobile.OptionSegments
 import com.facefusion.mobile.OptionSlider
 import com.facefusion.mobile.OptionSteps
+import com.facefusion.mobile.ModelPaths
 import com.facefusion.mobile.SwapOptions
 import java.io.File
 import kotlin.math.roundToInt
@@ -190,6 +191,8 @@ fun SwapScreen(
     hasHyperswap1c: Boolean = false,
     hasEnhancer: Boolean,
     hasLipSyncer: Boolean,
+    /** The face editor's four files are on disk (ModelPaths.LIVEPORTRAIT). */
+    hasFaceEditor: Boolean = false,
     /**
      * A processor whose model is not on the device was tapped.
      *
@@ -536,6 +539,17 @@ fun SwapScreen(
                         available = !hasTarget || durationMs > 0,
                         onToggle = { onOptsChange(opts.copy(lipSync = !opts.lipSync)) },
                         onSettings = { settingsFor = "lipsync" },
+                    )
+                    // Photos AND video, as upstream: a still is one edit, a clip gets the
+                    // same edit on every frame.
+                    ProcessorChip(
+                        name = stringResource(R.string.swap_proc_face_editor),
+                        model = ModelPaths.LIVEPORTRAIT,
+                        installed = hasFaceEditor,
+                        on = opts.faceEdit,
+                        available = true,
+                        onToggle = { onOptsChange(opts.copy(faceEdit = !opts.faceEdit)) },
+                        onSettings = { settingsFor = "editor" },
                     )
                 }
             }
@@ -1552,6 +1566,7 @@ fun SwapScreen(
                 Text(stringResource(when (sheet) {
                     "enhancer" -> R.string.swap_proc_enhancer
                     "lipsync"  -> R.string.swap_proc_lip_syncer
+                    "editor"   -> R.string.swap_proc_face_editor
                     else       -> R.string.swap_proc_swapper
                 }))
             },
@@ -1581,6 +1596,7 @@ fun SwapScreen(
                             Text(stringResource(R.string.opt_enhancer_note, opts.pixelBoostLabel),
                                  style = MaterialTheme.typography.bodySmall, fontSize = 11.sp)
                         }
+                        "editor" -> FaceEditorSliders(opts, onOptsChange)
                         "lipsync" -> {
                             OptionSlider(
                                 stringResource(R.string.opt_weight), opts.lipSyncWeight,
@@ -1675,6 +1691,57 @@ fun DownloadOverlay(onDownload: () -> Unit, note: String? = null) {
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * face_editor's 14 sliders, grouped as upstream's UI groups them. Each writes one entry of
+ * [SwapOptions.editor] by its upstream name, so the order here is presentation only and the
+ * native side's order lives in exactly one place ([SwapOptions.EDITOR_SLIDERS]).
+ */
+@Composable
+private fun FaceEditorSliders(opts: SwapOptions, onOptsChange: (SwapOptions) -> Unit) {
+    val groups = listOf(
+        R.string.opt_edit_group_eyes to listOf(
+            "eyebrow_direction" to R.string.opt_edit_eyebrow_direction,
+            "eye_gaze_horizontal" to R.string.opt_edit_eye_gaze_horizontal,
+            "eye_gaze_vertical" to R.string.opt_edit_eye_gaze_vertical,
+            "eye_open_ratio" to R.string.opt_edit_eye_open_ratio,
+        ),
+        R.string.opt_edit_group_mouth to listOf(
+            "mouth_smile" to R.string.opt_edit_mouth_smile,
+            "lip_open_ratio" to R.string.opt_edit_lip_open_ratio,
+            "mouth_grim" to R.string.opt_edit_mouth_grim,
+            "mouth_pout" to R.string.opt_edit_mouth_pout,
+            "mouth_purse" to R.string.opt_edit_mouth_purse,
+            "mouth_position_horizontal" to R.string.opt_edit_mouth_position_horizontal,
+            "mouth_position_vertical" to R.string.opt_edit_mouth_position_vertical,
+        ),
+        R.string.opt_edit_group_head to listOf(
+            "head_pitch" to R.string.opt_edit_head_pitch,
+            "head_yaw" to R.string.opt_edit_head_yaw,
+            "head_roll" to R.string.opt_edit_head_roll,
+        ),
+    )
+    for ((title, sliders) in groups) {
+        Text(stringResource(title), style = MaterialTheme.typography.titleSmall,
+             modifier = Modifier.padding(top = 4.dp))
+        for ((key, label) in sliders) {
+            val i = SwapOptions.EDITOR_SLIDERS.indexOf(key)
+            OptionSlider(
+                stringResource(label), opts.editor[i],
+                { v -> onOptsChange(opts.copy(editor = opts.editor.toMutableList().also { it[i] = v })) },
+                range = -1f..1f,
+                format = { "%+.2f".format(it) },
+            )
+        }
+    }
+    Text(stringResource(R.string.opt_edit_note),
+         style = MaterialTheme.typography.bodySmall, fontSize = 11.sp)
+    if (opts.editor.any { it != 0f }) {
+        TextButton(onClick = { onOptsChange(opts.copy(editor = SwapOptions().editor)) }) {
+            Text(stringResource(R.string.opt_edit_reset))
         }
     }
 }

@@ -599,4 +599,25 @@ Turning it off runs your own Swap settings instead. This is experimental: the en
     <string name="set_lowmem_on">On</string>
     <string name="set_lowmem_off">Off</string>
 
+    <string name="swap_proc_face_editor">face_editor</string>
+    <string name="model_face_editor">Face editor</string>
+    <string name="opt_edit_group_eyes">Eyes</string>
+    <string name="opt_edit_group_mouth">Mouth</string>
+    <string name="opt_edit_group_head">Head</string>
+    <string name="opt_edit_eyebrow_direction">Eyebrow direction</string>
+    <string name="opt_edit_eye_gaze_horizontal">Gaze left / right</string>
+    <string name="opt_edit_eye_gaze_vertical">Gaze up / down</string>
+    <string name="opt_edit_eye_open_ratio">Eyes open</string>
+    <string name="opt_edit_lip_open_ratio">Lips open</string>
+    <string name="opt_edit_mouth_grim">Grim</string>
+    <string name="opt_edit_mouth_pout">Pout</string>
+    <string name="opt_edit_mouth_purse">Purse</string>
+    <string name="opt_edit_mouth_smile">Smile</string>
+    <string name="opt_edit_mouth_position_horizontal">Mouth left / right</string>
+    <string name="opt_edit_mouth_position_vertical">Mouth up / down</string>
+    <string name="opt_edit_head_pitch">Head nod</string>
+    <string name="opt_edit_head_yaw">Head turn</string>
+    <string name="opt_edit_head_roll">Head tilt</string>
+    <string name="opt_edit_note">LivePortrait, as upstream\'s face_editor. With every slider at 0 the face is left as it is and nothing extra runs. About 0.2 s per face on an 8 Elite, so a video takes several times longer with it on.</string>
+    <string name="opt_edit_reset">Reset sliders</string>
 </resources>

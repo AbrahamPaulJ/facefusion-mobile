@@ -455,4 +455,25 @@
     <string name="status_lips_cleared">Синхронизация губ снова на всех лицах.</string>
     <string name="status_lips_missed">В этой точке лица нет.</string>
     <string name="status_lips_wait_boxes">Под касанием пока нет рамки лица. Дождитесь красных рамок и нажмите на лицо.</string>
+    <string name="swap_proc_face_editor">face_editor</string>
+    <string name="model_face_editor">Редактор лица</string>
+    <string name="opt_edit_group_eyes">Глаза</string>
+    <string name="opt_edit_group_mouth">Рот</string>
+    <string name="opt_edit_group_head">Голова</string>
+    <string name="opt_edit_eyebrow_direction">Брови</string>
+    <string name="opt_edit_eye_gaze_horizontal">Взгляд влево / вправо</string>
+    <string name="opt_edit_eye_gaze_vertical">Взгляд вверх / вниз</string>
+    <string name="opt_edit_eye_open_ratio">Открытость глаз</string>
+    <string name="opt_edit_lip_open_ratio">Открытость губ</string>
+    <string name="opt_edit_mouth_grim">Гримаса</string>
+    <string name="opt_edit_mouth_pout">Надутые губы</string>
+    <string name="opt_edit_mouth_purse">Сжатые губы</string>
+    <string name="opt_edit_mouth_smile">Улыбка</string>
+    <string name="opt_edit_mouth_position_horizontal">Рот влево / вправо</string>
+    <string name="opt_edit_mouth_position_vertical">Рот вверх / вниз</string>
+    <string name="opt_edit_head_pitch">Наклон головы вперёд</string>
+    <string name="opt_edit_head_yaw">Поворот головы</string>
+    <string name="opt_edit_head_roll">Наклон головы вбок</string>
+    <string name="opt_edit_note">LivePortrait, как face_editor в оригинале. Когда все ползунки на 0, лицо не меняется и ничего лишнего не запускается. Около 0,2 с на лицо на 8 Elite, поэтому видео с ним обрабатывается в несколько раз дольше.</string>
+    <string name="opt_edit_reset">Сбросить ползунки</string>
 </resources>
