@@ -2160,6 +2160,38 @@ def round_before_int_cast(model):
 	return n
 
 
+def widen_integer_tests(model):
+	"""The warp's bounds tests `|Floor(x) - Cast(Clip(..))| <= 0.001` compare at 0.5.
+
+	Both sides are whole numbers, so the difference is 0 or at least 1 and any threshold in
+	(0, 1) is the same test. 0.001 is not, once Floor is 16-bit fixed point: its scale is a
+	hair over 1/1024, and on the S25 the HTP's Sub returned -0.0012 at floor = 3, 7, 11, 15
+	and 19, so those five columns (and the same rows) of every depth slice were masked to
+	zero -- the 32 px plaid in the 512 output. Measured with the warp built alone: every
+	coordinate, floor, index and weight was within 1/1024 and this mask was wrong at 5120
+	of 65536 samples.
+	"""
+	g = model.graph
+	prod = {o: nd for nd in g.node for o in nd.output}
+	half = numpy_helper.from_array(numpy.array(0.5, numpy.float32), 'integer_test_half')
+	n = 0
+	for nd in g.node:
+		if nd.op_type != 'LessOrEqual':
+			continue
+		ab = prod.get(nd.input[0])
+		sub = prod.get(ab.input[0]) if ab is not None and ab.op_type == 'Abs' else None
+		if sub is None or sub.op_type != 'Sub':
+			continue
+		a, b = (prod.get(x) for x in sub.input)
+		if a is None or b is None or a.op_type not in ('Floor', 'Add') or b.op_type != 'Cast':
+			continue
+		nd.input[1] = half.name
+		n += 1
+	if n:
+		g.initializer.append(half)
+	return n
+
+
 def do_lp_generator():
 	"""LivePortrait generator: natively fp16 (194 fp16 initialisers, fp32 I/O behind Casts),
 	the same shape as hyperswap. QAIRT rejects its Tile with `0x232 != 0x216` (fp32 against
@@ -2179,6 +2211,7 @@ def do_lp_generator():
 	casts, inits = int64_to_int32(strip_value_info(m))
 	print('  int64 -> int32: %d Casts, %d initialisers' % (casts, inits))
 	print('  %d int32 casts rounded (+0.5)' % round_before_int_cast(strip_value_info(m)))
+	print('  %d bounds tests compared at 0.5' % widen_integer_tests(m))
 	m = shape_inference.infer_shapes(strip_value_info(m), strict_mode=False)
 	checker.check_model(m)
 	path = save(m, 'lp_generator')
