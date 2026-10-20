@@ -288,7 +288,11 @@ class PreviewEngine {
     fun applyOptions(opts: SwapOptions) {
         if (loadedSwapper == null || loadedSwapper != opts.swapper) return
         if (loadedOpts == opts) return
-        if (NativePipe.setOptions(opts)) loadedOpts = opts
+        if (NativePipe.setOptions(opts)) {
+            loadedOpts = opts
+            // Not part of setOptions: Live sets the same switch for its own session.
+            NativePipe.setSwapEnabled(opts.swapsFace)
+        }
     }
 
     /**
@@ -344,7 +348,8 @@ class PreviewEngine {
         assignEnabled: Boolean = false,
         gate: (suspend () -> String?)? = null,
     ): String? = withContext(Dispatchers.Default) {
-        if (slots.isEmpty()) return@withContext "No source image"
+        // No source is a valid state only while nothing is being swapped.
+        if (slots.isEmpty() && opts.swapsFace) return@withContext "No source image"
         val tags = slots.map { it.tag }
         // The SMALLEST job that is out of date, of three, in increasing cost:
         //   options  -> push them to the loaded pipeline, no I/O at all
@@ -357,6 +362,7 @@ class PreviewEngine {
                 return@withContext "Could not load the models: " + NativePipe.lastError()
             loadedSwapper = opts.swapper
             loadedOpts = opts
+            NativePipe.setSwapEnabled(opts.swapsFace)
         } else {
             applyOptions(opts)
             if (appliedSlots == tags) {
@@ -381,6 +387,13 @@ class PreviewEngine {
             return@withContext it
         }
 
+        if (slots.isEmpty()) {
+            // face_swapper off and no source: the gate above still ran (over an empty
+            // list) and the target is checked per frame by the caller, as ever.
+            appliedSlots = tags
+            NativePipe.setFaceAssignEnabled(false)
+            return@withContext null
+        }
         if (!NativePipe.setSource(slots[0].bgr, slots[0].width, slots[0].height)) {
             // ⚠ Released, not merely left unapplied, even though the models are fine and a
             // reload is what this change exists to avoid. `ffpipe::setSource` does not clear

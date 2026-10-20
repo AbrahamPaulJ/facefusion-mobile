@@ -836,7 +836,8 @@ class MainActivity : ComponentActivity() {
      * check is [screenSourceList], which runs against the bitmaps this returns.
      */
     private fun prepareSources(): PreparedSources? {
-        if (sources.isEmpty()) return null
+        // Empty is a valid list only while face_swapper is off (SwapOptions.swapsFace).
+        if (sources.isEmpty()) return if (opts.swapsFace) null else PreparedSources(emptyList(), emptyList())
         val bitmaps = sources.map { decodeOriented(it.uri) ?: return null }
         val slots = sources.zip(bitmaps).map { (item, bmp) ->
             val soft = bmp.asArgb8888() ?: return null
@@ -875,6 +876,10 @@ class MainActivity : ComponentActivity() {
 
     /** Register a prepared list into the pipeline that is loaded now. Null on success. */
     private fun registerSources(prepared: PreparedSources): String? {
+        if (prepared.slots.isEmpty()) {
+            NativePipe.setFaceAssignEnabled(false)
+            return null
+        }
         val first = prepared.slots.first()
         if (!NativePipe.setSource(first.bgr, first.width, first.height))
             return "source: ${NativePipe.lastError()}"
@@ -1572,6 +1577,8 @@ class MainActivity : ComponentActivity() {
             }
             flag("enhance")?.let { opts = opts.copy(faceEnhance = it) }
             flag("lipsync")?.let { opts = opts.copy(lipSync = it) }
+            // `--es swap 0`: face_swapper off, which only counts with another stage on.
+            flag("swap")?.let { opts = opts.copy(swapEnabled = it) }
             // `--es edit mouth_smile=1,head_yaw=-0.5`: the face editor with these sliders
             // (upstream's names, SwapOptions.EDITOR_SLIDERS); `--es edit 0` forces it OFF.
             // Same three-state rule as above, for the same reason.
@@ -1762,13 +1769,13 @@ class MainActivity : ComponentActivity() {
                     faceBoxFrame = frame
                 }
 
-                LaunchedEffect(sourceUri, targetVersion, modelsMissing) {
+                LaunchedEffect(sourceUri, targetVersion, modelsMissing, opts.swapsFace) {
                     android.util.Log.d("ffpreview", "autowarm fired: src=" +
                         (sourceUri != null) + " tgt=" +
                         (targetFile != null || targetImage != null) +
                         " missing=" + modelsMissing + " run=" + busy)
-                    if (sourceUri != null && (targetFile != null || targetImage != null) &&
-                        !modelsMissing && !busy) {
+                    if ((sourceUri != null || !opts.swapsFace) &&
+                        (targetFile != null || targetImage != null) && !modelsMissing && !busy) {
                         refreshSwapped(force = true)
                     }
                 }
@@ -2876,7 +2883,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         if (!previewWarm && !force) { skipRefresh("cold and not forced"); return }
-        val src = sourceUri ?: run { skipRefresh("no source"); return }
+        if (opts.swapsFace && sourceUri == null) { skipRefresh("no source"); return }
         // An image target has no targetFile -- it is held as a bitmap. Testing the
         // video handle here meant an image never previewed at all.
         if (targetFile == null && targetImage == null) { skipRefresh("no target"); return }
@@ -4344,7 +4351,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun runSwap() {
-        val src = sourceUri ?: return
+        if (opts.swapsFace && sourceUri == null) return
         val tgt = targetFile ?: return
         // Defence in depth: the Swap button in SwapScreen is already disabled without one
         // when Lip Sync is on, but this is the actual place a no-op run would happen, so it
@@ -4388,6 +4395,8 @@ class MainActivity : ComponentActivity() {
                     val ok = NativePipe.init(libDir, libDir, models.absolutePath, opts)
                     noteTierRejection()
                     if (!ok) error("init: ${NativePipe.lastError()}")
+                    NativePipe.setSwapEnabled(opts.swapsFace)
+                    if (!opts.swapsFace) appendLog("face_swapper off")
                     // WHICH UNIT, in the box the user can actually read, and only after
                     // init: the GPU agreement check runs on the first open that asks for the
                     // GPU, so before this line the note is still the optimistic answer.
@@ -4435,7 +4444,7 @@ class MainActivity : ComponentActivity() {
                         appendLog("lips target: " +
                             (if (lipsN > 0) "$lipsN face" + (if (lipsN > 1) "s" else "")
                              else "all faces"))
-                    appendLog("source ready (${prepared.slots[0].width}x" +
+                    if (prepared.slots.isNotEmpty()) appendLog("source ready (${prepared.slots[0].width}x" +
                               "${prepared.slots[0].height}, ${prepared.slots.size} source" +
                               (if (prepared.slots.size == 1) "" else "s") +
                               (if (restored > 0) ", $restored assigned" else "") + ")")
@@ -4561,7 +4570,8 @@ class MainActivity : ComponentActivity() {
      * service that fixes that is the second half of roadmap 14 and is not written yet.
      */
     private fun runBatch() {
-        val src = sourceUri ?: return
+        val src = sourceUri
+        if (opts.swapsFace && src == null) return
         val first = targetFile ?: return
         if (opts.lipSync && voiceFile == null) return
         invalidatePreview()
@@ -4617,25 +4627,31 @@ class MainActivity : ComponentActivity() {
                     val ok = NativePipe.init(libDir, libDir, models.absolutePath, opts)
                     noteTierRejection()
                     if (!ok) error("init: " + NativePipe.lastError())
+                    NativePipe.setSwapEnabled(opts.swapsFace)
 
-                    status = getString(R.string.status_reading_source)
-                    val bmp = decodeOriented(src) ?: error("cannot decode source image")
-                    status = getString(R.string.status_content_check)
-                    ContentGate.inspectStill(bmp).let {
-                        appendLog("source content score %+.3f".format(it.score))
-                        if (!it.permitted) throw ContentGate.Refused(
-                            ContentGate.message(this@MainActivity,
-                                                R.string.gate_subject_source_image, it))
+                    // face_swapper off and no source: nothing to read or check here, and
+                    // every clip in the queue is still checked on its own below.
+                    if (src != null) {
+                        status = getString(R.string.status_reading_source)
+                        val bmp = decodeOriented(src) ?: error("cannot decode source image")
+                        status = getString(R.string.status_content_check)
+                        ContentGate.inspectStill(bmp).let {
+                            appendLog("source content score %+.3f".format(it.score))
+                            if (!it.permitted) throw ContentGate.Refused(
+                                ContentGate.message(this@MainActivity,
+                                                    R.string.gate_subject_source_image, it))
+                        }
+                        val soft = bmp.asArgb8888()
+                        val px = IntArray(soft.width * soft.height)
+                        soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
+                        if (!NativePipe.setSource(
+                                NativePipe.argbToBgr(px, soft.width, soft.height),
+                                soft.width, soft.height))
+                            error("source: " + NativePipe.lastError())
                     }
-                    val soft = bmp.asArgb8888()
-                    val px = IntArray(soft.width * soft.height)
-                    soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
-                    if (!NativePipe.setSource(
-                            NativePipe.argbToBgr(px, soft.width, soft.height),
-                            soft.width, soft.height))
-                        error("source: " + NativePipe.lastError())
                     val lipsN = pushLipSelection()
-                    appendLog("source ready for " + batchQueue.size + " clips, lips target: " +
+                    appendLog((if (src != null) "source ready" else "face_swapper off") +
+                        " for " + batchQueue.size + " clips, lips target: " +
                         (if (lipsN > 0) "$lipsN face" + (if (lipsN > 1) "s" else "")
                          else "all faces"))
                 }
@@ -5076,6 +5092,8 @@ class MainActivity : ComponentActivity() {
                     say("INIT FAILED: ${NativePipe.lastError()}"); return@launch
                 }
                 say("$backend init OK")
+                NativePipe.setSwapEnabled(opts.swapsFace)
+                if (!opts.swapsFace) say("face_swapper off")
                 if (opts.faceEdit)
                     say("face editor: " + (if (NativePipe.hasFaceEditor())
                         SwapOptions.EDITOR_SLIDERS.zip(opts.editor).filter { it.second != 0f }

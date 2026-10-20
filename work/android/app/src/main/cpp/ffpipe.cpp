@@ -2082,6 +2082,12 @@ bool Pipeline::enhance(ffcv::Image& frame, const std::vector<Face>& faces) {
   if (!p_ || !p_->n.enh) return true;   // absent is not a failure, matches syncLip
   const Config& cfg = p_->cfg;
   if (!cfg.faceEnhance) return true;
+  // Same rule as swapAll and editFaces: with the swapper off this stage alone changes
+  // the frame, so it may not run on a pipeline no check has cleared.
+  if (!p_->gateCleared) {
+    err_ = "content check has not run for this pipeline";
+    return false;
+  }
   const int SS = cfg.swapSize;
   const int PB = cfg.pixelBoost < 1 ? 1 : cfg.pixelBoost;
   const int CS = SS * PB;
@@ -2192,6 +2198,12 @@ bool Pipeline::editFaces(ffcv::Image& frame, const std::vector<Face>& faces) {
   if (!hasFaceEditor()) return true;   // absent is not a failure, matches enhance
   const Config& cfg = p_->cfg;
   if (!cfg.faceEdit || !ffportrait::anyEdit(cfg.faceEditor)) return true;
+  // The swap's own rule, because with the swapper off this stage is the one that changes
+  // the frame: no check, no edit. See Impl::gateCleared.
+  if (!p_->gateCleared) {
+    err_ = "content check has not run for this pipeline";
+    return false;
+  }
   static_assert(ffportrait::kSliderCount == 14, "Config::faceEditor is 14 sliders");
 
   // model options: ffhq_512 at 512, the graphs at half that (prepare_crop_frame).

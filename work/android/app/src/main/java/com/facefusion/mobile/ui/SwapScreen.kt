@@ -337,6 +337,10 @@ fun SwapScreen(
     // ONE instance for every pane, which is what makes them zoom together (item 4).
     val zoom = remember { ZoomState() }
 
+    // A source is required only while face_swapper runs (SwapOptions.swapsFace): the
+    // editor, the enhancer or the lip syncer alone works on the target by itself.
+    val sourceReady = hasSource || !opts.swapsFace
+
     // Which processor's settings sheet is open: "swapper", "enhancer", "lipsync", or null.
     //
     // Local and saveable rather than hoisted into MainActivity like [openCard], because it
@@ -495,15 +499,17 @@ fun SwapScreen(
             // is the spacing seen.
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // face_swapper is always on and cannot be turned off: this app IS the
-                    // swapper. It still gets a chip, because the row exists to say WHICH
-                    // stages run.
+                    // face_swapper turns OFF only while another processor is on -- upstream
+                    // runs any subset, but never none -- and then no source is needed.
+                    // `swapsFace` is the effective state, so with nothing else on this chip
+                    // stays lit whatever was last tapped.
                     ProcessorChip(
                         name = stringResource(R.string.swap_proc_swapper),
                         // Always installed -- missing() makes it a REQUIRED model, so the
                         // app never reaches this row without it.
                         model = "",
-                        installed = true, on = true, available = true, onToggle = {},
+                        installed = true, on = opts.swapsFace, available = true,
+                        onToggle = { onOptsChange(opts.copy(swapEnabled = !opts.swapsFace)) },
                         // Opens with the Face Swapper card already expanded, so the
                         // weight slider -- the knob most runs actually touch -- is there
                         // on arrival rather than one tap further in. Only when nothing
@@ -972,7 +978,7 @@ fun SwapScreen(
             // `|| modelsMissing` because the download overlay lives on this pane -- it is
             // the one that cannot draw without the models -- so hiding it unconditionally
             // would leave a fresh install with no way to fetch them.
-            if ((hasSource && hasTarget) || modelsMissing) PreviewPane(
+            if ((sourceReady && hasTarget) || modelsMissing) PreviewPane(
                 label = stringResource(R.string.swap_pane_swapped),
                 height = paneHeight,
                 bitmap = preview.swapped,
@@ -984,7 +990,7 @@ fun SwapScreen(
                     preview.busy && !preview.warm ->
                         stringResource(R.string.swap_loading_models)
                     preview.busy -> stringResource(R.string.swap_swapping_frame)
-                    !hasSource -> stringResource(R.string.swap_pick_a_source)
+                    !sourceReady -> stringResource(R.string.swap_pick_a_source)
                     // No "tap refresh" any more: the preview warms itself as soon as both
                     // inputs exist, so this is a transient state rather than an instruction.
                     else -> stringResource(R.string.swap_preparing_preview)
@@ -1175,7 +1181,7 @@ fun SwapScreen(
         // Save button below is the only thing left to do.
         if (!imageTarget) Button(
             onClick = if (run.busy) onCancel else onSwap,
-            enabled = run.busy || (idle && hasSource && hasTarget && !modelsMissing &&
+            enabled = run.busy || (idle && sourceReady && hasTarget && !modelsMissing &&
                                     (!opts.lipSync || hasVoice)),
             modifier = Modifier.fillMaxWidth().height(52.dp)
                 .reportOnScreen { actionOnScreen = it },
@@ -1508,7 +1514,7 @@ fun SwapScreen(
         ) {
             Button(
                 onClick = if (run.busy) onCancel else onSwap,
-                enabled = run.busy || (idle && hasSource && hasTarget && !modelsMissing &&
+                enabled = run.busy || (idle && sourceReady && hasTarget && !modelsMissing &&
                                         (!opts.lipSync || hasVoice)),
                 modifier = Modifier.fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 10.dp)

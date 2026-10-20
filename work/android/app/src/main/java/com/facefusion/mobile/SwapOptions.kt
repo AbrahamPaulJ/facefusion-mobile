@@ -166,6 +166,14 @@ data class SwapOptions(
     val faceEdit: Boolean = false,
 
     /**
+     * face_swapper in `--processors`. Upstream runs any subset of processors, so the editor,
+     * the enhancer or the lip syncer can run on a target with no swap at all -- and then no
+     * source face is needed. Read [swapsFace], never this: OFF only counts while another
+     * processor is ON, so the app can never be asked to run nothing.
+     */
+    val swapEnabled: Boolean = true,
+
+    /**
      * face_editor's sliders, each -1..1, in [EDITOR_SLIDERS] order. All zero is the
      * identity, and the stage is then skipped rather than run to no effect.
      *
@@ -185,6 +193,9 @@ data class SwapOptions(
     val outputFps: Int = 0,
 ) {
     val pixelBoostLabel get() = "${256 * pixelBoost}x${256 * pixelBoost}"
+
+    /** Whether this run swaps faces, and therefore needs a source. See [swapEnabled]. */
+    val swapsFace: Boolean get() = swapEnabled || !(faceEdit || faceEnhance || lipSync)
 
     /** How many swapper invocations one face costs at this setting. */
     val invocationsPerFace get() = pixelBoost * pixelBoost
@@ -219,6 +230,7 @@ data class SwapOptions(
             .putBoolean(K_LIP_SYNC, lipSync)
             .putFloat(K_LIP_SYNC_WEIGHT, lipSyncWeight)
             .putBoolean(K_FACE_EDIT, faceEdit)
+            .putBoolean(K_SWAP, swapEnabled)
             .putString(K_EDITOR, editor.joinToString(","))
             .apply()
     }
@@ -241,6 +253,7 @@ data class SwapOptions(
         private const val K_LIP_SYNC = "lip_sync"
         private const val K_LIP_SYNC_WEIGHT = "lip_sync_weight"
         private const val K_FACE_EDIT = "face_edit"
+        private const val K_SWAP = "face_swap"
         private const val K_EDITOR = "face_editor"
 
         /**
@@ -305,6 +318,7 @@ data class SwapOptions(
                 lipSync = p.getBoolean(K_LIP_SYNC, d.lipSync),
                 lipSyncWeight = p.getFloat(K_LIP_SYNC_WEIGHT, d.lipSyncWeight),
                 faceEdit = p.getBoolean(K_FACE_EDIT, d.faceEdit),
+                swapEnabled = p.getBoolean(K_SWAP, d.swapEnabled),
                 editor = editor,
             )
         }
