@@ -85,6 +85,9 @@ Ruhs. The pipeline, the models, and the option names, defaults and ranges are Fa
   the face that will be shown, the swapped one, on photos and on video, where every frame
   gets the same edit. About 0.2 s per face on an 8 Elite, so a video takes several times
   longer with it on; every slider at zero costs nothing.
+- Swapping is optional, as in FaceFusion: turn face_swapper off while the face editor, the
+  enhancer or the lip syncer is on and that stage works on the target alone, with no source
+  face needed.
 - Shows the swap as it is written: while a video runs, the result pane is the frame going
   into the file, not a re-render of it. The sound arrives with the finished clip.
 - Speaks English, Русский, 简体中文 and 繁體中文.
