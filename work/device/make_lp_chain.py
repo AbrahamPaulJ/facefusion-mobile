@@ -36,6 +36,8 @@ def main():
 		if i % 2:
 			src[0, 14:20, 1] += 0.01
 		names = []
+		# trap #30: the context's keypoint inputs are [1, 3, 21], not the ONNX's [1, 21, 3]
+		src, tgt = (numpy.ascontiguousarray(x.transpose(0, 2, 1)) for x in (src, tgt))
 		for k, v in (('feature_volume', fv), ('source', src), ('target', tgt)):
 			fn = 'lp_chain_%s_%03d.raw' % (k, i)
 			v.tofile(os.path.join(io, 'in', fn))

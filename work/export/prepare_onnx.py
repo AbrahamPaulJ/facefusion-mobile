@@ -2226,9 +2226,55 @@ def do_lp_generator():
 	return path
 
 
+LP_HG = '/model/dense_motion_network/Reshape_12_output_0'
+
+
+def do_lp_gencut():
+	"""lp_generator from the dense-motion hourglass's input on. The 22 sparse warps of the
+	compressed volume and the keypoint heatmaps that build that input took 1.7 s of the
+	generator's 1.67 s on the HTP (constant 3D translations, ~46M MAC), so they belong on
+	the CPU, which hands the graph `hg_input` instead. It enters CHANNELS-LAST
+	[1,16,64,64,110] behind an explicit Transpose: fed NCDHW, the HTP's own 110-channel input
+	transpose garbled the hourglass's input (mask argmax agreeing 17%) and cost ~320 ms.
+	Built on work/onnx/lp_generator.onnx, so run lp_generator first."""
+	from onnx import utils
+	src = os.path.join(OUT, 'lp_generator.onnx')
+	path = os.path.join(OUT, 'lp_gencut.onnx')
+	utils.extract_model(src, path, ['feature_volume', 'source', 'target', LP_HG], ['output'])
+	m = onnx.load(path)
+	g = m.graph
+	for n in g.node:
+		n.input[:] = ['hg_input_ncdhw' if x == LP_HG else x for x in n.input]
+	g.node.insert(0, helper.make_node('Transpose', ['hg_input'], ['hg_input_ncdhw'],
+	                                  name='hg_input_to_ncdhw', perm=[0, 4, 1, 2, 3]))
+	for v in g.input:
+		if v.name == LP_HG:
+			v.name = 'hg_input'
+			for d, val in zip(v.type.tensor_type.shape.dim, (1, 16, 64, 64, 110)):
+				d.dim_value = val
+	checker.check_model(m)
+	path = save(m, 'lp_gencut')
+	import onnxruntime
+	so = onnxruntime.SessionOptions()
+	so.log_severity_level = 3
+	full = onnx.load(src)
+	full.graph.output.append(helper.make_tensor_value_info(LP_HG, onnx.TensorProto.FLOAT, None))
+	a = onnxruntime.InferenceSession(full.SerializeToString(), so, providers=['CPUExecutionProvider'])
+	b = onnxruntime.InferenceSession(path, so, providers=['CPUExecutionProvider'])
+	rng = numpy.random.default_rng(1234)
+	kp = (rng.random((1, 21, 3), dtype=numpy.float32) - 0.5) * 0.6
+	feeds = {'feature_volume': (rng.random((1, 32, 16, 64, 64), dtype=numpy.float32) - 0.5),
+	         'source': kp + 0.02, 'target': kp}
+	y, hg = a.run(None, feeds)
+	z = b.run(None, dict(feeds, hg_input=numpy.ascontiguousarray(hg.transpose(0, 2, 3, 4, 1))))[0]
+	print('  vs lp_generator, its own hg_input: max |diff| %.3g (want 0)' % float(numpy.abs(y - z).max()))
+	return path
+
+
 TASKS = {
 	'lp_feature': do_lp_feature,
 	'lp_generator': do_lp_generator,
+	'lp_gencut': do_lp_gencut,
 	'lp_motion': do_lp_motion,
 	'lp_motion_l2': lambda: do_lp_motion(l2_mean=True),
 	'arcface': do_arcface,
@@ -2264,7 +2310,7 @@ if __name__ == '__main__':
 	args = ap.parse_args()
 	# Experiments, not the shipping set -- ask for these by name.  `hyperswap_fp32` was
 	# here until it was promoted (2026-08-24); it is now what convert.sh reads.
-	EXPERIMENTAL = ('yoloface_slicefix', 'wav2lip_nogan', 'edtalk', 'lp_feature', 'lp_generator', 'lp_motion')
+	EXPERIMENTAL = ('yoloface_slicefix', 'wav2lip_nogan', 'edtalk', 'lp_feature', 'lp_generator', 'lp_gencut', 'lp_motion')
 	names = [n for n in TASKS if n not in EXPERIMENTAL] if 'all' in args.models else args.models
 	for n in names:
 		print(n + ':')

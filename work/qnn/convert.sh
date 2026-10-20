@@ -147,7 +147,7 @@ case "$NAME" in
     ONNX=${ONNX:-$FF/work/onnx/lp_generator.onnx}
     DIMS=(--input_dim feature_volume 1,32,16,64,64 --input_dim source 1,21,3
           --input_dim target 1,21,3)
-    PRESERVE=(--preserve_io layout feature_volume output)
+    PRESERVE=(--preserve_io layout feature_volume source target output)
     ;;
   # A diagnostic cut of lp_generator, not a shipping graph: the warp alone, so a device
   # error can be pinned on the warp or on the decoder after it.
@@ -159,11 +159,13 @@ case "$NAME" in
     ;;
   # The generator minus the dense-motion network's 22 sparse warps and heatmaps, which
   # took 1.7 s of its time on the HTP: hg_input is what the CPU would hand it instead.
+  # hg_input enters channels-last [1,16,64,64,110]: fed NCDHW, the HTP's own 110-channel
+  # input transpose garbled the hourglass's input (mask argmax agreeing 17%, 2026-10-20).
   lp_gencut)
     ONNX=${ONNX:-$FF/work/onnx/lp_gencut.onnx}
     DIMS=(--input_dim feature_volume 1,32,16,64,64 --input_dim source 1,21,3
-          --input_dim target 1,21,3 --input_dim hg_input 1,110,16,64,64)
-    PRESERVE=(--preserve_io layout feature_volume hg_input output)
+          --input_dim target 1,21,3 --input_dim hg_input 1,16,64,64,110)
+    PRESERVE=(--preserve_io layout feature_volume source target hg_input output)
     ;;
   *) echo "unknown model: $NAME"; exit 1 ;;
 esac
