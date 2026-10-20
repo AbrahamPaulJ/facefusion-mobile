@@ -475,7 +475,7 @@
     <string name="status_lips_missed">該位置沒有臉孔。</string>
     <string name="status_lips_wait_boxes">點按處還沒有臉孔框。請等待紅色框出現，再點按臉孔。</string>
     <string name="swap_proc_face_editor">face_editor</string>
-    <string name="model_face_editor">臉部編輯器</string>
+    <string name="model_face_editor">臉部編輯器與動畫器</string>
     <string name="opt_edit_group_eyes">眼睛</string>
     <string name="opt_edit_group_mouth">嘴巴</string>
     <string name="opt_edit_group_head">頭部</string>
@@ -495,4 +495,20 @@
     <string name="opt_edit_head_roll">歪頭</string>
     <string name="opt_edit_note">LivePortrait，與上游的 face_editor 相同。所有滑桿為 0 時臉部維持不變，也不會額外執行。在 8 Elite 上每張臉約 0.2 秒，開啟後影片處理會慢好幾倍。</string>
     <string name="opt_edit_reset">重設滑桿</string>
+    <string name="swap_proc_animator">face_animator</string>
+    <string name="swap_last_processor">至少要保留一個處理器開啟</string>
+    <string name="swap_pane_driver">驅動影片</string>
+    <string name="swap_driver_add">加入影片：照片中的臉會像影片裡的臉一樣動起來</string>
+    <string name="swap_driver_picked">驅動影片</string>
+    <string name="swap_choose_another_driver">選擇其他驅動影片</string>
+    <string name="swap_remove_driver">移除驅動影片</string>
+    <string name="swap_pane_result">結果</string>
+    <string name="swap_action_run">執行</string>
+    <string name="swap_photo_video_hint">執行會用這張照片產生影片。上方窗格顯示套用了其他處理器的照片。</string>
+    <string name="opt_edit_mouth_lipsync">唇形同步會在此之後重繪嘴巴，因此開啟時嘴部滑桿無法使用。</string>
+    <string name="status_driver_no_video">這個檔案沒有可擷取動作的影片</string>
+    <string name="status_driver_ready">驅動影片已就緒</string>
+    <string name="status_cannot_read_driver">無法讀取驅動影片：%1$s</string>
+    <string name="status_running">正在執行…</string>
+    <string name="gate_subject_driver_video">驅動影片</string>
 </resources>

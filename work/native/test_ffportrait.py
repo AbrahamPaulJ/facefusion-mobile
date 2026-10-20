@@ -81,7 +81,28 @@ for path in edits:
 		print('edit %s  max|err| %.2e  FAIL' % (n, e))
 print('editKeypoints: %d cases, worst max|err| %.2e  %s'
       % (len(edits), worst, 'ok' if worst <= TOL_EDIT else 'FAIL'))
-total = len(cases) + len(edits)
+
+# face_animator's keypoints against lp_editor.animate_keypoints: the same float32 steps,
+# except the composed rotation (double here, float64 there) and the stitcher's GEMM order.
+TOL_ANIM = 1e-6
+ff.ff_lp_animate_keypoints.argtypes = [P, P, P, ctypes.c_char_p, P, P]
+ff.ff_lp_animate_keypoints.restype = ctypes.c_int
+anims = sorted(glob.glob(os.path.join(ORACLE, 'anim_photo_*.raw')))
+worst = 0.0
+for path in anims:
+	n = os.path.basename(path)[11:14]
+	load = lambda k: numpy.fromfile(os.path.join(ORACLE, 'anim_%s_%s.raw' % (k, n)), numpy.float32)
+	src, tgt = numpy.empty(63, numpy.float32), numpy.empty(63, numpy.float32)
+	ff.ff_lp_animate_keypoints(ptr(load('photo')), ptr(load('first')), ptr(load('driver')),
+	                           MLP.encode(), ptr(src), ptr(tgt))
+	e = max(float(numpy.abs(src - load('source')).max()), float(numpy.abs(tgt - load('target')).max()))
+	worst = max(worst, e)
+	if e > TOL_ANIM:
+		failures += 1
+		print('anim %s  max|err| %.2e  FAIL' % (n, e))
+print('animateKeypoints: %d cases, worst max|err| %.2e  %s'
+      % (len(anims), worst, 'ok' if worst <= TOL_ANIM else 'FAIL'))
+total = len(cases) + len(edits) + len(anims)
 print('ffportrait: %d of %d cases FAILED' % (failures, total) if failures
       else 'ffportrait: all %d cases pass' % total)
 sys.exit(1 if failures else 0)

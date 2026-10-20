@@ -33,4 +33,25 @@ int ff_lp_edit_keypoints(const float* motion, const float* sliders, const float*
   return 1;
 }
 
+// face_animator's keypoints; each motion packed as in ff_lp_edit_keypoints.
+int ff_lp_animate_keypoints(const float* photo, const float* first, const float* driver,
+                            const char* mlpPath, float* source, float* target) {
+  static ffportrait::Mlps mlps;
+  static std::string loaded;
+  if (loaded != mlpPath) {
+    if (!mlps.load(mlpPath, nullptr)) return 0;
+    loaded = mlpPath;
+  }
+  auto unpack = [](const float* p) {
+    ffportrait::Motion m;
+    m.pitch = p[0]; m.yaw = p[1]; m.roll = p[2]; m.scale = p[3];
+    std::memcpy(m.translation, p + 4, sizeof m.translation);
+    std::memcpy(m.expression, p + 7, sizeof m.expression);
+    std::memcpy(m.points, p + 70, sizeof m.points);
+    return m;
+  };
+  ffportrait::animateKeypoints(unpack(photo), unpack(first), unpack(driver), mlps, source, target);
+  return 1;
+}
+
 }  // extern "C"

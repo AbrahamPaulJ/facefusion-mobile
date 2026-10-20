@@ -456,7 +456,7 @@
     <string name="status_lips_missed">В этой точке лица нет.</string>
     <string name="status_lips_wait_boxes">Под касанием пока нет рамки лица. Дождитесь красных рамок и нажмите на лицо.</string>
     <string name="swap_proc_face_editor">face_editor</string>
-    <string name="model_face_editor">Редактор лица</string>
+    <string name="model_face_editor">Редактор и аниматор лица</string>
     <string name="opt_edit_group_eyes">Глаза</string>
     <string name="opt_edit_group_mouth">Рот</string>
     <string name="opt_edit_group_head">Голова</string>
@@ -476,4 +476,20 @@
     <string name="opt_edit_head_roll">Наклон головы вбок</string>
     <string name="opt_edit_note">LivePortrait, как face_editor в оригинале. Когда все ползунки на 0, лицо не меняется и ничего лишнего не запускается. Около 0,2 с на лицо на 8 Elite, поэтому видео с ним обрабатывается в несколько раз дольше.</string>
     <string name="opt_edit_reset">Сбросить ползунки</string>
+    <string name="swap_proc_animator">face_animator</string>
+    <string name="swap_last_processor">Хотя бы один обработчик должен оставаться включённым</string>
+    <string name="swap_pane_driver">Движение</string>
+    <string name="swap_driver_add">Добавьте видео: лицо на фото будет двигаться как лицо в нём</string>
+    <string name="swap_driver_picked">Видео движения</string>
+    <string name="swap_choose_another_driver">Выбрать другое видео движения</string>
+    <string name="swap_remove_driver">Удалить видео движения</string>
+    <string name="swap_pane_result">Результат</string>
+    <string name="swap_action_run">Запустить</string>
+    <string name="swap_photo_video_hint">Запуск создаст видео из этого фото. Окно выше показывает фото с остальными обработчиками.</string>
+    <string name="opt_edit_mouth_lipsync">Синхронизация губ перерисовывает рот после этого шага, поэтому ползунки рта отключены, пока она включена.</string>
+    <string name="status_driver_no_video">В этом файле нет видео, из которого можно взять движение</string>
+    <string name="status_driver_ready">Видео движения готово</string>
+    <string name="status_cannot_read_driver">Не удалось прочитать видео движения: %1$s</string>
+    <string name="status_running">Обработка…</string>
+    <string name="gate_subject_driver_video">видео движения</string>
 </resources>

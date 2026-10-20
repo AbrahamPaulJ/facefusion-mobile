@@ -46,6 +46,7 @@ def main():
 		print('case %d  |source - target| max %.3f  hg range [%.3f, %.3f]'
 		      % (n, float(numpy.abs(src - tgt).max()), float(hg.min()), float(hg.max())))
 	editor(out)
+	animator(out)
 
 
 def editor(out):
@@ -81,6 +82,27 @@ def editor(out):
 			tgt.tofile(os.path.join(out, 'edit_target_%03d.raw' % n))
 			n += 1
 	print('editor: %d cases' % n)
+
+
+def animator(out):
+	"""face_animator's keypoints (lp_editor.animate_keypoints) on real motion from the wide
+	crop set, for ffportrait::animateKeypoints: photo, the driver's first frame, a driver
+	frame. Case 3 has all three the same, where the photo must keep its own pose."""
+	import glob as g
+	sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+	import lp_editor
+	me = lp_editor.session('motion_extractor')
+	crops = sorted(g.glob(os.path.join(ROOT, 'calib', 'lp_crops', '*.raw')))
+	mo = lambda c: me.run(None, {'input': numpy.fromfile(c, numpy.float32).reshape(1, 3, 256, 256)})
+	pack = lambda m: numpy.concatenate([numpy.ravel(x).astype(numpy.float32) for x in m])
+	picks = [crops[i * (len(crops) - 1) // 7] for i in range(8)]
+	for n, (a, b, c) in enumerate(((0, 1, 2), (3, 4, 5), (6, 7, 1), (2, 2, 2))):
+		p, f, d = mo(picks[a]), mo(picks[b]), mo(picks[c])
+		src, tgt = lp_editor.animate_keypoints(p, f, d)
+		for k, v in (('photo', pack(p)), ('first', pack(f)), ('driver', pack(d)),
+		             ('source', src), ('target', tgt)):
+			numpy.asarray(v, numpy.float32).tofile(os.path.join(out, 'anim_%s_%03d.raw' % (k, n)))
+	print('animator: 4 cases')
 
 
 if __name__ == '__main__':

@@ -20,6 +20,9 @@
 //          [--edit k=v,...]    # face_editor sliders, e.g. mouth_smile=1,head_yaw=-0.5
 //                              # (lp_editor.SLIDERS names); needs the lp_* set
 //          [--no-swap]         # skip the swapper, e.g. to judge the editor alone
+//          [--animate drv.bgr --dw W --dh H --dframes N]
+//                              # face_animator: the TARGET is a photo (one frame) and
+//                              # each driver frame moves its face; writes N frames
 //
 //   ffswap --lib DIR --skel DIR --probe [--canary DIR]
 //          # measure the HTP and exit: arch, VTCM, soc_model, the fp16 verdict and the
@@ -61,7 +64,8 @@ int main(int argc, char** argv) {
   bool enhance = false;
   float enhanceBlend = 0.8f;
   bool noSwap = false;
-  std::string editSpec;
+  std::string editSpec, drvPath;
+  int dw = 0, dh = 0, dframes = 0;
 
   // The loop used to stop at argc-1 so a value-taking flag in last position could not read
   // past the end.  That also silently ignored any flag that appeared last -- fine while
@@ -95,6 +99,10 @@ int main(int argc, char** argv) {
     else if (a == "--enhance-blend") enhanceBlend = (float)atof(v().c_str());
     else if (a == "--edit") editSpec = v();
     else if (a == "--no-swap") noSwap = true;
+    else if (a == "--animate") drvPath = v();
+    else if (a == "--dw") dw = num();
+    else if (a == "--dh") dh = num();
+    else if (a == "--dframes") dframes = num();
   }
   if (libDir.empty() || (!probe && (modelDir.empty() || srcPath.empty() || tgtPath.empty()))) {
     fprintf(stderr, "missing arguments; see the header of ffswap_main.cpp\n");
@@ -364,7 +372,33 @@ int main(int argc, char** argv) {
   double tStart = (double)std::chrono::duration_cast<std::chrono::milliseconds>(
                       std::chrono::steady_clock::now().time_since_epoch()).count();
   int totalFaces = 0;
-  for (int i = 0; i < frames; ++i) {
+  if (!drvPath.empty()) {
+    // face_animator: the target is the photo, the driver supplies the motion.
+    std::vector<uint8_t> drvRaw;
+    const size_t dBytes = (size_t)dw * dh * 3;
+    if (!readAll(drvPath.c_str(), drvRaw) || dBytes == 0 || drvRaw.size() < dBytes * dframes) {
+      fprintf(stderr, "cannot read %d frames of %dx%d from %s\n", dframes, dw, dh, drvPath.c_str());
+      return 1;
+    }
+    ffcv::Image photo(tw, th, 3);
+    std::memcpy(photo.data.data(), tgtRaw.data(), frameBytes);
+    if (!pipe.setPortrait(photo)) { fprintf(stderr, "portrait: %s\n", pipe.error().c_str()); return 1; }
+    for (int i = 0; i < dframes; ++i) {
+      ffcv::Image d(dw, dh, 3), out;
+      std::memcpy(d.data.data(), drvRaw.data() + dBytes * i, dBytes);
+      if (!pipe.animate(d, out)) { fprintf(stderr, "animate: %s\n", pipe.error().c_str()); return 1; }
+      auto faces = pipe.analyse(out, false, true);
+      totalFaces += (int)faces.size();
+      if (!faces.empty() && !pipe.editFaces(out, faces)) {
+        fprintf(stderr, "edit: %s\n", pipe.error().c_str());
+        return 1;
+      }
+      if (fo) fwrite(out.data.data(), 1, frameBytes, fo);
+      if ((i + 1) % 10 == 0) { printf("  %d/%d\n", i + 1, dframes); fflush(stdout); }
+    }
+    frames = dframes;
+  }
+  for (int i = 0; drvPath.empty() && i < frames; ++i) {
     ffcv::Image frame(tw, th, 3);
     std::memcpy(frame.data.data(), tgtRaw.data() + frameBytes * i, frameBytes);
     auto faces = pipe.analyse(frame);

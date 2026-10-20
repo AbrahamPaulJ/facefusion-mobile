@@ -37,6 +37,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -193,6 +194,13 @@ fun SwapScreen(
     hasLipSyncer: Boolean,
     /** The face editor's four files are on disk (ModelPaths.LIVEPORTRAIT). */
     hasFaceEditor: Boolean = false,
+    /** face_animator's driver video, picked. */
+    hasDriver: Boolean = false,
+    driverName: String? = null,
+    onPickDriver: () -> Unit = {},
+    onClearDriver: () -> Unit = {},
+    /** The PHOTO target's run makes a video (animator, or the talking photo). */
+    photoMakesVideo: Boolean = false,
     /**
      * A processor whose model is not on the device was tapped.
      *
@@ -497,19 +505,35 @@ fun SwapScreen(
             // 8 dp both ways here, unlike the Material chips this replaces: a Surface has
             // no enforced 48 dp interactive box padding it out, so the spacing asked for
             // is the spacing seen.
+            // THE RULES, in one place. Processors are drawn in the order they RUN --
+            // swap or animate, then edit, then lip sync, then enhance -- so what overwrites
+            // what can be read off the screen. Upstream runs any subset; here the swapper
+            // and the animator exclude each other (swapping an animated photo is animating
+            // a different photo), and the last processor on cannot be switched off.
+            val ctx = LocalContext.current
+            fun explicitOn(o: SwapOptions) = listOf(
+                o.swapEnabled && !o.faceAnimate, o.faceAnimate, o.faceEdit, o.lipSync,
+                o.faceEnhance).count { it }
+            fun change(o: SwapOptions) {
+                if (explicitOn(o) == 0) {
+                    android.widget.Toast.makeText(ctx, R.string.swap_last_processor,
+                                                  android.widget.Toast.LENGTH_SHORT).show()
+                    return
+                }
+                onOptsChange(o)
+            }
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // face_swapper turns OFF only while another processor is on -- upstream
-                    // runs any subset, but never none -- and then no source is needed.
-                    // `swapsFace` is the effective state, so with nothing else on this chip
-                    // stays lit whatever was last tapped.
                     ProcessorChip(
                         name = stringResource(R.string.swap_proc_swapper),
                         // Always installed -- missing() makes it a REQUIRED model, so the
                         // app never reaches this row without it.
                         model = "",
                         installed = true, on = opts.swapsFace, available = true,
-                        onToggle = { onOptsChange(opts.copy(swapEnabled = !opts.swapsFace)) },
+                        onToggle = {
+                            change(if (opts.swapsFace) opts.copy(swapEnabled = false)
+                                   else opts.copy(swapEnabled = true, faceAnimate = false))
+                        },
                         // Opens with the Face Swapper card already expanded, so the
                         // weight slider -- the knob most runs actually touch -- is there
                         // on arrival rather than one tap further in. Only when nothing
@@ -520,32 +544,18 @@ fun SwapScreen(
                             if (openCard.isEmpty()) onToggleCard("swapper")
                         },
                     )
+                    // A PHOTO target only: it moves a still's face like a driver video's,
+                    // and the run makes a video. The face editor's models.
                     ProcessorChip(
-                        name = stringResource(R.string.swap_proc_enhancer),
-                        model = "gpen",
-                        installed = hasEnhancer,
-                        on = opts.faceEnhance,
-                        available = true,
-                        onToggle = { onOptsChange(opts.copy(faceEnhance = !opts.faceEnhance)) },
-                        onSettings = { settingsFor = "enhancer" },
+                        name = stringResource(R.string.swap_proc_animator),
+                        model = ModelPaths.LIVEPORTRAIT,
+                        installed = hasFaceEditor,
+                        on = opts.faceAnimate,
+                        available = !hasTarget || imageTarget,
+                        onToggle = { change(opts.copy(faceAnimate = !opts.faceAnimate)) },
                     )
                 }
-                // ⚠ `available` is false only once a PHOTO is picked. `durationMs > 0`
-                // alone was false on an empty screen, so the chip greyed out the moment the
-                // app opened and looked broken beside face_enhancer, which needs no target.
-                // There is nothing to say no about until there is a target.
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ProcessorChip(
-                        name = stringResource(R.string.swap_proc_lip_syncer),
-                        // edtalk, matching hasLipSyncer -- wav2lip is not offered because
-                        // ffpipe no longer opens it.
-                        model = "edtalk",
-                        installed = hasLipSyncer,
-                        on = opts.lipSync,
-                        available = !hasTarget || durationMs > 0,
-                        onToggle = { onOptsChange(opts.copy(lipSync = !opts.lipSync)) },
-                        onSettings = { settingsFor = "lipsync" },
-                    )
                     // Photos AND video, as upstream: a still is one edit, a clip gets the
                     // same edit on every frame.
                     ProcessorChip(
@@ -554,8 +564,32 @@ fun SwapScreen(
                         installed = hasFaceEditor,
                         on = opts.faceEdit,
                         available = true,
-                        onToggle = { onOptsChange(opts.copy(faceEdit = !opts.faceEdit)) },
+                        onToggle = { change(opts.copy(faceEdit = !opts.faceEdit)) },
                         onSettings = { settingsFor = "editor" },
+                    )
+                    // A video, or a PHOTO with a voice: the talking photo, a video the
+                    // voice's length (upstream's audio-to-image).
+                    ProcessorChip(
+                        name = stringResource(R.string.swap_proc_lip_syncer),
+                        // edtalk, matching hasLipSyncer -- wav2lip is not offered because
+                        // ffpipe no longer opens it.
+                        model = "edtalk",
+                        installed = hasLipSyncer,
+                        on = opts.lipSync,
+                        available = true,
+                        onToggle = { change(opts.copy(lipSync = !opts.lipSync)) },
+                        onSettings = { settingsFor = "lipsync" },
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ProcessorChip(
+                        name = stringResource(R.string.swap_proc_enhancer),
+                        model = "gpen",
+                        installed = hasEnhancer,
+                        on = opts.faceEnhance,
+                        available = true,
+                        onToggle = { change(opts.copy(faceEnhance = !opts.faceEnhance)) },
+                        onSettings = { settingsFor = "enhancer" },
                     )
                 }
             }
@@ -576,6 +610,29 @@ fun SwapScreen(
         // below), because syncing a clip to the audio it already has has nothing to fix --
         // upstream's lip syncer exists to dub a DIFFERENT voice on, and running it on the
         // target's own track can only cost face quality with no corrective benefit.
+        // face_animator's driver: whose motion the photo takes on. Required while the
+        // animator is on, so it is up here with the other inputs, like the voice.
+        if (opts.faceAnimate && (!hasTarget || imageTarget)) PreviewPane(
+            label = stringResource(R.string.swap_pane_driver),
+            height = 64.dp,
+            bitmap = null,
+            placeholder = if (hasDriver) (driverName ?: stringResource(R.string.swap_driver_picked))
+                          else stringResource(R.string.swap_driver_add),
+            onClick = if (idle && !hasDriver) onPickDriver else null,
+            actionIcon = if (hasDriver) null else Icons.Default.Add,
+        ) {
+            if (hasDriver) {
+                IconButton(onPickDriver, enabled = idle, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.Add, stringResource(R.string.swap_choose_another_driver),
+                         Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClearDriver, enabled = idle, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.Delete, stringResource(R.string.swap_remove_driver),
+                         Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+
         if (opts.lipSync) PreviewPane(
             label = stringResource(R.string.swap_pane_voice),
             height = 64.dp,
@@ -703,7 +760,9 @@ fun SwapScreen(
         // ContentScale.Fit, so a wider box is more room for the caption and more letterbox
         // around the same picture, at the same aspect ratio.
         val sourceBox = 104.dp
-        Box(Modifier.fillMaxWidth()) {
+        // Only while face_swapper runs: a source is what the swapper swaps IN, and with it
+        // off nothing reads one. Assign per person goes with it, being a choice of source.
+        if (opts.swapsFace) Box(Modifier.fillMaxWidth()) {
             PreviewPane(
                 label = stringResource(R.string.swap_source_face),
                 height = if (hasSource) sourceBox else paneHeight,
@@ -758,7 +817,7 @@ fun SwapScreen(
         // EVERY source, under the pane that shows the selected one. The same row Live
         // draws, from the same list: picking a face on either screen makes it available
         // on both, which is what one shared list means for the person using it.
-        SourceRow(
+        if (opts.swapsFace) SourceRow(
             thumbs = sourceThumbs,
             active = activeSource,
             keepOriginalBrush = keepOriginalBrush,
@@ -771,7 +830,7 @@ fun SwapScreen(
         // through the warm pipeline either way, and native assignments live on
         // that pipeline -- so a still honours them exactly like a video frame
         // does, and the pane IS the result the Save button writes.
-        if (hasTarget && sourceThumbs.isNotEmpty()) {
+        if (opts.swapsFace && hasTarget && sourceThumbs.isNotEmpty()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(stringResource(R.string.live_assign_title),
@@ -979,7 +1038,8 @@ fun SwapScreen(
             // the one that cannot draw without the models -- so hiding it unconditionally
             // would leave a fresh install with no way to fetch them.
             if ((sourceReady && hasTarget) || modelsMissing) PreviewPane(
-                label = stringResource(R.string.swap_pane_swapped),
+                label = stringResource(if (opts.swapsFace) R.string.swap_pane_swapped
+                                       else R.string.swap_pane_result),
                 height = paneHeight,
                 bitmap = preview.swapped,
                 placeholder = when {
@@ -1179,10 +1239,11 @@ fun SwapScreen(
         // A still target has no button at all. The pane above IS the output, so a Swap
         // button would offer to compute something the user is already looking at, and the
         // Save button below is the only thing left to do.
-        if (!imageTarget) Button(
+        if (!imageTarget || photoMakesVideo) Button(
             onClick = if (run.busy) onCancel else onSwap,
             enabled = run.busy || (idle && sourceReady && hasTarget && !modelsMissing &&
-                                    (!opts.lipSync || hasVoice)),
+                                    (!opts.lipSync || hasVoice) &&
+                                    (!(opts.faceAnimate && imageTarget) || hasDriver)),
             modifier = Modifier.fillMaxWidth().height(52.dp)
                 .reportOnScreen { actionOnScreen = it },
             // 14.dp everywhere: the stadium default made the two primary buttons the only
@@ -1190,10 +1251,16 @@ fun SwapScreen(
             shape = RoundedCornerShape(14.dp),
         ) { Text(stringResource(
                     if (run.busy) R.string.swap_cancel
-                    else if (batch.size > 1) R.string.swap_action_batch
-                    else R.string.swap_action,
+                    else if (batch.size > 1 && !photoMakesVideo) R.string.swap_action_batch
+                    else if (opts.swapsFace) R.string.swap_action
+                    else R.string.swap_action_run,
                     batch.size),
                  fontSize = 16.sp) }
+        if (photoMakesVideo && idle) Text(
+            stringResource(R.string.swap_photo_video_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
 
         // THE LIVE PLAYER: the target clip through the pipeline at whatever rate the phone
         // manages, with its own sound, instead of waiting for a whole render. It sits under
@@ -1212,7 +1279,7 @@ fun SwapScreen(
         // have to read as buttons without reading as the same button. The theme is
         // monochrome on purpose, so the weight comes from the secondaryContainer fill and
         // the 14 dp shape, never from a second accent colour.
-        if (hasSource && hasTarget && !imageTarget && idle &&
+        if (opts.swapsFace && hasSource && hasTarget && !imageTarget && idle &&
             !modelsMissing) {
             // ⚠ DISABLED once a QUEUE exists. The player runs the one visible clip, and
             // Swap next to it would run all of them -- so with a queue built the two
@@ -1507,7 +1574,7 @@ fun SwapScreen(
 
         // The pinned copy. Same handler, same enablement, same words -- a second button
         // that could disagree with the first would be worse than no second button.
-        if (!imageTarget && !actionOnScreen) Surface(
+        if ((!imageTarget || photoMakesVideo) && !actionOnScreen) Surface(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
             tonalElevation = 3.dp,
             shadowElevation = 8.dp,
@@ -1515,15 +1582,17 @@ fun SwapScreen(
             Button(
                 onClick = if (run.busy) onCancel else onSwap,
                 enabled = run.busy || (idle && sourceReady && hasTarget && !modelsMissing &&
-                                        (!opts.lipSync || hasVoice)),
+                                        (!opts.lipSync || hasVoice) &&
+                                        (!(opts.faceAnimate && imageTarget) || hasDriver)),
                 modifier = Modifier.fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 10.dp)
                     .height(52.dp),
                 shape = RoundedCornerShape(14.dp),
             ) { Text(stringResource(
                         if (run.busy) R.string.swap_cancel
-                        else if (batch.size > 1) R.string.swap_action_batch
-                        else R.string.swap_action,
+                        else if (batch.size > 1 && !photoMakesVideo) R.string.swap_action_batch
+                        else if (opts.swapsFace) R.string.swap_action
+                        else R.string.swap_action_run,
                         batch.size),
                      fontSize = 16.sp) }
         }
@@ -1733,6 +1802,12 @@ private fun FaceEditorSliders(opts: SwapOptions, onOptsChange: (SwapOptions) -> 
     for ((title, sliders) in groups) {
         Text(stringResource(title), style = MaterialTheme.typography.titleSmall,
              modifier = Modifier.padding(top = 4.dp))
+        // The lip syncer runs AFTER the editor and redraws the mouth, so a mouth edit would
+        // be painted over: greyed, and said why, rather than silently lost.
+        val mouth = title == R.string.opt_edit_group_mouth
+        if (mouth && opts.lipSync)
+            Text(stringResource(R.string.opt_edit_mouth_lipsync),
+                 style = MaterialTheme.typography.bodySmall, fontSize = 11.sp)
         for ((key, label) in sliders) {
             val i = SwapOptions.EDITOR_SLIDERS.indexOf(key)
             OptionSlider(
@@ -1740,6 +1815,7 @@ private fun FaceEditorSliders(opts: SwapOptions, onOptsChange: (SwapOptions) -> 
                 { v -> onOptsChange(opts.copy(editor = opts.editor.toMutableList().also { it[i] = v })) },
                 range = -1f..1f,
                 format = { "%+.2f".format(it) },
+                enabled = !(mouth && opts.lipSync),
             )
         }
     }

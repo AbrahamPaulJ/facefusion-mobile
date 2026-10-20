@@ -608,7 +608,7 @@ class VideoSwapper(
     }
 
     /** One encoded AAC frame, held until the muxer has a track to take it. */
-    private class AacPacket(val bytes: ByteArray, val ptsUs: Long)
+    internal class AacPacket(val bytes: ByteArray, val ptsUs: Long)
 
     /**
      * Decode [path]'s audio and re-encode it as AAC, for the codecs MP4 will not carry.
@@ -626,7 +626,7 @@ class VideoSwapper(
      * The decode is deliberately a SECOND one, not shared with the lip syncer's PCM: that
      * one exists only when lipSync is on, and this bug bites any PCM source, swap alone.
      */
-    private fun transcodeToAac(path: String, startUs: Long, endUs: Long):
+    internal fun transcodeToAac(path: String, startUs: Long, endUs: Long):
             Pair<MediaFormat, List<AacPacket>>? {
         val pcm = AudioDecoder.decode(path, startUs, endUs) ?: return null
         if (pcm.samples.isEmpty() || pcm.channels < 1) return null

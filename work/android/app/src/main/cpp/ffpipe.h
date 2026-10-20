@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "ffcv.h"
+#include "ffportrait.h"
 
 namespace ffpipe {
 
@@ -507,6 +508,20 @@ class Pipeline {
    */
   bool editFaces(ffcv::Image& frame, const std::vector<Face>& faces);
 
+  /**
+   * face_animator: a still photo whose face moves like the face in a driver video --
+   * LivePortrait's own use, which upstream FaceFusion does not offer. `setPortrait` takes
+   * the photo once (its largest face; false when it has none); `animate` renders one
+   * driver frame into `out`, which is the photo with its face moved. The motion is
+   * RELATIVE to the driver's first face (`resetAnimation` starts a new clip), so the photo
+   * keeps its own pose and follows the driver's changes. A driver frame with no face gives
+   * the photo unchanged. Needs the face editor's models (hasFaceEditor), and refuses on a
+   * pipeline no content check has cleared, like every stage that changes a picture.
+   */
+  bool setPortrait(const ffcv::Image& photo);
+  void resetAnimation();
+  bool animate(const ffcv::Image& driver, ffcv::Image& out);
+
   const std::string& error() const { return err_; }
   // Cumulative per-stage milliseconds, for the CLI's report.
   double msDetect = 0, msLandmark = 0, msRecognise = 0, msSwap = 0, msGeom = 0;
@@ -541,6 +556,14 @@ class Pipeline {
   void resetStats();
 
  private:
+  // LivePortrait's shared steps: the ffhq_512 crop at 256, the two extractors, and the
+  // generator from hourglassInput to the pasted face.
+  bool lpCrop(const ffcv::Image& frame, const Face& f, ffcv::Affine* am, std::vector<float>* in);
+  bool lpFeature(const std::vector<float>& in, std::vector<float>* fv);
+  bool lpMotion(const std::vector<float>& in, ffportrait::Motion* m);
+  bool lpRender(const std::vector<float>& fv, const float* source, const float* target,
+                const ffcv::Affine& am, const ffcv::MatF& mask, ffcv::Image& frame);
+
   struct Impl;
   std::unique_ptr<Impl> p_;
   std::string err_;

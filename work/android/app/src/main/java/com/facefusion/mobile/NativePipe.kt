@@ -59,6 +59,22 @@ object NativePipe {
      * can be false on a device where everything else works; [faceEditorError] says why.
      */
     @JvmStatic external fun hasFaceEditor(): Boolean
+
+    /**
+     * face_animator's still, taken once: its largest face's crop, features and motion. False
+     * when it has no face or the LivePortrait set is not loaded. Starts a new clip, so the
+     * next driver frame becomes the one later motion is measured against.
+     */
+    @JvmStatic external fun setPortrait(bgr: ByteArray, w: Int, h: Int): Boolean
+
+    /**
+     * One frame of a video made from a still ([PortraitVideo]). [frame] holds the photo and
+     * receives the result; with [driver] the photo's face moves like the driver's, without
+     * one the still is used as it is (the talking photo). Then editor, lip sync (window
+     * [frameIndex], or -1 for none) and enhancer. Returns faces processed, or -1.
+     */
+    @JvmStatic external fun portraitFrame(driver: ByteArray?, dw: Int, dh: Int,
+                                          frame: ByteArray, w: Int, h: Int, frameIndex: Int): Int
     @JvmStatic external fun faceEditorError(): String
 
     /**

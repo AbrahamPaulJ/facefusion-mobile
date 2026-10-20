@@ -454,4 +454,54 @@ void editKeypoints(const Motion& m, const float* s, const float* lm68, const Mlp
   }
 }
 
+
+void animateKeypoints(const Motion& s, const Motion& d0, const Motion& d, const Mlps& mlps,
+                      float* source, float* target) {
+  constexpr int N = kKeypoints * 3;
+  float rs[9], r0[9], rd[9], tmp[N];
+  rotation(s.pitch, s.yaw, s.roll, rs);
+  rotation(d0.pitch, d0.yaw, d0.roll, r0);
+  rotation(d.pitch, d.yaw, d.roll, rd);
+  rotate(s.points, rs, tmp);
+  for (int i = 0; i < N; ++i)
+    target[i] = s.scale * (tmp[i] + s.expression[i]) + s.translation[i % 3];
+
+  // LivePortrait rotates row vectors by R_lp, face_editor by R.T, so R_lp = R.T and its
+  // R_new = (R_d @ R_d0^-1) @ R_s becomes R_new.T = R_d.T @ R_d0 @ R_s.T -- composed here in
+  // face_editor's convention, so rotate() can apply it unchanged.
+  double m1[9], m2[9];
+  for (int i = 0; i < 3; ++i)          // m1 = R_s @ R_d0.T
+    for (int j = 0; j < 3; ++j) {
+      double a = 0;
+      for (int k = 0; k < 3; ++k) a += (double)rs[i * 3 + k] * r0[j * 3 + k];
+      m1[i * 3 + j] = a;
+    }
+  for (int i = 0; i < 3; ++i)          // m2 = m1 @ R_d   (= R_new in face_editor's form)
+    for (int j = 0; j < 3; ++j) {
+      double a = 0;
+      for (int k = 0; k < 3; ++k) a += m1[i * 3 + k] * rd[k * 3 + j];
+      m2[i * 3 + j] = a;
+    }
+  float rn[9];
+  for (int i = 0; i < 9; ++i) rn[i] = (float)m2[i];
+  rotate(s.points, rn, tmp);
+  const float scale = s.scale * (d0.scale != 0.f ? d.scale / d0.scale : 1.f);
+  float t[3];
+  for (int a = 0; a < 2; ++a) t[a] = s.translation[a] + (d.translation[a] - d0.translation[a]);
+  t[2] = s.translation[2];   // LivePortrait zeroes the driving depth; the photo keeps its own
+  for (int i = 0; i < N; ++i)
+    source[i] = scale * (tmp[i] + s.expression[i] + (d.expression[i] - d0.expression[i])) + t[i % 3];
+
+  // forward_stitch_motion_points, as in editKeypoints.
+  float st[2 * N];
+  std::memcpy(st, target, sizeof(float) * N);
+  std::memcpy(st + N, source, sizeof(float) * N);
+  std::vector<float> dl = mlps.run(2, st);
+  for (int k = 0; k < kKeypoints; ++k) {
+    source[k * 3] = (source[k * 3] + dl[k * 3]) + dl[N];
+    source[k * 3 + 1] = (source[k * 3 + 1] + dl[k * 3 + 1]) + dl[N + 1];
+    source[k * 3 + 2] = source[k * 3 + 2] + dl[k * 3 + 2];
+  }
+}
+
 }  // namespace ffportrait

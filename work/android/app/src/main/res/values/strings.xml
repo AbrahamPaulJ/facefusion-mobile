@@ -600,7 +600,7 @@ Turning it off runs your own Swap settings instead. This is experimental: the en
     <string name="set_lowmem_off">Off</string>
 
     <string name="swap_proc_face_editor">face_editor</string>
-    <string name="model_face_editor">Face editor</string>
+    <string name="model_face_editor">Face editor and animator</string>
     <string name="opt_edit_group_eyes">Eyes</string>
     <string name="opt_edit_group_mouth">Mouth</string>
     <string name="opt_edit_group_head">Head</string>
@@ -620,4 +620,20 @@ Turning it off runs your own Swap settings instead. This is experimental: the en
     <string name="opt_edit_head_roll">Head tilt</string>
     <string name="opt_edit_note">LivePortrait, as upstream\'s face_editor. With every slider at 0 the face is left as it is and nothing extra runs. About 0.2 s per face on an 8 Elite, so a video takes several times longer with it on.</string>
     <string name="opt_edit_reset">Reset sliders</string>
+    <string name="swap_proc_animator">face_animator</string>
+    <string name="swap_last_processor">At least one processor has to stay on</string>
+    <string name="swap_pane_driver">Driver</string>
+    <string name="swap_driver_add">Add a video: the photo\'s face will move like the face in it</string>
+    <string name="swap_driver_picked">Driver video</string>
+    <string name="swap_choose_another_driver">Choose another driver video</string>
+    <string name="swap_remove_driver">Remove the driver video</string>
+    <string name="swap_pane_result">Result</string>
+    <string name="swap_action_run">Run</string>
+    <string name="swap_photo_video_hint">Run makes a video from this photo. The pane above shows the photo with the other processors applied.</string>
+    <string name="opt_edit_mouth_lipsync">The lip syncer redraws the mouth after this, so the mouth sliders are off while it is on.</string>
+    <string name="status_driver_no_video">That file has no video to take motion from</string>
+    <string name="status_driver_ready">Driver ready</string>
+    <string name="status_cannot_read_driver">Cannot read the driver: %1$s</string>
+    <string name="status_running">Running…</string>
+    <string name="gate_subject_driver_video">the driver video</string>
 </resources>

@@ -174,6 +174,14 @@ data class SwapOptions(
     val swapEnabled: Boolean = true,
 
     /**
+     * face_animator: a PHOTO target's face moved like a driver video's -- LivePortrait's own
+     * use, which upstream does not offer. Never with the swapper (swapping the frames of an
+     * animated photo is just animating a different photo), so while this is on [swapsFace]
+     * is false. Photo targets only; loading a video target clears it.
+     */
+    val faceAnimate: Boolean = false,
+
+    /**
      * face_editor's sliders, each -1..1, in [EDITOR_SLIDERS] order. All zero is the
      * identity, and the stage is then skipped rather than run to no effect.
      *
@@ -195,7 +203,8 @@ data class SwapOptions(
     val pixelBoostLabel get() = "${256 * pixelBoost}x${256 * pixelBoost}"
 
     /** Whether this run swaps faces, and therefore needs a source. See [swapEnabled]. */
-    val swapsFace: Boolean get() = swapEnabled || !(faceEdit || faceEnhance || lipSync)
+    val swapsFace: Boolean get() =
+        !faceAnimate && (swapEnabled || !(faceEdit || faceEnhance || lipSync))
 
     /** How many swapper invocations one face costs at this setting. */
     val invocationsPerFace get() = pixelBoost * pixelBoost
@@ -231,6 +240,7 @@ data class SwapOptions(
             .putFloat(K_LIP_SYNC_WEIGHT, lipSyncWeight)
             .putBoolean(K_FACE_EDIT, faceEdit)
             .putBoolean(K_SWAP, swapEnabled)
+            .putBoolean(K_ANIMATE, faceAnimate)
             .putString(K_EDITOR, editor.joinToString(","))
             .apply()
     }
@@ -254,6 +264,7 @@ data class SwapOptions(
         private const val K_LIP_SYNC_WEIGHT = "lip_sync_weight"
         private const val K_FACE_EDIT = "face_edit"
         private const val K_SWAP = "face_swap"
+        private const val K_ANIMATE = "face_animate"
         private const val K_EDITOR = "face_editor"
 
         /**
@@ -319,6 +330,7 @@ data class SwapOptions(
                 lipSyncWeight = p.getFloat(K_LIP_SYNC_WEIGHT, d.lipSyncWeight),
                 faceEdit = p.getBoolean(K_FACE_EDIT, d.faceEdit),
                 swapEnabled = p.getBoolean(K_SWAP, d.swapEnabled),
+                faceAnimate = p.getBoolean(K_ANIMATE, d.faceAnimate),
                 editor = editor,
             )
         }

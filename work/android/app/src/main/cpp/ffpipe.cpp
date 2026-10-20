@@ -152,6 +152,17 @@ struct Pipeline::Impl {
   // kept so a video does not allocate it per face per frame.
   ffportrait::Mlps lpMlps;
   std::vector<float> lpHg;
+  // face_animator's still: the photo, its face's crop, features and motion, taken once; and
+  // the driver's FIRST face, which every later frame's motion is measured against.
+  struct Portrait {
+    bool ready = false, haveFirst = false;
+    ffcv::Image photo;
+    ffcv::Affine am;
+    ffcv::MatF mask;
+    std::vector<float> fv;
+    ffportrait::Motion motion, first;
+  };
+  Portrait portrait;
   float srcEmbedding[512]{};
   float srcEmbeddingNorm[512]{};
   bool haveSource = false;
@@ -2187,33 +2198,146 @@ bool Pipeline::enhance(ffcv::Image& frame, const std::vector<Face>& faces) {
 }
 
 
-// ------------------------------------------------------------- face editor (LivePortrait)
+// ------------------------------------------------------------- LivePortrait
 //
-// face_editor/core.py:edit_face. Three graphs on the NPU -- lp_feature, lp_motion and
-// lp_gencut, the generator from its dense-motion hourglass on -- and on the CPU the slider
-// arithmetic (ffportrait::editKeypoints) and the hourglass's input, which on the HTP cost
-// 1.7 s of the full generator's time and here is ~18 ms (ffportrait::hourglassInput).
+// Three graphs on the NPU -- lp_feature, lp_motion and lp_gencut, the generator from its
+// dense-motion hourglass on -- and on the CPU the keypoint arithmetic (ffportrait) and the
+// hourglass's input, which on the HTP cost 1.7 s of the full generator's time and here is
+// ~18 ms (ffportrait::hourglassInput). Two processors use them: face_editor (editFaces) and
+// face_animator (setPortrait + animate).
 
+namespace {
+// model options: ffhq_512 at 512, the graphs at half that (prepare_crop_frame).
+constexpr int kLpCrop = 512, kLpModel = 256;
+}  // namespace
+
+bool Pipeline::lpCrop(const ffcv::Image& frame, const Face& f, ffcv::Affine* am,
+                      std::vector<float>* in) {
+  // scale_face_landmark_5(landmark_set['5/68'], 1.5): about the nose, point 2.
+  float tmpl[10], lm5[10];
+  const float* T = ffcv::warpTemplate(2);   // ffhq_512
+  for (int i = 0; i < 10; ++i) tmpl[i] = T[i] * kLpCrop;
+  const float nx = f.landmark5_68[4], ny = f.landmark5_68[5];
+  for (int i = 0; i < 5; ++i) {
+    lm5[i * 2] = (f.landmark5_68[i * 2] - nx) * 1.5f + nx;
+    lm5[i * 2 + 1] = (f.landmark5_68[i * 2 + 1] - ny) * 1.5f + ny;
+  }
+  *am = ffcv::umeyama(lm5, tmpl, 5);
+  ffcv::Image crop = ffcv::warpAffine(frame, *am, kLpCrop, kLpCrop, ffcv::BORDER_REPLICATE);
+  // cv2.INTER_AREA at exactly 2x, which resizeLinear reproduces bit for bit (edtalk).
+  ffcv::Image small = ffcv::resizeLinear(crop, kLpModel, kLpModel);
+  in->resize((size_t)3 * kLpModel * kLpModel);
+  for (int y = 0; y < kLpModel; ++y) {
+    const uint8_t* row = small.row(y);
+    for (int x = 0; x < kLpModel; ++x)
+      for (int c = 0; c < 3; ++c)   // BGR -> RGB planes, / 255
+        (*in)[(size_t)(2 - c) * kLpModel * kLpModel + (size_t)y * kLpModel + x] =
+            row[x * 3 + c] / 255.0f;
+  }
+  return true;
+}
+
+bool Pipeline::lpMotion(const std::vector<float>& in, ffportrait::Motion* m) {
+  std::vector<std::vector<float>> mo;
+  if (!ffnn::execute(p_->n.lpMotion, {"input"}, {in.data()}, mo)) {
+    err_ = std::string("LivePortrait motion: ") + ffnn::lastError();
+    return false;
+  }
+  const std::vector<std::string> names = ffnn::outputNames(p_->n.lpMotion);
+  bool complete = names.size() == mo.size();
+  auto take = [&](const char* name, float* dst, size_t n) {
+    for (size_t i = 0; i < names.size(); ++i)
+      if (names[i] == name && mo[i].size() == n) {
+        std::copy(mo[i].begin(), mo[i].end(), dst);
+        return;
+      }
+    complete = false;
+  };
+  constexpr size_t K = ffportrait::kKeypoints * 3;
+  take("pitch", &m->pitch, 1);
+  take("yaw", &m->yaw, 1);
+  take("roll", &m->roll, 1);
+  take("scale", &m->scale, 1);
+  take("translation", m->translation, 3);
+  take("expression", m->expression, K);
+  take("motion_points", m->points, K);
+  if (!complete) err_ = "LivePortrait motion: outputs do not match";
+  return complete;
+}
+
+bool Pipeline::lpFeature(const std::vector<float>& in, std::vector<float>* fv) {
+  std::vector<std::vector<float>> fo;
+  if (!ffnn::execute(p_->n.lpFeat, {"input"}, {in.data()}, fo)) {
+    err_ = std::string("LivePortrait features: ") + ffnn::lastError();
+    return false;
+  }
+  if (fo.empty() || fo[0].size() != (size_t)ffportrait::kFeatureChannels * ffportrait::kVoxels) {
+    err_ = "LivePortrait features: unexpected output";
+    return false;
+  }
+  fv->swap(fo[0]);
+  return true;
+}
+
+bool Pipeline::lpRender(const std::vector<float>& fv, const float* source, const float* target,
+                        const ffcv::Affine& am, const ffcv::MatF& mask, ffcv::Image& frame) {
+  double t0 = nowMs();
+  p_->lpHg.resize((size_t)ffportrait::kVoxels * ffportrait::kHourglassChannels);
+  ffportrait::hourglassInput(fv.data(), source, target, p_->lpHg.data());
+  msEditCpu += nowMs() - t0;
+
+  t0 = nowMs();
+  std::vector<std::vector<float>> go;
+  if (!ffnn::execute(p_->n.lpGen, {"feature_volume", "source", "target", "hg_input"},
+                     {fv.data(), source, target, p_->lpHg.data()}, go)) {
+    err_ = std::string("LivePortrait generator: ") + ffnn::lastError();
+    return false;
+  }
+  msEdit += nowMs() - t0;
+  // By name: a build carrying diagnostic taps puts them before `output`.
+  const std::vector<std::string> genNames = ffnn::outputNames(p_->n.lpGen);
+  const std::vector<float>* gen = nullptr;
+  for (size_t i = 0; i < genNames.size() && i < go.size(); ++i)
+    if (genNames[i] == "output") gen = &go[i];
+  if (!gen || gen->size() != (size_t)3 * kLpCrop * kLpCrop) {
+    err_ = "LivePortrait generator: unexpected output";
+    return false;
+  }
+
+  // normalize_crop_frame: clip to [0, 1], * 255, astype(uint8) -- which TRUNCATES --
+  // and RGB back to BGR; then paste_back through the box mask.
+  t0 = nowMs();
+  const float* g = gen->data();
+  ffcv::MatF out(kLpCrop, kLpCrop, 3);
+  for (int y = 0; y < kLpCrop; ++y) {
+    float* orow = out.row(y);
+    for (int x = 0; x < kLpCrop; ++x)
+      for (int c = 0; c < 3; ++c) {
+        float v = g[(size_t)c * kLpCrop * kLpCrop + (size_t)y * kLpCrop + x];
+        v = v < 0.f ? 0.f : (v > 1.f ? 1.f : v);
+        orow[x * 3 + (2 - c)] = std::floor(v * 255.0f);
+      }
+  }
+  ffcv::pasteBack(frame, out, mask, am);
+  msGeom += nowMs() - t0;
+  return true;
+}
+
+// face_editor/core.py:edit_face.
 bool Pipeline::editFaces(ffcv::Image& frame, const std::vector<Face>& faces) {
   if (!hasFaceEditor()) return true;   // absent is not a failure, matches enhance
   const Config& cfg = p_->cfg;
   if (!cfg.faceEdit || !ffportrait::anyEdit(cfg.faceEditor)) return true;
+  static_assert(ffportrait::kSliderCount == 14, "Config::faceEditor is 14 sliders");
   // The swap's own rule, because with the swapper off this stage is the one that changes
   // the frame: no check, no edit. See Impl::gateCleared.
   if (!p_->gateCleared) {
     err_ = "content check has not run for this pipeline";
     return false;
   }
-  static_assert(ffportrait::kSliderCount == 14, "Config::faceEditor is 14 sliders");
-
-  // model options: ffhq_512 at 512, the graphs at half that (prepare_crop_frame).
-  constexpr int CS = 512, MS = 256;
-  float tmpl[10];
-  const float* T = ffcv::warpTemplate(2);   // ffhq_512
-  for (int i = 0; i < 10; ++i) tmpl[i] = T[i] * CS;
   // create_box_mask(crop, face_mask_blur, (0, 0, 0, 0)) -- the editor ignores the padding.
   const int noPadding[4] = {0, 0, 0, 0};
-  ffcv::MatF mask = ffcv::createBoxMask(CS, CS, cfg.maskBlur, noPadding);
+  ffcv::MatF mask = ffcv::createBoxMask(kLpCrop, kLpCrop, cfg.maskBlur, noPadding);
 
   const Face* only = nullptr;
   if (cfg.swapLargestOnly) {
@@ -2224,111 +2348,93 @@ bool Pipeline::editFaces(ffcv::Image& frame, const std::vector<Face>& faces) {
     }
   }
 
-  using namespace ffportrait;
-  std::vector<std::string> motionNames = ffnn::outputNames(p_->n.lpMotion);
-  std::vector<float> in((size_t)3 * MS * MS);
-  p_->lpHg.resize((size_t)kVoxels * kHourglassChannels);
+  std::vector<float> in, fv;
   for (size_t fi = 0; fi < faces.size(); ++fi) {
     const Face& f = faces[fi];
     if (only && &f != only) continue;
     if (p_->sourceForFace(f, fi, faces.size(), cfg.referenceDistance) == kNoSource) continue;
 
-    // scale_face_landmark_5(landmark_set['5/68'], 1.5): about the nose, point 2.
     double t0 = nowMs();
-    float lm5[10];
-    const float nx = f.landmark5_68[4], ny = f.landmark5_68[5];
-    for (int i = 0; i < 5; ++i) {
-      lm5[i * 2] = (f.landmark5_68[i * 2] - nx) * 1.5f + nx;
-      lm5[i * 2 + 1] = (f.landmark5_68[i * 2 + 1] - ny) * 1.5f + ny;
-    }
-    ffcv::Affine am = ffcv::umeyama(lm5, tmpl, 5);
-    ffcv::Image crop = ffcv::warpAffine(frame, am, CS, CS, ffcv::BORDER_REPLICATE);
-    // cv2.INTER_AREA at exactly 2x, which resizeLinear reproduces bit for bit (edtalk).
-    ffcv::Image small = ffcv::resizeLinear(crop, MS, MS);
-    for (int y = 0; y < MS; ++y) {
-      const uint8_t* row = small.row(y);
-      for (int x = 0; x < MS; ++x)
-        for (int c = 0; c < 3; ++c)   // BGR -> RGB planes, / 255
-          in[(size_t)(2 - c) * MS * MS + (size_t)y * MS + x] = row[x * 3 + c] / 255.0f;
-    }
+    ffcv::Affine am;
+    lpCrop(frame, f, &am, &in);
     msGeom += nowMs() - t0;
 
     t0 = nowMs();
-    std::vector<std::vector<float>> fo, mo, go;
-    if (!ffnn::execute(p_->n.lpFeat, {"input"}, {in.data()}, fo) ||
-        !ffnn::execute(p_->n.lpMotion, {"input"}, {in.data()}, mo)) {
-      err_ = std::string("face editor: ") + ffnn::lastError();
-      return false;
-    }
+    ffportrait::Motion m;
+    if (!lpFeature(in, &fv) || !lpMotion(in, &m)) return false;
     msEdit += nowMs() - t0;
-    if (fo.empty() || fo[0].size() != (size_t)kFeatureChannels * kVoxels ||
-        mo.size() != motionNames.size()) {
-      err_ = "face editor: unexpected extractor output";
-      return false;
-    }
 
     t0 = nowMs();
-    Motion m;
-    bool complete = true;
-    auto take = [&](const char* name, float* dst, size_t n) {
-      for (size_t i = 0; i < motionNames.size(); ++i)
-        if (motionNames[i] == name && mo[i].size() == n) {
-          std::copy(mo[i].begin(), mo[i].end(), dst);
-          return;
-        }
-      complete = false;
-    };
-    take("pitch", &m.pitch, 1);
-    take("yaw", &m.yaw, 1);
-    take("roll", &m.roll, 1);
-    take("scale", &m.scale, 1);
-    take("translation", m.translation, 3);
-    take("expression", m.expression, kKeypoints * 3);
-    take("motion_points", m.points, kKeypoints * 3);
-    if (!complete) {
-      err_ = "face editor: motion extractor outputs do not match";
-      return false;
-    }
-    float source[kKeypoints * 3], target[kKeypoints * 3];
-    editKeypoints(m, cfg.faceEditor, f.landmark68, p_->lpMlps, source, target);
-    hourglassInput(fo[0].data(), source, target, p_->lpHg.data());
+    float source[ffportrait::kKeypoints * 3], target[ffportrait::kKeypoints * 3];
+    ffportrait::editKeypoints(m, cfg.faceEditor, f.landmark68, p_->lpMlps, source, target);
     msEditCpu += nowMs() - t0;
-
-    t0 = nowMs();
-    if (!ffnn::execute(p_->n.lpGen, {"feature_volume", "source", "target", "hg_input"},
-                       {fo[0].data(), source, target, p_->lpHg.data()}, go)) {
-      err_ = std::string("face editor: ") + ffnn::lastError();
-      return false;
-    }
-    msEdit += nowMs() - t0;
-    // By name: a build carrying diagnostic taps puts them before `output`.
-    const std::vector<std::string> genNames = ffnn::outputNames(p_->n.lpGen);
-    const std::vector<float>* gen = nullptr;
-    for (size_t i = 0; i < genNames.size() && i < go.size(); ++i)
-      if (genNames[i] == "output") gen = &go[i];
-    if (!gen || gen->size() != (size_t)3 * CS * CS) {
-      err_ = "face editor: unexpected generator output";
-      return false;
-    }
-
-    // normalize_crop_frame: clip to [0, 1], * 255, astype(uint8) -- which TRUNCATES --
-    // and RGB back to BGR; then paste_back through the box mask.
-    t0 = nowMs();
-    const float* g = gen->data();
-    ffcv::MatF out(CS, CS, 3);
-    for (int y = 0; y < CS; ++y) {
-      float* orow = out.row(y);
-      for (int x = 0; x < CS; ++x)
-        for (int c = 0; c < 3; ++c) {
-          float v = g[(size_t)c * CS * CS + (size_t)y * CS + x];
-          v = v < 0.f ? 0.f : (v > 1.f ? 1.f : v);
-          orow[x * 3 + (2 - c)] = std::floor(v * 255.0f);
-        }
-    }
-    ffcv::pasteBack(frame, out, mask, am);
-    msGeom += nowMs() - t0;
+    if (!lpRender(fv, source, target, am, mask, frame)) return false;
   }
   return true;
+}
+
+// face_animator: the photo's face, moved like the driver's (LivePortrait's own use).
+bool Pipeline::setPortrait(const ffcv::Image& photo) {
+  p_->portrait = Impl::Portrait();
+  if (!hasFaceEditor()) { err_ = "the LivePortrait models are not loaded"; return false; }
+  std::vector<Face> faces = analyse(photo, false, /*noTrack=*/true);
+  const Face* best = nullptr;
+  float area = -1.f;
+  for (const Face& f : faces) {
+    const float a = (f.box[2] - f.box[0]) * (f.box[3] - f.box[1]);
+    if (a > area) { area = a; best = &f; }
+  }
+  if (!best) { err_ = "no face found in the photo"; return false; }
+  Impl::Portrait& P = p_->portrait;
+  std::vector<float> in;
+  lpCrop(photo, *best, &P.am, &in);
+  if (!lpFeature(in, &P.fv) || !lpMotion(in, &P.motion)) return false;
+  const int noPadding[4] = {0, 0, 0, 0};
+  P.mask = ffcv::createBoxMask(kLpCrop, kLpCrop, p_->cfg.maskBlur, noPadding);
+  P.photo = photo;
+  P.ready = true;
+  return true;
+}
+
+void Pipeline::resetAnimation() { p_->portrait.haveFirst = false; }
+
+bool Pipeline::animate(const ffcv::Image& driver, ffcv::Image& out) {
+  Impl::Portrait& P = p_->portrait;
+  if (!P.ready) { err_ = "setPortrait not called"; return false; }
+  // No check, no frame: the rule every stage that changes a picture follows.
+  if (!p_->gateCleared) {
+    err_ = "content check has not run for this pipeline";
+    return false;
+  }
+  out = P.photo;
+  // The driver's largest face. A frame with none leaves the photo as it is.
+  std::vector<Face> faces = analyse(driver);
+  const Face* best = nullptr;
+  float area = -1.f;
+  for (const Face& f : faces) {
+    const float a = (f.box[2] - f.box[0]) * (f.box[3] - f.box[1]);
+    if (a > area) { area = a; best = &f; }
+  }
+  if (!best) return true;
+
+  double t0 = nowMs();
+  std::vector<float> in;
+  ffcv::Affine dam;
+  lpCrop(driver, *best, &dam, &in);
+  msGeom += nowMs() - t0;
+  t0 = nowMs();
+  ffportrait::Motion d;
+  if (!lpMotion(in, &d)) return false;
+  msEdit += nowMs() - t0;
+  // Relative motion is measured against the driver's FIRST face: the photo starts in its
+  // own pose and follows the driver's CHANGES, as LivePortrait does by default.
+  if (!P.haveFirst) { P.first = d; P.haveFirst = true; }
+
+  t0 = nowMs();
+  float source[ffportrait::kKeypoints * 3], target[ffportrait::kKeypoints * 3];
+  ffportrait::animateKeypoints(P.motion, P.first, d, p_->lpMlps, source, target);
+  msEditCpu += nowMs() - t0;
+  return lpRender(P.fv, source, target, P.am, P.mask, out);
 }
 
 }  // namespace ffpipe

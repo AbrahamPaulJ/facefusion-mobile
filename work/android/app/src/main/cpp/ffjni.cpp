@@ -945,6 +945,57 @@ Java_com_facefusion_mobile_NativePipe_setSwapLargestOnly(JNIEnv* env, jclass, jb
   if (g_pipe) g_pipe->setSwapLargestOnly(enabled);
 }
 
+/**
+ * The still behind face_animator and the talking photo: its largest face's crop, features
+ * and motion, taken once. False (with lastError) when the photo has no face or the
+ * LivePortrait set is not loaded. Also starts a new clip for animate's relative motion.
+ */
+JNIEXPORT jboolean JNICALL
+Java_com_facefusion_mobile_NativePipe_setPortrait(JNIEnv* env, jclass, jbyteArray jBgr,
+                                                  jint w, jint h) {
+  if (!g_pipe) { g_err = "pipeline not initialised"; return JNI_FALSE; }
+  ffcv::Image img(w, h, 3);
+  env->GetByteArrayRegion(jBgr, 0, (jsize)img.data.size(), (jbyte*)img.data.data());
+  if (!g_pipe->setPortrait(img)) { g_err = g_pipe->error(); return JNI_FALSE; }
+  return JNI_TRUE;
+}
+
+/**
+ * One frame of a video made FROM A STILL: `frame` holds the photo (w x h BGR) and is
+ * overwritten with the result. With a driver frame, face_animator moves the photo's face
+ * like the driver's (setPortrait first); without one the still is used as it is -- the
+ * talking photo. Then the editor, the lip syncer (window `frameIndex`, when setAudio was
+ * called) and the enhancer, in the pipeline's order. Returns the faces processed, or -1.
+ */
+JNIEXPORT jint JNICALL
+Java_com_facefusion_mobile_NativePipe_portraitFrame(JNIEnv* env, jclass, jbyteArray jDriver,
+                                                    jint dw, jint dh, jbyteArray jFrame,
+                                                    jint w, jint h, jint frameIndex) {
+  if (!g_pipe) { g_err = "pipeline not initialised"; return -1; }
+  ffcv::Image img(w, h, 3);
+  if (jDriver) {
+    ffcv::Image d(dw, dh, 3);
+    env->GetByteArrayRegion(jDriver, 0, (jsize)d.data.size(), (jbyte*)d.data.data());
+    if (!g_pipe->animate(d, img)) { g_err = g_pipe->error(); return -1; }
+    if (img.w != w || img.h != h) { g_err = "portrait size changed"; return -1; }
+  } else {
+    env->GetByteArrayRegion(jFrame, 0, (jsize)img.data.size(), (jbyte*)img.data.data());
+  }
+  // noTrack: these frames are not a filmed sequence the tracker could follow.
+  auto faces = g_pipe->analyse(img, false, /*noTrack=*/true);
+  if (!faces.empty()) {
+    if (!g_pipe->editFaces(img, faces)) { g_err = g_pipe->error(); return -1; }
+    if (frameIndex >= 0 && g_pipe->hasLipSyncer() && g_pipe->melWindowTotal() > 0 &&
+        !g_pipe->syncLip(img, faces, g_pipe->melWindow(frameIndex))) {
+      g_err = g_pipe->error();
+      return -1;
+    }
+    if (!g_pipe->enhance(img, faces)) { g_err = g_pipe->error(); return -1; }
+  }
+  env->SetByteArrayRegion(jFrame, 0, (jsize)img.data.size(), (const jbyte*)img.data.data());
+  return (jint)faces.size();
+}
+
 /** Swap every face in a BGR frame, in place.  Returns the face count, or -1 on error. */
 JNIEXPORT jint JNICALL
 Java_com_facefusion_mobile_NativePipe_processFrame(JNIEnv* env, jclass, jbyteArray jBgr,

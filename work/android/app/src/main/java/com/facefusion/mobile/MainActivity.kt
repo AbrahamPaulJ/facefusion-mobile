@@ -130,6 +130,18 @@ class MainActivity : ComponentActivity() {
      */
     private var voiceFile by mutableStateOf<File?>(null)
     private var voiceName by mutableStateOf<String?>(null)
+
+    /**
+     * face_animator's DRIVER: a video whose face's motion the photo target takes on. Its
+     * pixels never reach the output -- only its motion does -- but it is still an input the
+     * pipeline processes, so a run checks it like a target clip.
+     */
+    private var driverFile by mutableStateOf<File?>(null)
+    private var driverName by mutableStateOf<String?>(null)
+
+    /** A run of the photo target makes a VIDEO: animated, or a talking photo. */
+    private val photoMakesVideo: Boolean
+        get() = targetImage != null && (opts.faceAnimate || opts.lipSync)
     /** The loaded voice's full length, ms. 0 until a file is loaded. */
     private var voiceDurationMs by mutableStateOf(0L)
     /**
@@ -1329,6 +1341,44 @@ class MainActivity : ComponentActivity() {
         if (uri != null) loadVoice(uri)
     }
 
+    private val pickDriver = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) loadDriver(uri)
+    }
+
+    /** Copy the driver to a real path, as targets and voices are, and check it has video. */
+    private fun loadDriver(uri: Uri) {
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val f = File(cacheDir, "driver.video")
+                    contentResolver.openInputStream(uri).use { i ->
+                        f.outputStream().use { o -> i!!.copyTo(o) }
+                    }
+                    val mmr = MediaMetadataRetriever().apply { setDataSource(f.absolutePath) }
+                    val hasVideo = mmr.extractMetadata(
+                        MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO) == "yes"
+                    mmr.release()
+                    if (!hasVideo) error(getString(R.string.status_driver_no_video))
+                    f
+                }
+            }
+            result.onSuccess {
+                driverFile = it
+                driverName = displayName(uri)
+                status = getString(R.string.status_driver_ready)
+            }.onFailure {
+                driverFile = null; driverName = null
+                status = getString(R.string.status_cannot_read_driver, it.message ?: "")
+            }
+        }
+    }
+
+    private fun clearDriver() {
+        driverFile = null
+        driverName = null
+    }
+
     /**
      * The models live in a subdirectory of the app's external files dir.
      *
@@ -1579,6 +1629,10 @@ class MainActivity : ComponentActivity() {
             flag("lipsync")?.let { opts = opts.copy(lipSync = it) }
             // `--es swap 0`: face_swapper off, which only counts with another stage on.
             flag("swap")?.let { opts = opts.copy(swapEnabled = it) }
+            // `--es animate 1`: face_animator, the source photo moved by the test clip;
+            // `--es talking 1`: the talking photo (needs `--es lipsync 1 --es voice <f>`).
+            flag("animate")?.let { opts = opts.copy(faceAnimate = it) }
+            val portrait = opts.faceAnimate || flag("talking") == true
             // `--es edit mouth_smile=1,head_yaw=-0.5`: the face editor with these sliders
             // (upstream's names, SwapOptions.EDITOR_SLIDERS); `--es edit 0` forces it OFF.
             // Same three-state rule as above, for the same reason.
@@ -1590,7 +1644,7 @@ class MainActivity : ComponentActivity() {
             // /sdcard/Download), scriptable over adb without going through the SAF picker.
             // Bench-only wiring for `VideoSwapper.voicePath` -- see `runSwap`'s doc for why
             // the real UI never lets this stay null while Lip Sync is on.
-            selfTest(intent?.getStringExtra("voice")); return
+            selfTest(intent?.getStringExtra("voice"), portrait); return
         }
 
         // adb: am start -n com.facefusion.mobile/.MainActivity --es api start
@@ -1868,7 +1922,8 @@ class MainActivity : ComponentActivity() {
                                 onToggleCard = { k -> openCard = if (openCard == k) "" else k },
                                 // A still needs no run, so it has no output FILE -- what
                                 // there is to save is the pane itself.
-                                hasOutput = if (targetImage != null) swappedFrame != null
+                                hasOutput = if (targetImage != null && !photoMakesVideo)
+                                                swappedFrame != null
                                             else outputFile != null,
                                 outputFile = outputFile,
                                 outputPartial = outputPartial,
@@ -1903,6 +1958,11 @@ class MainActivity : ComponentActivity() {
                                 onVoiceSeek = ::onVoiceSeek,
                                 onPickVoice = { pickVoice.launch(arrayOf("audio/*", "video/*")) },
                                 onClearVoice = ::clearVoice,
+                                hasDriver = driverFile != null,
+                                driverName = driverName,
+                                onPickDriver = { pickDriver.launch(arrayOf("video/*")) },
+                                onClearDriver = ::clearDriver,
+                                photoMakesVideo = photoMakesVideo,
                                 recordingVoice = recordingVoice,
                                 onToggleRecordVoice = ::toggleVoiceRecording,
                                 // ONE button. A queue of one is a single run, and the
@@ -1914,7 +1974,8 @@ class MainActivity : ComponentActivity() {
                                     // the batch runner deliberately ignores trim, because
                                     // one range cannot mean anything across clips of
                                     // different lengths.
-                                    if (batchQueue.size > 1) runBatch() else runSwap()
+                                    if (photoMakesVideo) runPortrait()
+                                    else if (batchQueue.size > 1) runBatch() else runSwap()
                                 },
                                 batch = batchQueue,
                                 batchAutoSave = opts.batchAutoSave,
@@ -1970,7 +2031,7 @@ class MainActivity : ComponentActivity() {
                                 onShareLog = { shareBugReport() },
                                 // A still saves the pane; a video saves its file.
                                 onSave = {
-                                    if (targetImage != null) saveSwappedStill()
+                                    if (targetImage != null && !photoMakesVideo) saveSwappedStill()
                                     else outputFile?.let { saveToGallery(it) }
                                 },
                                 onShare = { shareResult() },
@@ -3160,6 +3221,8 @@ class MainActivity : ComponentActivity() {
                 // the pane went on offering to save and share the PREVIOUS video.
                 discardOutput()
                 targetImage = null
+                // face_animator moves a STILL's face; it has nothing to do on a clip.
+                if (opts.faceAnimate) applyOpts(opts.copy(faceAnimate = false))
                 targetFile = l.file; durationMs = l.durationMs
                 inputFps = l.fps
                 targetW = l.width; targetH = l.height
@@ -4042,7 +4105,10 @@ class MainActivity : ComponentActivity() {
             // into single digits, so they are pinned unless the override says otherwise.
             val opts = (if (liveUseMySettings) base else base.copy(
                 faceEnhance = false, pixelBoost = 1, lipSync = false, trackPeriod = 4,
-            )).copy(largestOnly = liveLargestOnly)
+            )).copy(largestOnly = liveLargestOnly,
+                    // Swap-only, whatever the Swap screen has on: ~150 ms a face for the
+                    // editor is single-digit fps, and the animator moves a still.
+                    faceEdit = false, faceAnimate = false, swapEnabled = true)
             val startError = withContext(Dispatchers.Default) {
                 val models = modelDir()
                 val libDir = applicationInfo.nativeLibraryDir
@@ -4265,7 +4331,9 @@ class MainActivity : ComponentActivity() {
             playerSeeking = false
             playerOpen = true
 
+            // Swap-only, like Live: the editor at ~150 ms a face cannot keep up with playback.
             val opts = SwapOptions.load(this@MainActivity)
+                .copy(faceEdit = false, faceAnimate = false, swapEnabled = true)
             val err = withContext(Dispatchers.Default) {
                 val models = modelDir()
                 val libDir = applicationInfo.nativeLibraryDir
@@ -4535,6 +4603,129 @@ class MainActivity : ComponentActivity() {
                     // error: nothing malfunctioned, so this offers no bug report.
                     status = it.message ?: getString(R.string.gate_blocked_generic)
                 } else {
+                    failStatus(getString(R.string.status_failed, it.message ?: ""))
+                    appendLog(it.stackTraceToString().take(700))
+                }
+            }
+            NativePipe.release()
+            PipeGuard.release()
+            busy = false
+        }
+    }
+
+    /**
+     * A video made FROM THE PHOTO target: face_animator (with a driver) or the talking photo
+     * (lip sync with a voice), then the editor and the enhancer -- see [PortraitVideo].
+     *
+     * ⚠ A GATED PATH like every other: the photo is checked, and so is the DRIVER, which the
+     * pipeline processes even though none of its pixels reach the output. No source is
+     * involved -- the animator never swaps -- so there is no source list to walk.
+     */
+    private fun runPortrait() {
+        val photo = targetImage ?: return
+        val animate = opts.faceAnimate
+        val driver = driverFile
+        if (animate && driver == null) return
+        if (opts.lipSync && voiceFile == null) return
+        if (!animate && !opts.lipSync) return
+        invalidatePreview()
+        cancelRequested = false
+        busy = true; progress = 0f; log = ""
+        discardOutput()
+        preview = null; framesDone = 0; framesTotal = 0; elapsedS = 0.0
+
+        lifecycleScope.launch {
+            if (!PipeGuard.acquire("swap", 5000)) {
+                status = pipeBusyMessage(); busy = false; return@launch
+            }
+            val result = withContext(Dispatchers.Default) {
+                runCatching {
+                    val models = modelDir()
+                    if (!ModelPaths.present(models, tier, ModelPaths.LIVEPORTRAIT) && animate)
+                        error("the face animator's models are not installed")
+                    status = getString(R.string.status_loading_models)
+                    val libDir = applicationInfo.nativeLibraryDir
+                    val runOpts = opts.copy(swapEnabled = false)
+                    val ok = NativePipe.init(libDir, libDir, models.absolutePath, runOpts)
+                    noteTierRejection()
+                    if (!ok) error("init: ${NativePipe.lastError()}")
+                    NativePipe.setSwapEnabled(false)
+                    if (animate && !NativePipe.hasFaceEditor())
+                        error("face animator: " + NativePipe.faceEditorError())
+                    appendLog(if (animate) "face_animator" + (if (opts.lipSync) " + lip_syncer" else "")
+                              else "talking photo (lip_syncer)")
+
+                    status = getString(R.string.status_content_check)
+                    ContentGate.inspectStill(photo).let {
+                        appendLog("target photo score %+.3f".format(it.score))
+                        if (!it.permitted) throw ContentGate.Refused(
+                            ContentGate.message(this@MainActivity, R.string.gate_subject_target_image, it))
+                    }
+                    if (driver != null && animate) ContentGate.inspectClip(driver).let {
+                        appendLog("driver content: %s, worst %+.3f".format(it.detail, it.score))
+                        if (!it.permitted) throw ContentGate.Refused(
+                            ContentGate.message(this@MainActivity, R.string.gate_subject_driver_video, it))
+                    }
+
+                    val soft = photo.asArgb8888() ?: error("cannot read the photo")
+                    val px = IntArray(soft.width * soft.height)
+                    soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
+                    // Even edges for 4:2:0, as every video this app writes has.
+                    val w = soft.width and 1.inv(); val h = soft.height and 1.inv()
+                    var bgr = NativePipe.argbToBgr(px, soft.width, soft.height)
+                    if (w != soft.width || h != soft.height)
+                        bgr = NativePipe.resizeBgr(bgr, soft.width, soft.height, w, h)
+                              ?: error("resize failed")
+
+                    val t0 = System.currentTimeMillis()
+                    val out = File(outputDir(), "portrait_${System.currentTimeMillis()}.mp4")
+                    status = getString(R.string.status_running)
+                    var lastPreview = 0L; var lastProgress = 0L
+                    val previewInterval = previewIntervalMs()
+                    PortraitVideo(
+                        fps = 25,
+                        lipSync = opts.lipSync,
+                        voicePath = voiceFile?.absolutePath,
+                        voiceTrimStartUs = (voiceTrimStartMs * 1000).toLong(),
+                        voiceTrimEndUs = if (voiceTrimEndMs >= voiceDurationMs) Long.MAX_VALUE
+                                         else (voiceTrimEndMs * 1000).toLong(),
+                        onProgress = { done, total ->
+                            val now = System.currentTimeMillis()
+                            if (now - lastProgress >= 100 || done >= total) {
+                                lastProgress = now
+                                framesDone = done; framesTotal = total
+                                progress = if (total > 0) done.toFloat() / total else 0f
+                                elapsedS = (now - t0) / 1000.0
+                            }
+                        },
+                        onFrame = { f, fw, fh ->
+                            val now = System.currentTimeMillis()
+                            if (now - lastPreview >= previewInterval) {
+                                lastPreview = now
+                                val pw = 480
+                                val ph = (fh.toLong() * pw / fw).toInt().coerceAtLeast(1)
+                                preview = Bitmap.createBitmap(NativePipe.bgrToArgb(f, fw, fh, pw, ph),
+                                                              pw, ph, Bitmap.Config.ARGB_8888)
+                            }
+                        },
+                        onLog = { appendLog(it) },
+                        isCancelled = { cancelRequested },
+                    ).run(bgr, w, h, if (animate) driver?.absolutePath else null,
+                          out.absolutePath).getOrThrow()
+                    appendLog("total %.1f s".format((System.currentTimeMillis() - t0) / 1000.0))
+                    out
+                }
+            }
+            result.onSuccess {
+                outputFile = it; progress = 1f
+                outputPartial = cancelRequested
+                status = getString(R.string.status_done, it.length() / 1024)
+                refreshSwapped(force = true)
+            }.onFailure {
+                if (it.message == "cancelled") status = getString(R.string.status_cancelled)
+                else if (it is ContentGate.Refused)
+                    status = it.message ?: getString(R.string.gate_blocked_generic)
+                else {
                     failStatus(getString(R.string.status_failed, it.message ?: ""))
                     appendLog(it.stackTraceToString().take(700))
                 }
@@ -5038,7 +5229,7 @@ class MainActivity : ComponentActivity() {
         // The mime has to match what was actually saved, or the chooser offers apps that
         // cannot open it -- an image result went out as video/mp4 before image targets
         // existed, and would have silently kept doing so.
-        val image = targetImage != null
+        val image = targetImage != null && !photoMakesVideo
         startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
             type = if (image) "image/png" else "video/mp4"
             putExtra(Intent.EXTRA_STREAM, uri)
@@ -5052,7 +5243,7 @@ class MainActivity : ComponentActivity() {
      *   adb shell am start -n com.facefusion.mobile/.MainActivity --es selftest 1
      *   adb logcat -s ffselftest
      */
-    private fun selfTest(voiceName: String? = null) {
+    private fun selfTest(voiceName: String? = null, portrait: Boolean = false) {
         val tag = "ffselftest"
         lifecycleScope.launch(Dispatchers.Default) {
             fun say(s: String) = android.util.Log.i(tag, s)
@@ -5144,6 +5335,27 @@ class MainActivity : ComponentActivity() {
                 val soft = bmp.asArgb8888()
                 val px = IntArray(soft.width * soft.height)
                 soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
+                if (portrait) {
+                    // The source photo as the PHOTO target, the test clip as the driver --
+                    // both already gated above. The same PortraitVideo runPortrait uses.
+                    val w = soft.width and 1.inv(); val h = soft.height and 1.inv()
+                    var bgr = NativePipe.argbToBgr(px, soft.width, soft.height)
+                    if (w != soft.width || h != soft.height)
+                        bgr = NativePipe.resizeBgr(bgr, soft.width, soft.height, w, h) ?: return@launch
+                    NativePipe.setSwapEnabled(false)
+                    say("face animator on device: ${NativePipe.hasFaceEditor()}" +
+                        (if (!NativePipe.hasFaceEditor()) " (" + NativePipe.faceEditorError() + ")" else ""))
+                    val out = File(getExternalFilesDir(null), "selftest.mp4")
+                    val t1 = System.currentTimeMillis()
+                    PortraitVideo(lipSync = opts.lipSync, voicePath = voiceFile?.absolutePath,
+                                  onProgress = { d, tt -> if (d % 25 == 0) say("frame $d/$tt") },
+                                  onLog = { say(it) })
+                        .run(bgr, w, h, if (opts.faceAnimate) tgtFile.absolutePath else null,
+                             out.absolutePath)
+                        .fold({ say("SELFTEST OK -> $it in ${(System.currentTimeMillis() - t1) / 1000.0} s") },
+                              { say("PORTRAIT FAILED: ${it.message}") })
+                    return@launch
+                }
                 if (!NativePipe.setSource(NativePipe.argbToBgr(px, soft.width, soft.height),
                                           soft.width, soft.height)) {
                     say("SOURCE FAILED: ${NativePipe.lastError()}"); return@launch

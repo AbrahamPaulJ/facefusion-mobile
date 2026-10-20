@@ -95,4 +95,14 @@ bool anyEdit(const float* sliders);
 void editKeypoints(const Motion& m, const float* sliders, const float* landmark68,
                    const Mlps& mlps, float* source, float* target);
 
+/**
+ * face_animator's keypoints: LivePortrait's relative motion transfer
+ * (live_portrait_pipeline.py with flag_relative_motion and stitching on). The photo keeps its
+ * own pose and takes the driver's CHANGE since `driverFirst` -- rotation composed, expression
+ * and translation added, scale multiplied -- then the stitcher. `target` is the photo's own
+ * keypoints and `source` the moved ones, in the generator's naming (see hourglassInput).
+ */
+void animateKeypoints(const Motion& photo, const Motion& driverFirst, const Motion& driver,
+                      const Mlps& mlps, float* source, float* target);
+
 }  // namespace ffportrait

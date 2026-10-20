@@ -174,3 +174,26 @@ def random_sliders(rng, strength=1.0, active=4):
 	for k in rng.choice(SLIDERS, size=active, replace=False):
 		s[str(k)] = float(rng.uniform(-strength, strength))
 	return s
+
+
+def animate_keypoints(photo, first, driver):
+	"""LivePortrait's relative motion transfer (live_portrait_pipeline.py, flag_relative_motion,
+	stitching on), in face_editor's conventions: the oracle for ffportrait::animateKeypoints.
+	Each argument is the motion extractor's seven outputs. Returns (source, target)."""
+	def unpack(m):
+		p, y, r, s, t, e, mp = [numpy.array(x, numpy.float32) for x in m]
+		return float(numpy.ravel(p)[0]), float(numpy.ravel(y)[0]), float(numpy.ravel(r)[0]), s, t, e, mp
+	ps, ys, rs_, ss, ts, es, mps = unpack(photo)
+	p0, y0, r0, s0, t0, e0, _ = unpack(first)
+	pd, yd, rd, sd, td, ed, _ = unpack(driver)
+	Rs, R0, Rd = create_rotation(ps, ys, rs_), create_rotation(p0, y0, r0), create_rotation(pd, yd, rd)
+	target = ss * (mps @ Rs.T + es) + ts
+	# LivePortrait: x @ R_lp with R_lp = R.T here; R_new_lp = (R_d_lp @ R_d0_lp.T) @ R_s_lp
+	r_new_lp = (Rd.T.astype(numpy.float64) @ R0.astype(numpy.float64)) @ Rs.T.astype(numpy.float64)
+	scale = ss * (sd / s0)
+	t = ts.copy()
+	t[..., :2] = ts[..., :2] + (td[..., :2] - t0[..., :2])
+	source = scale * (mps @ r_new_lp.astype(numpy.float32) + es + (ed - e0)) + t
+	source = session('stitcher').run(None, {'source': source.astype(numpy.float32),
+	                                        'target': target.astype(numpy.float32)})[0]
+	return source.astype(numpy.float32), target.astype(numpy.float32)

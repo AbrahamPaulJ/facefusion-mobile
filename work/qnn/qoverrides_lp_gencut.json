@@ -1,0 +1,14 @@
+{
+ "activation_encodings": {
+  "/model/dense_motion_network/mask/Conv_output_0": [
+   {
+    "bitwidth": 16,
+    "dtype": "int",
+    "is_symmetric": "False",
+    "min": -4000.0,
+    "max": 1500.0
+   }
+  ]
+ },
+ "param_encodings": {}
+}
