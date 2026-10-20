@@ -177,6 +177,9 @@ fi
 [ "${WBW:-8}" != "8" ] && NAME_SUFFIX="${NAME_SUFFIX}w${WBW}"
 [ "${ABW:-16}" != "16" ] && NAME_SUFFIX="${NAME_SUFFIX}a${ABW}"
 [ "${QOPT:-pc}" != "pc" ] && NAME_SUFFIX="${NAME_SUFFIX}${QOPT}"
+# TAG names an experiment (a calibration set, an override file) so it does not overwrite the
+# build it is being compared against.
+NAME_SUFFIX="${NAME_SUFFIX}${TAG:-}"
 OUT=$HOME/ff-build/${NAME}${NAME_SUFFIX}${BUILD_TAG}
 mkdir -p "$OUT"
 [ -f "$ONNX" ] || { echo "ERROR: no $ONNX -- run work/export/prepare_onnx.py first"; exit 1; }
@@ -218,6 +221,12 @@ else
   # per-channel slopes): device output saturated at the encoding bounds with 2.1x the
   # reference std and cosine ~0.01 against the host embedding.
   [ "${CLE:-0}" = "1" ] && QFLAGS+=(--algorithms cle)
+  # Tensors whose range is known EXACTLY get it from qoverrides_<name>.json instead of from
+  # calibration. lp_motion's pose decode is the case: softmax-weighted bin index * 3 - 97.5,
+  # so its range is [-97.5, 97.5] by construction, and six calibration crops of one head
+  # encoded it as [-2.35, 0] and clipped every other pose.
+  QOVR=$FF/work/qnn/qoverrides_${NAME}.json
+  [ -f "$QOVR" ] && QFLAGS+=(--quantization_overrides "$QOVR") && echo "overrides: $QOVR"
   echo "mode: FULL W8A16, $n calibration samples"
 fi
 

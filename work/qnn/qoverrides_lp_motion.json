@@ -1,0 +1,167 @@
+{
+ "activation_encodings": {
+  "/Mul_output_0": [
+   {
+    "bitwidth": 16,
+    "dtype": "int",
+    "is_symmetric": "False",
+    "min": 0.0,
+    "max": 65.0
+   }
+  ],
+  "/ReduceSum_output_0": [
+   {
+    "bitwidth": 16,
+    "dtype": "int",
+    "is_symmetric": "False",
+    "min": 0.0,
+    "max": 65.0
+   }
+  ],
+  "/Mul_1_output_0": [
+   {
+    "bitwidth": 16,
+    "dtype": "int",
+    "is_symmetric": "False",
+    "min": 0.0,
+    "max": 195.0
+   }
+  ],
+  "/Sub_output_0": [
+   {
+    "bitwidth": 16,
+    "dtype": "int",
+    "is_symmetric": "False",
+    "min": -97.5,
+    "max": 97.5
+   }
+  ],
+  "pitch_rank0": [
+   {
+    "bitwidth": 16,
+    "dtype": "int",
+    "is_symmetric": "False",
+    "min": -97.5,
+    "max": 97.5
+   }
+  ],
+  "pitch": [
+   {
+    "bitwidth": 16,
+    "dtype": "int",
+    "is_symmetric": "False",
+    "min": -97.5,
+    "max": 97.5
+   }
+  ],
+  "/Mul_2_output_0": [
+   {
+    "bitwidth": 16,
+    "dtype": "int",
+    "is_symmetric": "False",
+    "min": 0.0,
+    "max": 65.0
+   }
+  ],
+  "/ReduceSum_1_output_0": [
+   {
+    "bitwidth": 16,
+    "dtype": "int",
+    "is_symmetric": "False",
+    "min": 0.0,
+    "max": 65.0
+   }
+  ],
+  "/Mul_3_output_0": [
+   {
+    "bitwidth": 16,
+    "dtype": "int",
+    "is_symmetric": "False",
+    "min": 0.0,
+    "max": 195.0
+   }
+  ],
+  "/Sub_1_output_0": [
+   {
+    "bitwidth": 16,
+    "dtype": "int",
+    "is_symmetric": "False",
+    "min": -97.5,
+    "max": 97.5
+   }
+  ],
+  "yaw_rank0": [
+   {
+    "bitwidth": 16,
+    "dtype": "int",
+    "is_symmetric": "False",
+    "min": -97.5,
+    "max": 97.5
+   }
+  ],
+  "yaw": [
+   {
+    "bitwidth": 16,
+    "dtype": "int",
+    "is_symmetric": "False",
+    "min": -97.5,
+    "max": 97.5
+   }
+  ],
+  "/Mul_4_output_0": [
+   {
+    "bitwidth": 16,
+    "dtype": "int",
+    "is_symmetric": "False",
+    "min": 0.0,
+    "max": 65.0
+   }
+  ],
+  "/ReduceSum_2_output_0": [
+   {
+    "bitwidth": 16,
+    "dtype": "int",
+    "is_symmetric": "False",
+    "min": 0.0,
+    "max": 65.0
+   }
+  ],
+  "/Mul_5_output_0": [
+   {
+    "bitwidth": 16,
+    "dtype": "int",
+    "is_symmetric": "False",
+    "min": 0.0,
+    "max": 195.0
+   }
+  ],
+  "/Sub_2_output_0": [
+   {
+    "bitwidth": 16,
+    "dtype": "int",
+    "is_symmetric": "False",
+    "min": -97.5,
+    "max": 97.5
+   }
+  ],
+  "roll_rank0": [
+   {
+    "bitwidth": 16,
+    "dtype": "int",
+    "is_symmetric": "False",
+    "min": -97.5,
+    "max": 97.5
+   }
+  ],
+  "roll": [
+   {
+    "bitwidth": 16,
+    "dtype": "int",
+    "is_symmetric": "False",
+    "min": -97.5,
+    "max": 97.5
+   }
+  ]
+ },
+ "param_encodings": {}
+}

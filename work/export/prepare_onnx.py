@@ -1908,9 +1908,52 @@ def derange_squares(model, limit=4096.0):
 	return ln, l2
 
 
-def do_lp_motion():
+def reducel2_as_mean(model):
+	"""ReduceL2(x) -> Sqrt(N * ReduceMean(x * x)): the same function, as tensors that can be NAMED.
+
+	ConvNeXt-V2's GRN takes a per-channel L2 norm over every spatial position. The converter
+	splits ReduceL2 into its own square / ReduceSum / Sqrt, and the sum it creates stays int16
+	whatever the overrides say, because nothing can name it: one LSB of that sum ([0, 3196],
+	step 0.049) comes out of the root as 0.22, i.e. a FLOOR of 0.883 on every dead channel of
+	stage 3.2 once the derange factor is undone, and its ceiling clips stage 0 at 288 against a
+	held-out 341. GRN divides by the channel mean of those norms, which the floors inflate.
+	With these tensors spelled out here and forced to fp16 (qoverrides, dtype float), the norms
+	go 23 -> 34-37 dB on the S25 and the channel mean 13.6 -> 60 dB.
+	⚠ It does NOT move lp_motion's outputs: ConvNeXt's final LayerNorm, on a pooled vector whose
+	statistics are set by a few massive-activation channels, caps them either way (2026-10-20).
+	So the shipping build does not use it; it is here because the defect is real.
+	"""
+	g = model.graph
+	shapes = {v.name: [d.dim_value for d in v.type.tensor_type.shape.dim]
+	          for v in list(g.value_info) + list(g.input) + list(g.output)}
+	n = 0
+	for r in [x for x in g.node if x.op_type == 'ReduceL2']:
+		axes = [a.ints for a in r.attribute if a.name == 'axes'][0]
+		keep = [a.i for a in r.attribute if a.name == 'keepdims']
+		shp = shapes.get(r.input[0])
+		if not shp or any(shp[a] <= 0 for a in axes):
+			raise SystemExit('reducel2_as_mean: no static shape for ' + r.input[0])
+		count = int(numpy.prod([shp[a] for a in axes]))
+		x, y, base = r.input[0], r.output[0], r.name
+		cn = base + '_count'
+		g.initializer.append(numpy_helper.from_array(numpy.array(count, numpy.float32), cn))
+		at = list(g.node).index(r)
+		new = [helper.make_node('Mul', [x, x], [base + '_sq'], name=base + '_sq'),
+		       helper.make_node('ReduceMean', [base + '_sq'], [base + '_ms'], name=base + '_mean',
+		                        axes=list(axes), keepdims=keep[0] if keep else 1),
+		       helper.make_node('Mul', [base + '_ms', cn], [base + '_ss'], name=base + '_sum'),
+		       helper.make_node('Sqrt', [base + '_ss'], [y], name=base + '_sqrt')]
+		g.node.remove(r)
+		for i, nn in enumerate(new):
+			g.node.insert(at + i, nn)
+		n += 1
+	return n
+
+
+def do_lp_motion(l2_mean=False):
 	"""LivePortrait motion extractor: pitch / yaw / roll are RANK-0 outputs, and QNN wants
-	rank >= 1 (docs/roadmap.md 10). Each gets a Reshape to [1] under its own name."""
+	rank >= 1 (docs/roadmap.md 10). Each gets a Reshape to [1] under its own name.
+	`lp_motion_l2` also spells out GRN's ReduceL2 (reducel2_as_mean)."""
 	m = load('live_portrait_motion_extractor')
 	g = strip_value_info(m).graph
 	shape1 = numpy_helper.from_array(numpy.array([1], numpy.int64), 'lp_rank1_shape')
@@ -1934,9 +1977,13 @@ def do_lp_motion():
 	print('  %d rank-0 outputs -> [1]' % n)
 	ln, l2 = derange_squares(m)
 	print('  fp16 range: %d LayerNorm and %d ReduceL2 rescaled' % (ln, l2))
+	if l2_mean:
+		m = shape_inference.infer_shapes(m, strict_mode=False)
+		print('  %d ReduceL2 -> Sqrt(N * ReduceMean(x * x))' % reducel2_as_mean(m))
+		del m.graph.value_info[:]
 	m = shape_inference.infer_shapes(m, strict_mode=False)
 	checker.check_model(m)
-	path = save(m, 'lp_motion')
+	path = save(m, 'lp_motion_l2' if l2_mean else 'lp_motion')
 	rng = numpy.random.default_rng(1234)
 	feeds = {'input': rng.random((1, 3, 256, 256), dtype=numpy.float32)}
 	print('  vs original: %.2f dB' % _ort_compare(
@@ -2079,6 +2126,40 @@ def int64_to_int32(model):
 	return casts, inits
 
 
+def round_before_int_cast(model):
+	"""+0.5 ahead of every float -> int32 Cast whose input is already a whole number.
+
+	The warp's corners are Floor(x) and Floor(x) + 1, cast to int32 for the Gather indices.
+	In a W8A16 build those floats are 16-bit fixed point, and the encodings the quantiser fits
+	do not land integers on the grid: Floor's [-1, 63] gets scale 0.00097658, a hair over
+	1/1024, so 63 dequantises to 62.99998 and the HTP's Cast TRUNCATES it to 62. A corner
+	one voxel (or one 4096-voxel depth slice) off is the "face cut into rearranged tiles"
+	the first W8A16 build showed. Emulated in onnxruntime with those exact encodings, that
+	alone takes the generator to 14.01 dB; with the +0.5 it is 287 dB, unchanged.
+
+	Exact in float: the input is an integer k, so trunc(k + 0.5) = k for k >= 0, and every
+	cast here is clipped to [0, size - 1] next, which absorbs k = -1 either way.
+	"""
+	g = model.graph
+	INT32 = 6
+	prod = {o: nd for nd in g.node for o in nd.output}
+	out, n = [], 0
+	for nd in g.node:
+		to = [a.i for a in nd.attribute if a.name == 'to']
+		src = prod.get(nd.input[0]) if nd.op_type == 'Cast' else None
+		if to and to[0] == INT32 and src is not None and src.op_type in ('Floor', 'Add'):
+			half = numpy_helper.from_array(numpy.array(0.5, numpy.float32), nd.name + '_half')
+			g.initializer.append(half)
+			y = nd.input[0] + '_rounded'
+			out.append(helper.make_node('Add', [nd.input[0], half.name], [y], name=nd.name + '_round'))
+			nd.input[0] = y
+			n += 1
+		out.append(nd)
+	del g.node[:]
+	g.node.extend(out)
+	return n
+
+
 def do_lp_generator():
 	"""LivePortrait generator: natively fp16 (194 fp16 initialisers, fp32 I/O behind Casts),
 	the same shape as hyperswap. QAIRT rejects its Tile with `0x232 != 0x216` (fp32 against
@@ -2097,6 +2178,7 @@ def do_lp_generator():
 	      % masks_in_float(strip_value_info(m)))
 	casts, inits = int64_to_int32(strip_value_info(m))
 	print('  int64 -> int32: %d Casts, %d initialisers' % (casts, inits))
+	print('  %d int32 casts rounded (+0.5)' % round_before_int_cast(strip_value_info(m)))
 	m = shape_inference.infer_shapes(strip_value_info(m), strict_mode=False)
 	checker.check_model(m)
 	path = save(m, 'lp_generator')
@@ -2115,6 +2197,7 @@ TASKS = {
 	'lp_feature': do_lp_feature,
 	'lp_generator': do_lp_generator,
 	'lp_motion': do_lp_motion,
+	'lp_motion_l2': lambda: do_lp_motion(l2_mean=True),
 	'arcface': do_arcface,
 	'2dfan4': do_2dfan4,
 	'yoloface': do_yoloface,
