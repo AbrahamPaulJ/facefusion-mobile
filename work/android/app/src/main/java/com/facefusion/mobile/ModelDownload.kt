@@ -46,7 +46,54 @@ object ModelDownload {
      * ⚠ Never create a new repo at the old name; the redirect is the compatibility story.
      */
     const val REPO = "AbrahamPJ/facefusion-mobile-models"
-    private const val BASE = "https://huggingface.co/$REPO/resolve/main/"
+
+    /**
+     * WHERE the files come from: Hugging Face itself, or hf-mirror.com (issue #18), an
+     * unofficial mirror with the same `resolve/main/<file>` layout, for networks where
+     * Hugging Face is blocked or slow. Same repo, same manifest, same checks. Measured
+     * 2026-10-22 from outside China: the mirror answers with a 308 to huggingface.co, and
+     * the Range header survives the hop (206).
+     */
+    const val SOURCE_HF = "hf"
+    const val SOURCE_MIRROR = "mirror"
+    private const val PREFS = "model_download"
+    private const val KEY_SOURCE = "source"
+    @Volatile private var source = SOURCE_HF
+    private val base: String
+        get() = (if (source == SOURCE_MIRROR) "https://hf-mirror.com/" else "https://huggingface.co/") +
+                "$REPO/resolve/main/"
+
+    /** Read the saved choice. Called by every entry point that downloads: the UI and the service. */
+    fun loadSource(context: Context): String {
+        source = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_SOURCE, SOURCE_HF)?.takeIf { it == SOURCE_MIRROR } ?: SOURCE_HF
+        return source
+    }
+
+    fun setSource(context: Context, value: String) {
+        source = if (value == SOURCE_MIRROR) SOURCE_MIRROR else SOURCE_HF
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(KEY_SOURCE, source).apply()
+    }
+
+    /**
+     * The content-check models, pinned to these exact files. The manifest's own hashes
+     * only prove a file matches the manifest it came with, and with a mirror both come
+     * from a third party; these were compiled in from what this project hosts, so no
+     * host can change what the check runs. A new build of one of them needs an app
+     * update, which a change to the check needs anyway.
+     */
+    private val PINNED = mapOf(
+        "nsfwq_v68.bin" to "27884c9d1835ac45a596650dcdcabf4027475c931f4f9f22037ea5c761f0c629",
+        "nsfwq2_v68.bin" to "37b58374e66ceb2b8c84621f9ae52d4d9d03a42848e0bcbe91fd10dc3729b3b1",
+        "nsfwq_v73.bin" to "f85590597217088875a39fffd43ddb2b61594528656c1f976e380d56d7b1e930",
+        "nsfwq2_v73.bin" to "197a25ad82ce6db89fa583cbe130686acbe7a45478e31d363412c9846102ac93",
+        "nsfw_v79.bin" to "74755eb82955fd03abe7275e93a86e46352e36f9b8aa5a30f67e64da32b9f2d0",
+        "nsfwq2_v81.bin" to "16ee9369d8fd62b8c7dce0b7d4f5cf2e57e6885effd6c25bc100aeac606e58e1",
+        "nsfwq2_v81s97.bin" to "9d44b6132df404eedce2f9d0a825429e2e0abe4e09543194979e7a9677e4ae47",
+        "nsfw_2_sim.ncnn.param" to "6200fb9e859cfa59dba49a104b5c2f30b4778e99e1fd8dc3989f8ea804fee7a1",
+        "nsfw_2_sim.ncnn.bin" to "6fbff5ebe0919c3ed5518c2abebd08027bb4d3ffb2f37e805e5e4a3849ec67d1",
+    )
 
     /**
      * One hosted file.
@@ -106,7 +153,7 @@ object ModelDownload {
     fun manifestFor(chain: String): Pair<String, List<Entry>> {
         val want = chain.split(",").map { it.trim() }.filter { it.isNotEmpty() }
         if (want.isEmpty()) error("no tier requested")
-        val root = JSONObject(URL(BASE + "manifest.json").readText())
+        val root = JSONObject(URL(base + "manifest.json").readText())
         val tiers = root.optJSONObject("tiers") ?: JSONObject()
         val tier = want.firstOrNull { tiers.has(it) || root.has(legacyKey(it)) }
             ?: error("no models published for any of " + want.joinToString(", "))
@@ -286,7 +333,7 @@ object ModelDownload {
                 return verifyAndCommit(part, dest, e)
             }
 
-            conn = (URL(BASE + e.remote).openConnection() as HttpURLConnection).apply {
+            conn = (URL(base + e.remote).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 30_000
                 readTimeout = 60_000
                 if (from > 0) setRequestProperty("Range", "bytes=$from-")
@@ -348,6 +395,10 @@ object ModelDownload {
             // Not resumable: a hash mismatch means the bytes we have are wrong, not short.
             part.delete()
             return "${e.name}: checksum mismatch"
+        }
+        if (e.name.startsWith("nsfw") && !got.equals(PINNED[e.name], ignoreCase = true)) {
+            part.delete()
+            return "${e.name}: not a file this app accepts"
         }
         dest.delete()
         return if (part.renameTo(dest)) null else "${e.name}: could not be saved"

@@ -185,6 +185,7 @@ class MainActivity : ComponentActivity() {
      * keeps its own copy for the duration.
      */
     private var opts by mutableStateOf(SwapOptions())
+    private var downloadSource by mutableStateOf(ModelDownload.SOURCE_HF)
     private var openCard by mutableStateOf("")
 
     private var statusText by mutableStateOf("")
@@ -1586,6 +1587,7 @@ class MainActivity : ComponentActivity() {
         forcedBackend = ModelPaths.forcedBackend(this)
         ncnnGpu = ModelPaths.ncnnGpu(this)
         lowMemory = ModelPaths.lowMemory(this)
+        downloadSource = ModelDownload.loadSource(this)
         // Restore the manual theme choice (if any) BEFORE the first composition, so a
         // pinned dark mode does not flash the light scheme on launch.
         darkTheme = ThemePrefs.load(this)
@@ -1685,6 +1687,11 @@ class MainActivity : ComponentActivity() {
         // Nothing here is privileged: it fetches only what the manifest publishes for a
         // runtime the app already chose, and every file is still SHA256-verified before it
         // takes its real name.
+        // `--es source mirror|hf`: the Download-from setting, saved as if picked in Settings.
+        intent?.getStringExtra("source")?.let {
+            ModelDownload.setSource(this, it)
+            downloadSource = ModelDownload.loadSource(this)
+        }
         if (intent?.getStringExtra("download") != null) onDownloadTapped()
 
         setContent {
@@ -2129,6 +2136,12 @@ class MainActivity : ComponentActivity() {
                                     if (NativePipe.hasNcnnBackend()) ::onNcnnGpu
                                     else null,
                                 lowMemory = lowMemory,
+                                downloadSource = downloadSource,
+                                onDownloadSource = { v ->
+                                    ModelDownload.setSource(this@MainActivity, v)
+                                    downloadSource = v
+                                    appendLog("models download from: $v")
+                                },
                                 lowMemoryActive = ModelPaths.lowMemoryOn(this@MainActivity),
                                 onLowMemory =
                                     if (NativePipe.hasNcnnBackend()) ::onLowMemory

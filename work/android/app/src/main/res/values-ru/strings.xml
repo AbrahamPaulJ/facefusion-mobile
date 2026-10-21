@@ -441,6 +441,8 @@
     <string name="set_unit_gpu">GPU</string>
     <string name="set_unit_cpu">CPU</string>
     <string name="set_lowmem">Мало памяти</string>
+    <string name="set_models_source">Источник загрузки</string>
+    <string name="set_models_source_hint">hf-mirror.com: неофициальное зеркало для сетей, где Hugging Face заблокирован или работает медленно. Каждый файл всё равно проверяется перед использованием.</string>
     <string name="set_lowmem_note">Собирает модели так, что им нужно примерно вдвое меньше памяти, но работа примерно втрое медленнее. Автоматически включается на телефонах с памятью меньше 5 ГБ, где с полным набором Android закрывает приложение.</string>
     <string name="set_lowmem_is_on">Сейчас на этом телефоне включено.</string>
     <string name="set_lowmem_is_off">Сейчас на этом телефоне выключено.</string>

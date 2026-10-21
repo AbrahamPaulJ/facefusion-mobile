@@ -593,6 +593,8 @@ Turning it off runs your own Swap settings instead. This is experimental: the en
     <string name="set_unit_gpu">GPU</string>
     <string name="set_unit_cpu">CPU</string>
     <string name="set_lowmem">Low memory</string>
+    <string name="set_models_source">Download from</string>
+    <string name="set_models_source_hint">hf-mirror.com is an unofficial mirror, for networks where Hugging Face is blocked or slow. Every file is still checked before it is used.</string>
     <string name="set_lowmem_note">Builds the models in a way that needs about half the memory and is about three times slower. Automatic turns it on for phones with less than 5 GB of RAM, where the full set gets the app closed by Android.</string>
     <string name="set_lowmem_is_on">It is on for this phone now.</string>
     <string name="set_lowmem_is_off">It is off for this phone now.</string>

@@ -460,6 +460,8 @@
     <string name="set_unit_gpu">GPU</string>
     <string name="set_unit_cpu">CPU</string>
     <string name="set_lowmem">低記憶體</string>
+    <string name="set_models_source">下載來源</string>
+    <string name="set_models_source_hint">hf-mirror.com 是非官方鏡像，適用於無法連上或連線 Hugging Face 很慢的網路。每個檔案在使用前仍會經過驗證。</string>
     <string name="set_lowmem_note">以約一半的記憶體建立模型，速度約慢三倍。「自動」會在記憶體小於 5 GB 的手機上開啟：在這些手機上載入完整模型會被 Android 關閉應用程式。</string>
     <string name="set_lowmem_is_on">此手機目前已開啟。</string>
     <string name="set_lowmem_is_off">此手機目前已關閉。</string>

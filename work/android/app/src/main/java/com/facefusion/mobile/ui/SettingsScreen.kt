@@ -181,6 +181,9 @@ fun SettingsScreen(
     darkTheme: Boolean? = null,
     /** Pin light or dark. There is deliberately no way back to "follow the system". */
     onSetTheme: (Boolean) -> Unit,
+    /** Where models download from: [ModelDownload.SOURCE_HF] or [ModelDownload.SOURCE_MIRROR]. */
+    downloadSource: String = ModelDownload.SOURCE_HF,
+    onDownloadSource: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var confirming by remember { mutableStateOf<ModelRow?>(null) }
@@ -349,6 +352,18 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(6.dp))
         }
+
+        // Issue #18. Locked while a download runs: switching hosts mid-file would resume
+        // one host's .part from the other.
+        com.facefusion.mobile.OptionSegments(
+            stringResource(R.string.set_models_source),
+            listOf(ModelDownload.SOURCE_HF to "Hugging Face",
+                   ModelDownload.SOURCE_MIRROR to "hf-mirror.com"),
+            downloadSource,
+            onDownloadSource,
+            hint = stringResource(R.string.set_models_source_hint),
+            enabled = !ModelDownload.running,
+        )
 
         Spacer(Modifier.height(6.dp))
 

@@ -26,6 +26,7 @@ class DownloadService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        ModelDownload.loadSource(this)
         if (intent?.action == ACTION_CANCEL) {
             ModelDownload.cancel()
             return START_NOT_STICKY

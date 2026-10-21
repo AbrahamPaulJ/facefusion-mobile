@@ -486,8 +486,9 @@ android {
         // 113 = a local 0.9.41 build (hold face between swaps), reverted and never released.
         // 114 = 0.9.40 as released: the same content as 112, numbered above 113 so it
         // installs over the one phone that had it.
-        versionCode = 114
-        versionName = "0.9.40$variantTag"    // "-dev" == NO content gate
+        // 115 = models can download from hf-mirror.com (issue #18).
+        versionCode = 115
+        versionName = "0.9.41$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }

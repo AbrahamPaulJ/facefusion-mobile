@@ -457,6 +457,8 @@
     <string name="set_unit_gpu">GPU</string>
     <string name="set_unit_cpu">CPU</string>
     <string name="set_lowmem">低内存</string>
+    <string name="set_models_source">下载来源</string>
+    <string name="set_models_source_hint">hf-mirror.com 是非官方镜像，适用于无法访问或访问 Hugging Face 很慢的网络。每个文件在使用前仍会经过校验。</string>
     <string name="set_lowmem_note">以约一半的内存构建模型，速度约慢三倍。“自动”会在内存小于 5 GB 的手机上开启：在这些手机上加载完整模型会被 Android 关闭应用。</string>
     <string name="set_lowmem_is_on">此手机当前已开启。</string>
     <string name="set_lowmem_is_off">此手机当前已关闭。</string>
