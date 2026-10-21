@@ -483,7 +483,10 @@ android {
         // v81 one, which loads there and dies at its first execute. Issue #16.
         // 112 = the face editor: LivePortrait, upstream's face_editor with its 14 sliders, as an
         // optional processor and its own download.
-        versionCode = 112
+        // 113 = a local 0.9.41 build (hold face between swaps), reverted and never released.
+        // 114 = 0.9.40 as released: the same content as 112, numbered above 113 so it
+        // installs over the one phone that had it.
+        versionCode = 114
         versionName = "0.9.40$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
